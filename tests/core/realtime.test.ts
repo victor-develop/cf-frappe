@@ -6,6 +6,7 @@ import {
   DOCUMENT_SHARED_DRAFT_EVENT_TYPE,
   DOCUMENT_SHARED_DRAFT_MESSAGE_TYPE,
   documentRealtimeTopic,
+  documentUserNotificationsFromDomainEvent,
   doctypeRealtimeTopic,
   parseRealtimeTopic,
   realtimeEventFromDocumentFieldEdit,
@@ -450,5 +451,28 @@ describe("realtime topics", () => {
       ]);
     }
     expect(JSON.stringify(realtimeUserNotificationsFromDomainEvent(event)[0]?.payload)).not.toContain("snapshot");
+  });
+
+  it("derives direct user notification payload kinds from source event identity", () => {
+    const notification = documentUserNotificationsFromDomainEvent({
+      id: "evt2",
+      tenantId: "acme",
+      stream: "acme:Note:One",
+      sequence: 2,
+      type: "NoteAssigned",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner@example.com",
+      occurredAt: now,
+      payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" },
+      metadata: {}
+    })[0];
+
+    expect(notification).toMatchObject({
+      eventId: "evt2",
+      eventType: "NoteAssigned",
+      payloadKind: "DocumentAssigned",
+      recipientId: "support@example.com"
+    });
   });
 });

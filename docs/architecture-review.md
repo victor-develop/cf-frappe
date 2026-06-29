@@ -119,6 +119,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized assignment-rule source payload-kind derivation in domain events so assignment metadata no longer reads source event payload kinds inline in the hook.
 - Centralized queued-email source payload-kind derivation in domain events so email delivery queue metadata no longer reads source event payload kinds inline in the hook.
 - Centralized replayed queued-email source payload-kind derivation in domain events so delivery-outbox consumer queue metadata no longer reads replayed source event payload kinds inline.
+- Centralized direct user-notification source payload-kind derivation in domain events so collaboration notification payloads no longer read source event payload kinds inline.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

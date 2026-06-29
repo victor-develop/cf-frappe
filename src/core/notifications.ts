@@ -6,6 +6,7 @@ import type {
   NotificationRuleDefinition,
   TenantId
 } from "./types.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import {
   notificationRuleEmailNotificationsFromDomainEvent,
   notificationRuleUserNotificationsFromDomainEvent
@@ -33,7 +34,7 @@ export function documentUserNotificationsFromDomainEvent(
     kind: "DocumentUserNotification",
     eventId: event.id,
     eventType: event.type,
-    payloadKind: event.payload.kind,
+    payloadKind: domainEventPayloadKind(event),
     tenantId: event.tenantId,
     doctype: event.doctype,
     documentName: event.documentName,
