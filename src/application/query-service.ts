@@ -53,6 +53,7 @@ import {
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
+  planDocumentReadAccess,
   planDocumentReadProjection,
   planGlobalSearchCandidate,
   planLinkOptionCandidate,
@@ -139,8 +140,14 @@ export class QueryService {
     if (projection.status === "not-found") {
       throw notFound(projection.message);
     }
-    if (!(await this.canReadDocument(actor, doctype, projection.document))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read ${doctype.name}/${name}`);
+    const access = planDocumentReadAccess({
+      actor,
+      doctype,
+      name,
+      readable: await this.canReadDocument(actor, doctype, projection.document)
+    });
+    if (access.status === "deny") {
+      throw permissionDenied(access.message);
     }
     return projection.document;
   }

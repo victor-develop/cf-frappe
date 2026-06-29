@@ -1,6 +1,7 @@
 import { badRequest, FrameworkError } from "../core/errors.js";
 import { mergeListFilters } from "../core/list-view.js";
 import type {
+  Actor,
   DocTypeDefinition,
   DocumentSnapshot,
   FieldDefinition,
@@ -26,6 +27,10 @@ export interface GlobalSearchMatch {
 export type DocumentReadProjectionDecision =
   | { readonly status: "not-found"; readonly message: string }
   | { readonly status: "check-access"; readonly document: DocumentSnapshot };
+
+export type DocumentReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export type ProjectionPageScanDecision =
   | { readonly status: "complete" }
@@ -180,6 +185,20 @@ export function planDocumentReadProjection(input: {
     };
   }
   return { status: "check-access", document: input.document };
+}
+
+export function planDocumentReadAccess(input: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly name: string;
+  readonly readable: boolean;
+}): DocumentReadAccessDecision {
+  return input.readable
+    ? { status: "allow" }
+    : {
+        status: "deny",
+        message: `Actor '${input.actor.id}' cannot read ${input.doctype.name}/${input.name}`
+      };
 }
 
 export function planProjectionPageScan(input: {

@@ -16,6 +16,7 @@ import {
   mergeDefaultFilters,
   normalizeRequiredSearch,
   normalizeSearch,
+  planDocumentReadAccess,
   planDocumentReadProjection,
   planGlobalSearchCandidate,
   planLinkOptionCandidate,
@@ -100,6 +101,28 @@ describe("document query policy", () => {
     expect(planDocumentReadProjection({ doctype: Article, name: "ART-1", document: article })).toEqual({
       status: "check-access",
       document: article
+    });
+  });
+
+  it("plans projected document read access with denial messages", () => {
+    expect(
+      planDocumentReadAccess({
+        actor: { id: "reader@example.com", roles: ["Reader"] },
+        doctype: Article,
+        name: "ART-1",
+        readable: true
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planDocumentReadAccess({
+        actor: { id: "reader@example.com", roles: ["Reader"] },
+        doctype: Article,
+        name: "ART-2",
+        readable: false
+      })
+    ).toEqual({
+      status: "deny",
+      message: "Actor 'reader@example.com' cannot read Article/ART-2"
     });
   });
 
