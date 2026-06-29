@@ -6,11 +6,16 @@ import type {
   ReportChartType,
   ReportColumnDefinition,
   ReportFilterDefinition,
+  ReportFilterOperator,
+  ReportFilterValue,
   ReportFormulaOperand,
   ReportGroupDefinition,
+  ReportOrder,
+  ReportDefinition,
   ReportSummaryDefinition
 } from "../core/reports.js";
-import type { DocumentSnapshot, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
+import { isCustomReport } from "../core/reports.js";
+import type { DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 
 export type ReportRow = Readonly<Record<string, JsonValue>>;
 
@@ -63,6 +68,35 @@ export interface ReportGroupResult {
   readonly label: string;
   readonly field: string;
   readonly rows: readonly ReportGroupRow[];
+}
+
+export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
+
+export interface ReportFilterControlResult {
+  readonly name: string;
+  readonly label: string;
+  readonly field: string;
+  readonly type?: FieldType;
+  readonly operator: ReportFilterOperator;
+  readonly required: boolean;
+  readonly value?: ReportFilterValue;
+  readonly options: readonly string[];
+}
+
+export interface ReportOrderOptionResult {
+  readonly name: string;
+  readonly label: string;
+}
+
+export interface ReportOrderControlResult {
+  readonly orderBy?: string;
+  readonly order: ReportOrder;
+  readonly options: readonly ReportOrderOptionResult[];
+}
+
+export interface ReportOrderInput {
+  readonly orderBy?: string;
+  readonly order?: ReportOrder;
 }
 
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
@@ -146,6 +180,77 @@ export function reportSortValue(
 ): JsonValue | undefined {
   const column = columns.find((item) => item.name === columnName);
   return column === undefined ? undefined : reportDocumentColumnValue(document, column);
+}
+
+export function buildReportFilterControls(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  filters: ReportFilters
+): readonly ReportFilterControlResult[] {
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return (report.filters ?? []).map((filter) => {
+    const field = fields.get(filter.field);
+    const type = resolvedReportFilterType(filter, field);
+    const value = filters[filter.name];
+    return {
+      name: filter.name,
+      label: filter.label ?? filter.name,
+      field: filter.field,
+      ...(type ? { type } : {}),
+      operator: filter.operator ?? "eq",
+      required: filter.required ?? false,
+      ...(value === undefined ? {} : { value }),
+      options: filter.options ?? (type === "select" ? field?.options ?? [] : [])
+    };
+  });
+}
+
+export function buildReportOrderOptions(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition
+): readonly ReportOrderOptionResult[] {
+  if (isCustomReport(report)) {
+    return report.columns
+      .filter((column) => column.type !== "json" && column.type !== "table")
+      .map((column) => ({
+        name: column.name,
+        label: column.label ?? column.name
+      }));
+  }
+  const fields = new Map(doctype.fields.map((field) => [field.name, field]));
+  return report.columns
+    .filter((column) => {
+      if (column.formula !== undefined) {
+        return true;
+      }
+      const field = fields.get(column.field ?? column.name);
+      return field?.type !== "json" && field?.type !== "table";
+    })
+    .map((column) => ({
+      name: column.name,
+      label: column.label ?? column.name
+    }));
+}
+
+export function resolveReportOrder(
+  report: ReportDefinition,
+  doctype: DocTypeDefinition,
+  options: ReportOrderInput
+): ReportOrderControlResult {
+  const orderOptions = buildReportOrderOptions(report, doctype);
+  const orderBy = options.orderBy ?? report.orderBy;
+  const order = options.order ?? report.order ?? "asc";
+  if (order !== "asc" && order !== "desc") {
+    throw badRequest("Report order must be asc or desc");
+  }
+  if (orderBy !== undefined && !orderOptions.some((option) => option.name === orderBy)) {
+    throw badRequest(`Report orderBy '${orderBy}' is not a sortable report column`);
+  }
+  return {
+    ...(orderBy === undefined ? {} : { orderBy }),
+    order,
+    options: orderOptions
+  };
 }
 
 export function reportChartDrilldown(
@@ -277,6 +382,13 @@ function exactDrilldownFilterForGroup(
   return filters.find((filter) =>
     filter.field === group.field && (filter.operator ?? "eq") === "eq"
   );
+}
+
+export function resolvedReportFilterType(
+  filter: ReportFilterDefinition,
+  field: FieldDefinition | undefined
+): FieldType | undefined {
+  return filter.type ?? field?.type;
 }
 
 function reportDocumentFormulaValue(

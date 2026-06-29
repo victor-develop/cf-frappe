@@ -1,6 +1,8 @@
 import {
+  buildReportFilterControls,
   buildReportCharts,
   buildReportGroups,
+  buildReportOrderOptions,
   limitReportGroups,
   primitiveReportRowValue,
   projectReportDocumentRow,
@@ -10,6 +12,8 @@ import {
   reportDocumentColumnValue,
   reportRowColumnValue,
   reportSortValue,
+  resolveReportOrder,
+  resolvedReportFilterType,
   reportSummaryValue,
   sortReportChartPoints
 } from "../../src";
@@ -148,6 +152,131 @@ describe("report policy", () => {
       text_math: null
     });
     expect(reportRowColumnValue(row, { name: "remaining", formula: { operator: "subtract", left: "count", right: 1 } })).toBe(3);
+  });
+
+  it("builds report filter controls from metadata, field definitions, and materialized values", () => {
+    const doctype = {
+      name: "Task",
+      fields: [
+        { name: "priority", type: "select" as const, options: ["Low", "High"] },
+        { name: "count", type: "integer" as const },
+        { name: "archived", type: "boolean" as const }
+      ]
+    };
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [{ name: "priority" }],
+      filters: [
+        { name: "priority", label: "Priority", field: "priority", required: true },
+        { name: "minimum", field: "count", operator: "gte" as const, type: "number" as const },
+        { name: "archived", field: "archived", options: ["true", "false"] }
+      ]
+    };
+
+    expect(buildReportFilterControls(report, doctype, {
+      priority: "High",
+      minimum: 2
+    })).toEqual([
+      {
+        name: "priority",
+        label: "Priority",
+        field: "priority",
+        type: "select",
+        operator: "eq",
+        required: true,
+        value: "High",
+        options: ["Low", "High"]
+      },
+      {
+        name: "minimum",
+        label: "minimum",
+        field: "count",
+        type: "number",
+        operator: "gte",
+        required: false,
+        value: 2,
+        options: []
+      },
+      {
+        name: "archived",
+        label: "archived",
+        field: "archived",
+        type: "boolean",
+        operator: "eq",
+        required: false,
+        options: ["true", "false"]
+      }
+    ]);
+    expect(resolvedReportFilterType({ name: "minimum", field: "count", type: "number" }, doctype.fields[1])).toBe("number");
+  });
+
+  it("resolves document report ordering from sortable metadata columns", () => {
+    const doctype = {
+      name: "Task",
+      fields: [
+        { name: "title", type: "text" as const },
+        { name: "metadata", type: "json" as const },
+        { name: "children", type: "table" as const }
+      ]
+    };
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [
+        { name: "title", label: "Title" },
+        { name: "metadata" },
+        { name: "children" },
+        { name: "score", label: "Score", formula: { operator: "add" as const, left: 1, right: 2 } }
+      ],
+      orderBy: "score",
+      order: "desc" as const
+    };
+
+    expect(buildReportOrderOptions(report, doctype)).toEqual([
+      { name: "title", label: "Title" },
+      { name: "score", label: "Score" }
+    ]);
+    expect(resolveReportOrder(report, doctype, {})).toEqual({
+      orderBy: "score",
+      order: "desc",
+      options: [
+        { name: "title", label: "Title" },
+        { name: "score", label: "Score" }
+      ]
+    });
+    expect(resolveReportOrder(report, doctype, { orderBy: "title", order: "asc" })).toMatchObject({
+      orderBy: "title",
+      order: "asc"
+    });
+    expect(() => resolveReportOrder(report, doctype, { orderBy: "metadata" }))
+      .toThrow("Report orderBy 'metadata' is not a sortable report column");
+  });
+
+  it("resolves custom report ordering from projected column types only", () => {
+    const doctype = { name: "External Row", fields: [] };
+    const report = {
+      name: "External Report",
+      doctype: "External Row",
+      source: { kind: "custom" as const, provider: "external" },
+      columns: [
+        { name: "title", label: "Title" },
+        { name: "payload", type: "json" as const },
+        { name: "children", type: "table" as const },
+        { name: "score", label: "Score", type: "number" as const }
+      ]
+    };
+
+    expect(buildReportOrderOptions(report, doctype)).toEqual([
+      { name: "title", label: "Title" },
+      { name: "score", label: "Score" }
+    ]);
+    expect(resolveReportOrder(report, doctype, { orderBy: "score" })).toMatchObject({
+      orderBy: "score",
+      order: "asc"
+    });
+    expect(() => resolveReportOrder(report, doctype, { order: "sideways" as "asc" }))
+      .toThrow("Report order must be asc or desc");
   });
 
   it("builds chart drilldown queries from exact report filters", () => {
