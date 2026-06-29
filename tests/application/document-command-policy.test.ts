@@ -4,6 +4,7 @@ import {
   canExecuteDomainCommandForRoles,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
+  documentMergeDisposition,
   documentUpdateValidationIssues,
   ensureDocumentCreateAvailable,
   ensureDocumentStatus,
@@ -97,6 +98,35 @@ describe("document command policy", () => {
     expect(() =>
       ensureDocumentCreateAvailable({ doctypeName: "Note", documentName: "NOTE-1", existing: { docstatus: "draft" } })
     ).toThrow("Note/NOTE-1 already exists");
+  });
+
+  it("classifies conflicting document merge plans", () => {
+    expect(documentMergeDisposition({
+      status: "conflict",
+      patch: {},
+      unset: []
+    })).toBe("conflict");
+  });
+
+  it("classifies empty clean document merge plans as noops", () => {
+    expect(documentMergeDisposition({
+      status: "clean",
+      patch: {},
+      unset: []
+    })).toBe("noop");
+  });
+
+  it("classifies clean document merge plans with changes as apply", () => {
+    expect(documentMergeDisposition({
+      status: "clean",
+      patch: { title: "Updated" },
+      unset: []
+    })).toBe("apply");
+    expect(documentMergeDisposition({
+      status: "clean",
+      patch: {},
+      unset: ["body"]
+    })).toBe("apply");
   });
 
   it("preserves document update validation issue ordering by validation stage", () => {

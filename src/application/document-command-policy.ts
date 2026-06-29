@@ -1,4 +1,4 @@
-import type { DocumentMergeSnapshot } from "../core/document-merge.js";
+import type { DocumentFieldMergePlan, DocumentMergeSnapshot } from "../core/document-merge.js";
 import { badRequest, conflict, FrameworkError } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
 import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
@@ -74,6 +74,15 @@ export function ensureDocumentCreateAvailable(input: {
   if (input.existing !== undefined && input.existing !== null && input.existing.docstatus !== "deleted") {
     throw conflict(`${input.doctypeName}/${input.documentName} already exists`);
   }
+}
+
+export type DocumentMergeDisposition = "conflict" | "noop" | "apply";
+
+export function documentMergeDisposition(plan: Pick<DocumentFieldMergePlan, "status" | "patch" | "unset">): DocumentMergeDisposition {
+  if (plan.status === "conflict") {
+    return "conflict";
+  }
+  return Object.keys(plan.patch).length === 0 && plan.unset.length === 0 ? "noop" : "apply";
 }
 
 export interface DocumentUpdateValidationIssueGroups {

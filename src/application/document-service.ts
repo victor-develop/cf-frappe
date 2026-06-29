@@ -49,6 +49,7 @@ import {
   canExecuteDomainCommandForRoles,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
+  documentMergeDisposition,
   documentUpdateValidationIssues,
   planDocumentCopyPolicy,
   planDocumentCreatePolicy,
@@ -662,10 +663,11 @@ export class DocumentService implements DocumentCommandExecutor {
       remote: mergeSnapshotFromDocument(existing),
       draft
     });
-    if (plan.status === "conflict") {
+    const disposition = documentMergeDisposition(plan);
+    if (disposition === "conflict") {
       return { status: "conflict", plan, document: existing };
     }
-    if (Object.keys(plan.patch).length === 0 && plan.unset.length === 0) {
+    if (disposition === "noop") {
       return { status: "noop", plan, document: existing };
     }
 
