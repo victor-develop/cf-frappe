@@ -61,6 +61,8 @@ import {
   ensureUserAccountPasswordLoginAllowed,
   userAccountPasswordHashForLogin,
   userAccountEmailVerificationDeliveryEmail,
+  userAccountEmailVerificationChallengeForCompletion,
+  ensureUserAccountPasswordResettable,
   userAccountPasswordResetDeliveryEmail,
   userAccountRolesEqual
 } from "./user-account-policy.js";
@@ -470,9 +472,7 @@ export class UserAccountService {
     const token = normalizeUserRecoveryToken(command.token);
     const password = normalizeUserPassword(command.password);
     const state = await this.stateFor(tenantId, userId);
-    if (state.passwordHash === undefined) {
-      throw invalidRecoveryToken();
-    }
+    ensureUserAccountPasswordResettable(state);
     await this.ensureValidRecoveryChallenge(state, state.passwordReset, token);
     const passwordHash = await this.passwords.hash(password);
     const saved = await this.appendEvent({
@@ -545,11 +545,8 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const token = normalizeUserRecoveryToken(command.token);
     const state = await this.stateFor(tenantId, userId);
-    const challenge = state.emailVerification;
+    const challenge = userAccountEmailVerificationChallengeForCompletion(state);
     await this.ensureValidRecoveryChallenge(state, challenge, token);
-    if (challenge === undefined) {
-      throw invalidRecoveryToken();
-    }
     const saved = await this.appendEvent({
       tenantId,
       stream: userAccountsStream(tenantId, userId),

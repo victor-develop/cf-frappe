@@ -109,6 +109,21 @@ export function userAccountEmailVerificationDeliveryEmail(
   return state.email;
 }
 
+export function ensureUserAccountPasswordResettable(state: UserAccountState): void {
+  if (state.passwordHash === undefined) {
+    throw permissionDenied("Invalid recovery token");
+  }
+}
+
+export function userAccountEmailVerificationChallengeForCompletion(
+  state: UserAccountState
+): UserAccountEmailVerificationChallenge {
+  if (state.emailVerification === undefined) {
+    throw permissionDenied("Invalid recovery token");
+  }
+  return state.emailVerification;
+}
+
 export function normalizeUserRecoveryToken(token: string): string {
   const normalized = token.trim();
   if (normalized.length === 0) {

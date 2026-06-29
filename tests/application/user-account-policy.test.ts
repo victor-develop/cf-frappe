@@ -19,6 +19,8 @@ import {
   resolveUserAccountSessionTenant,
   SYSTEM_MANAGER_ROLE,
   ensureUserAccountPasswordLoginAllowed,
+  ensureUserAccountPasswordResettable,
+  userAccountEmailVerificationChallengeForCompletion,
   userAccountEmailVerificationDeliveryEmail,
   userAccountPasswordHashForLogin,
   userAccountPasswordResetDeliveryEmail,
@@ -158,6 +160,21 @@ describe("user account policy", () => {
     }), true)).toBeUndefined();
   });
 
+  it("guards password reset completion to password accounts", () => {
+    expect(() => ensureUserAccountPasswordResettable(accountState({ passwordHash: "hash:secret" }))).not.toThrow();
+    expect(() => ensureUserAccountPasswordResettable(accountState()))
+      .toThrow("Invalid recovery token");
+  });
+
+  it("selects email verification challenges for completion", () => {
+    const challenge = emailVerificationChallenge({ email: "owner@example.com" });
+    expect(userAccountEmailVerificationChallengeForCompletion(accountState({
+      emailVerification: challenge
+    }))).toEqual(challenge);
+    expect(() => userAccountEmailVerificationChallengeForCompletion(accountState()))
+      .toThrow("Invalid recovery token");
+  });
+
   it("normalizes recovery tokens", () => {
     expect(normalizeUserRecoveryToken(" tok_123 ")).toBe("tok_123");
     expect(() => normalizeUserRecoveryToken("   ")).toThrow("Invalid recovery token");
@@ -260,6 +277,18 @@ function recoveryChallenge(overrides: Partial<{ readonly tokenHash: string; read
     tokenHash: "hash:tok_123",
     expiresAt: "2026-01-01T00:01:00.000Z",
     requestedAt: now,
+    ...overrides
+  };
+}
+
+function emailVerificationChallenge(
+  overrides: Partial<{ readonly tokenHash: string; readonly expiresAt: string; readonly requestedAt: string; readonly email: string }> = {}
+) {
+  return {
+    tokenHash: "hash:tok_123",
+    expiresAt: "2026-01-01T00:01:00.000Z",
+    requestedAt: now,
+    email: "owner@example.com",
     ...overrides
   };
 }
