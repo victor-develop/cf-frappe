@@ -93,8 +93,14 @@ export function documentLifecycleEventType(options: DocumentLifecycleEventTypeOp
   }
 }
 
+export function isDocumentCreatedEvent(
+  event: DomainEvent
+): event is DomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" }>> {
+  return event.payload.kind === "DocumentCreated";
+}
+
 export function snapshotFromDocumentCreatedEvent(event: DomainEvent): DocumentSnapshot {
-  if (event.payload.kind !== "DocumentCreated") {
+  if (!isDocumentCreatedEvent(event)) {
     throw new Error("Expected DocumentCreated event");
   }
   return {

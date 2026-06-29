@@ -7,6 +7,7 @@ import {
   documentLifecycleEventType,
   documentStatusChangedPayload,
   documentUpdatedPayload,
+  isDocumentCreatedEvent,
   requireFirstSavedEvent,
   requireLiveDocumentSnapshot,
   requireSavedEvent,
@@ -105,6 +106,20 @@ describe("document lifecycle events", () => {
       data: { title: "First" },
       createdAt: "2026-06-28T01:00:00.000Z",
       updatedAt: "2026-06-28T01:00:00.000Z"
+    });
+  });
+
+  it("matches document-created events by payload kind when event type names are custom", () => {
+    const imported = {
+      ...createdEvent,
+      type: "NoteImported"
+    };
+
+    expect(isDocumentCreatedEvent(imported)).toBe(true);
+    expect(snapshotFromDocumentCreatedEvent(imported)).toMatchObject({
+      doctype: "Note",
+      name: "NOTE-1",
+      data: { title: "First" }
     });
   });
 
