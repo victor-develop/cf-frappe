@@ -1,4 +1,5 @@
 import { defineDocumentHooks, type DocumentHooks } from "../core/document-hooks.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
@@ -139,7 +140,7 @@ export function createDocumentQueuedEmailNotificationHooks(
               metadata: {
                 sourceEventId: event.id,
                 sourceEventType: event.type,
-                sourcePayloadKind: event.payload.kind,
+                sourcePayloadKind: domainEventPayloadKind(event),
                 ruleName: delivery.ruleName,
                 recipientId: delivery.recipientId
               }

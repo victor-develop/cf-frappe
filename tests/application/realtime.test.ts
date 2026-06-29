@@ -525,4 +525,58 @@ describe("document realtime hooks", () => {
       }
     ]);
   });
+
+  it("derives queued email metadata payload kinds from source event identity", async () => {
+    const emailNotifications = new EmailNotificationService({
+      events: new InMemoryEventStore(),
+      from: { email: "notifications@example.com" },
+      sender: { async send() { return {}; } },
+      notificationRules: {
+        async notificationRulesFor() {
+          return [
+            {
+              name: "Email assignees",
+              events: ["DocumentAssigned"],
+              recipients: [{ kind: "user", userId: "support@example.com" }],
+              channels: ["email"]
+            }
+          ];
+        }
+      }
+    });
+    const enqueued: Array<{ readonly tenantId: string; readonly messageId: string; readonly metadata: unknown }> = [];
+    const hooks = createDocumentQueuedEmailNotificationHooks(emailNotifications, {
+      async enqueue(tenantId, messageId, options) {
+        enqueued.push({ tenantId, messageId, metadata: options?.metadata });
+      }
+    });
+    const services = createServices(["create-1", "assign-1"], {
+      afterCommit: async (context) => {
+        await hooks.afterCommit?.(context);
+      }
+    });
+
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Queue Metadata" }) });
+    await services.documents.assign({
+      actor: owner,
+      doctype: "Note",
+      name: "Queue Metadata",
+      assignee: "support@example.com",
+      expectedVersion: 1
+    });
+
+    expect(enqueued).toEqual([
+      {
+        tenantId: "acme",
+        messageId: "evt_assign-1:rule:Email%20assignees:email:support%40example.com",
+        metadata: {
+          sourceEventId: "evt_assign-1",
+          sourceEventType: "NoteAssigned",
+          sourcePayloadKind: "DocumentAssigned",
+          ruleName: "Email assignees",
+          recipientId: "support@example.com"
+        }
+      }
+    ]);
+  });
 });
