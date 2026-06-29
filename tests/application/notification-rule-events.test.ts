@@ -8,6 +8,8 @@ import {
   notificationRuleNameForPayload,
   notificationRuleSavedPayload,
   NOTIFICATION_RULE_PAYLOAD_KINDS,
+  isNotificationRuleEvent,
+  isNotificationRulePayloadKind,
   replayNotificationRuleAppend
 } from "../../src";
 import type { DomainEvent, NotificationRuleDefinition, NotificationRuleEventPayload } from "../../src";
@@ -120,10 +122,38 @@ describe("notification rule events", () => {
       "NotificationRuleCleared"
     ]);
   });
+
+  it("narrows notification rule events by payload kind when event type names are custom", () => {
+    const saved = {
+      ...savedEvent(1, rule),
+      type: "NoteNotificationConfigured"
+    };
+
+    expect(isNotificationRulePayloadKind("NotificationRuleSaved")).toBe(true);
+    expect(isNotificationRulePayloadKind("DocumentDeleted")).toBe(false);
+    expect(isNotificationRuleEvent(saved)).toBe(true);
+    expect(isNotificationRuleEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
 });
 
 function notificationRulePayload(payload: NotificationRuleEventPayload): NotificationRuleEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: admin.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 function savedEvent(

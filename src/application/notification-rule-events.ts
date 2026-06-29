@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldNotificationRules, type NotificationRuleState } from "../core/notification-rules.js";
 import type {
   Actor,
@@ -22,10 +23,14 @@ export type NotificationRuleEventPayload =
       readonly ruleName: string;
     };
 
+export type NotificationRulePayloadKind = NotificationRuleEventPayload["kind"];
+
 export const NOTIFICATION_RULE_PAYLOAD_KINDS = Object.freeze([
   "NotificationRuleSaved",
   "NotificationRuleCleared"
-] as const);
+] as const satisfies readonly NotificationRulePayloadKind[]);
+
+const NOTIFICATION_RULE_PAYLOAD_KIND_SET = new Set<string>(NOTIFICATION_RULE_PAYLOAD_KINDS);
 
 export interface NotificationRuleSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -86,8 +91,16 @@ export function notificationRuleEvent<TPayload extends NotificationRuleEventPayl
 
 export function notificationRuleEventType(
   payload: NotificationRuleEventPayload
-): NotificationRuleEventPayload["kind"] {
+): NotificationRulePayloadKind {
   return payload.kind;
+}
+
+export function isNotificationRulePayloadKind(kind: string): kind is NotificationRulePayloadKind {
+  return NOTIFICATION_RULE_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isNotificationRuleEvent(event: DomainEvent): event is DomainEvent<NotificationRuleEventPayload> {
+  return isNotificationRulePayloadKind(domainEventPayloadKind(event));
 }
 
 export function notificationRuleDocumentName(payload: NotificationRuleEventPayload): string {
