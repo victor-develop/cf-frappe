@@ -20,7 +20,7 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the data-patch journal policy slice:
+As of the shared data-patch journal policy slice:
 
 - Vitest files: `197`
 - Vitest cases: `2401`

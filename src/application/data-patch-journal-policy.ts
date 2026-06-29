@@ -130,6 +130,14 @@ export function dataPatchRetryUnavailable(id: string, reason: string): Framework
   );
 }
 
+export function dataPatchApplyUnavailable(id: string, reason: string): FrameworkError {
+  return new FrameworkError(
+    "DATA_PATCH_APPLY_UNAVAILABLE",
+    `Data patch '${id}' cannot be applied because ${reason}`,
+    { status: 409 }
+  );
+}
+
 export function dataPatchRollbackRetryUnavailable(id: string, reason: string): FrameworkError {
   return new FrameworkError(
     "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",

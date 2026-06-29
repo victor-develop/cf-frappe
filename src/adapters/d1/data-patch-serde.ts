@@ -1,4 +1,5 @@
 import { FrameworkError } from "../../core/errors.js";
+import { dataPatchApplyUnavailable, invalidDataPatchJournalStatus } from "../../application/data-patch-journal-policy.js";
 import { cloneJsonValue, isJsonValue } from "../../core/json.js";
 import type { JsonValue } from "../../core/types.js";
 import type {
@@ -61,7 +62,7 @@ export function recordedDataPatchFromRow(row: DataPatchRow): RecordedDataPatch {
       status: "pending"
     };
   }
-  throw invalidStatus(row);
+  throw invalidDataPatchJournalStatus(row);
 }
 
 export function appliedDataPatchFromRow(row: DataPatchRow): AppliedDataPatch {
@@ -113,7 +114,7 @@ export function claimResultFromRow(row: DataPatchRow, claimId: string): DataPatc
   if (row.status === "rollback_pending" || row.status === "rolled_back" || row.status === "rollback_failed") {
     throw dataPatchApplyUnavailable(row.id, `journal status is '${row.status}'`);
   }
-  throw invalidStatus(row);
+  throw invalidDataPatchJournalStatus(row);
 }
 
 export function rollbackClaimResultFromRow(row: DataPatchRow): DataPatchRollbackClaimResult {
@@ -147,7 +148,7 @@ export function rollbackClaimResultFromRow(row: DataPatchRow): DataPatchRollback
   if (row.status === "rollback_failed") {
     return { kind: "rollback_failed", patch: rollbackFailedDataPatchFromRow(row) };
   }
-  throw invalidStatus(row);
+  throw invalidDataPatchJournalStatus(row);
 }
 
 export function serializedPatchResult(
@@ -212,20 +213,4 @@ function parseJsonValue(id: string, field: "result_json" | "rollback_result_json
     // Fall through to the journal corruption error below.
   }
   throw new FrameworkError("DATA_PATCH_INVALID", `Data patch '${id}' has invalid ${field}`, { status: 409 });
-}
-
-function invalidStatus(row: DataPatchRow): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_INVALID",
-    `Data patch '${row.id}' has invalid journal status '${row.status}'`,
-    { status: 409 }
-  );
-}
-
-function dataPatchApplyUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_APPLY_UNAVAILABLE",
-    `Data patch '${id}' cannot be applied because ${reason}`,
-    { status: 409 }
-  );
 }

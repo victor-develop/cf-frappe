@@ -1,4 +1,12 @@
 import { FrameworkError } from "../../core/errors.js";
+import {
+  assertDataPatchChecksumMatches,
+  assertRetryableFailedJournal,
+  assertRetryableRollbackFailedJournal,
+  assertRollbackClaimableJournal,
+  dataPatchApplyUnavailable,
+  dataPatchRollbackUnavailable
+} from "../../application/data-patch-journal-policy.js";
 import { cloneJsonValue, isJsonValue } from "../../core/json.js";
 import type { JsonValue } from "../../core/types.js";
 import type {
@@ -46,7 +54,7 @@ export class InMemoryDataPatchLog implements DataPatchLog {
   async claimDataPatch(patch: ClaimDataPatch): Promise<DataPatchClaimResult> {
     const existing = this.patches.get(patch.id);
     if (existing !== undefined) {
-      assertChecksumValueMatches(patch.id, patch.checksum, existing.checksum);
+      assertDataPatchChecksumMatches(patch.id, patch.checksum, existing.checksum);
       return claimResult(existing);
     }
     const claimed = Object.freeze({
@@ -87,13 +95,13 @@ export class InMemoryDataPatchLog implements DataPatchLog {
 
   async retryFailedDataPatch(patch: RetryFailedDataPatch): Promise<void> {
     const existing = this.patches.get(patch.id);
-    assertRetryableFailedPatch(existing, patch.id, patch.checksum);
+    assertRetryableFailedJournal(existing, patch.id, patch.checksum);
     this.patches.delete(patch.id);
   }
 
   async retryFailedDataPatchRollback(patch: RetryFailedDataPatchRollback) {
     const existing = this.patches.get(patch.id);
-    assertRetryableFailedRollbackPatch(existing, patch.id, patch.checksum);
+    assertRetryableRollbackFailedJournal(existing, patch.id, patch.checksum);
     const claimed = Object.freeze({
       id: patch.id,
       checksum: patch.checksum,
@@ -109,7 +117,7 @@ export class InMemoryDataPatchLog implements DataPatchLog {
 
   async claimDataPatchRollback(patch: ClaimRollbackDataPatch): Promise<DataPatchRollbackClaimResult> {
     const existing = this.patches.get(patch.id);
-    assertRollbackClaimable(existing, patch.id, patch.checksum);
+    assertRollbackClaimableJournal(existing, patch.id, patch.checksum);
     if (existing.status !== "applied") {
       return rollbackClaimResult(existing);
     }
@@ -283,17 +291,6 @@ function clonePatchResult(id: string, field: "result" | "rollbackResult", value:
   return cloneJsonValue(value);
 }
 
-function assertChecksumValueMatches(id: string, plannedChecksum: string, recordedChecksum: string): void {
-  if (plannedChecksum === recordedChecksum) {
-    return;
-  }
-  throw new FrameworkError(
-    "DATA_PATCH_CHECKSUM_MISMATCH",
-    `Recorded data patch '${id}' has checksum '${recordedChecksum}' but planned '${plannedChecksum}'`,
-    { status: 409 }
-  );
-}
-
 function assertPendingClaim(
   entry: InMemoryDataPatchEntry | undefined,
   id: string,
@@ -308,81 +305,6 @@ function assertPendingClaim(
   });
 }
 
-function assertRetryableFailedPatch(
-  entry: InMemoryDataPatchEntry | undefined,
-  id: string,
-  checksum: string
-): asserts entry is FailedDataPatch & { readonly status: "failed"; readonly claimId: string } {
-  if (entry === undefined) {
-    throw dataPatchRetryUnavailable(id, "no failed journal entry exists");
-  }
-  assertChecksumValueMatches(id, checksum, entry.checksum);
-  if (entry.status === "failed") {
-    return;
-  }
-  if (entry.status === "pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_PENDING",
-      `Data patch '${id}' is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  throw dataPatchRetryUnavailable(id, `journal status is '${entry.status}'`);
-}
-
-function assertRetryableFailedRollbackPatch(
-  entry: InMemoryDataPatchEntry | undefined,
-  id: string,
-  checksum: string
-): asserts entry is RollbackFailedDataPatch & { readonly status: "rollback_failed"; readonly claimId: string } {
-  if (entry === undefined) {
-    throw dataPatchRollbackRetryUnavailable(id, "no failed rollback journal entry exists");
-  }
-  assertChecksumValueMatches(id, checksum, entry.checksum);
-  if (entry.status === "rollback_failed") {
-    return;
-  }
-  if (entry.status === "pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_PENDING",
-      `Data patch '${id}' is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  if (entry.status === "failed") {
-    throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${id}' failed and must be retried first`, {
-      status: 409
-    });
-  }
-  if (entry.status === "rollback_pending") {
-    throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is pending`, {
-      status: 409
-    });
-  }
-  throw dataPatchRollbackRetryUnavailable(id, `journal status is '${entry.status}'`);
-}
-
-function assertRollbackClaimable(
-  entry: InMemoryDataPatchEntry | undefined,
-  id: string,
-  checksum: string
-): asserts entry is InMemoryDataPatchEntry {
-  if (entry === undefined) {
-    throw dataPatchRollbackUnavailable(id, "no applied journal entry exists");
-  }
-  assertChecksumValueMatches(id, checksum, entry.checksum);
-  if (
-    entry.status === "applied" ||
-    entry.status === "pending" ||
-    entry.status === "failed" ||
-    entry.status === "rollback_pending" ||
-    entry.status === "rollback_failed" ||
-    entry.status === "rolled_back"
-  ) {
-    return;
-  }
-}
-
 function assertRollbackPendingClaim(
   entry: InMemoryDataPatchEntry | undefined,
   id: string,
@@ -395,36 +317,4 @@ function assertRollbackPendingClaim(
   throw new FrameworkError("DATA_PATCH_ROLLBACK_PENDING", `Data patch '${id}' rollback is not claimed by this runner`, {
     status: 409
   });
-}
-
-function dataPatchApplyUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_APPLY_UNAVAILABLE",
-    `Data patch '${id}' cannot be applied because ${reason}`,
-    { status: 409 }
-  );
-}
-
-function dataPatchRetryUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_RETRY_UNAVAILABLE",
-    `Data patch '${id}' cannot be retried because ${reason}`,
-    { status: 409 }
-  );
-}
-
-function dataPatchRollbackRetryUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
-    `Data patch '${id}' rollback cannot be retried because ${reason}`,
-    { status: 409 }
-  );
-}
-
-function dataPatchRollbackUnavailable(id: string, reason: string): FrameworkError {
-  return new FrameworkError(
-    "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-    `Data patch '${id}' cannot be rolled back because ${reason}`,
-    { status: 409 }
-  );
 }

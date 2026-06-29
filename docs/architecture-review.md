@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Shared data-patch journal policy across D1 and in-memory logs so retry, rollback-retry, rollback-claim, checksum, and apply-unavailable errors use one status boundary.
 - Extracted data-patch journal retry and rollback claimability policy from D1 data-patch-log I/O and covered retry, rollback-retry, and rollback-claim status guards directly.
 - Extracted D1 data-patch journal row/result serde from data-patch-log I/O and covered direct row projection, rollback result JSON, and invalid-result guards.
 - Extracted D1 job execution query planning from job-execution-log I/O and covered bound list-filter SQL planning with default limits.
