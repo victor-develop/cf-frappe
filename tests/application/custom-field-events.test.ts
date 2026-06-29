@@ -68,19 +68,28 @@ describe("custom field events", () => {
     })))).toBe(true);
     expect(isCustomFieldEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
   });
+
+  it("narrows custom-field events by payload kind when event type names are custom", () => {
+    const saved = event(customFieldSavedPayload({
+      doctypeName: "Note",
+      field: { name: "priority", type: "text" }
+    }), "NoteCustomFieldUpserted");
+
+    expect(isCustomFieldEvent(saved)).toBe(true);
+  });
 });
 
 function customFieldPayload(payload: CustomFieldEventPayload): CustomFieldEventPayload {
   return payload;
 }
 
-function event(payload: DomainEvent["payload"]): DomainEvent {
+function event(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
   return {
     id: "evt_1",
     tenantId: "acme",
     stream: "acme:__CustomFields",
     sequence: 1,
-    type: payload.kind,
+    type,
     doctype: "__CustomFields",
     documentName: "priority",
     actorId: "admin@example.com",

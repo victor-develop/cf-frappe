@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized custom-field event payload-kind matching through domain events so catalog stream filters no longer read source event payload kinds inline.
 - Centralized document-created event payload-kind matching in document lifecycle events so create-snapshot projection no longer reads source event payload kinds inline.
 - Centralized job-schedule event payload-kind matching in job schedule events so runtime schedule replay selectors no longer read event payload kinds inline.
 - Centralized document-delivery outbox source-event payload-kind validation in domain events so replayed delivery records no longer inspect source event payload kinds inline.

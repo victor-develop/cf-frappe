@@ -1,4 +1,5 @@
 import type { DocTypeName, DomainEvent, PersistedFieldDefinition } from "../core/types.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 
 export type CustomFieldEventPayload =
   | {
@@ -60,7 +61,7 @@ export function isCustomFieldPayloadKind(kind: string): kind is CustomFieldPaylo
 }
 
 export function isCustomFieldEvent(event: DomainEvent): event is DomainEvent<CustomFieldEventPayload> {
-  return isCustomFieldPayloadKind(event.payload.kind);
+  return isCustomFieldPayloadKind(domainEventPayloadKind(event));
 }
 
 declare module "../core/types.js" {
