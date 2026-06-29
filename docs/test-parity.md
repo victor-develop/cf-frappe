@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the dashboard report value policy slice:
+As of the report summary policy slice:
 
-- Vitest files: `195`
-- Vitest cases: `2215`
-- Remaining gap to Frappe static markers: `569`
+- Vitest files: `196`
+- Vitest cases: `2222`
+- Remaining gap to Frappe static markers: `562`
 
 ## Implication
 

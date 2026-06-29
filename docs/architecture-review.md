@@ -153,6 +153,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Extracted dashboard document aggregate folding, aggregate finishing, and indicator-rule selection into `src/application/dashboard-policy.ts`, keeping dashboard metadata access plus query/report orchestration in `DashboardService`.
 - Extracted dashboard card result shaping into `src/application/dashboard-policy.ts`, keeping card source execution in `DashboardService`.
 - Extracted dashboard report summary/chart value selection into `src/application/dashboard-policy.ts`, keeping report execution in `DashboardService`.
+- Extracted report row primitive reads and summary aggregate/value shaping into `src/application/report-policy.ts`, keeping report data loading, filtering, grouping, charting, and CSV orchestration in `ReportService`.
 - Moved workflow definition save and clear event payloads into their own bounded application event module and narrowed `WorkflowService` append/fold orchestration to that payload union, adding a thirteenth extension-map contract test.
 - Moved notification rule save and clear event payloads into their own bounded application event module and narrowed `NotificationRuleService` append/fold orchestration to that payload union, adding a fourteenth extension-map contract test.
 - Extracted notification rule save/clear payload factories into `src/application/notification-rule-events.ts`, keeping registry resolution, normalization, version checks, and append orchestration in `NotificationRuleService`.

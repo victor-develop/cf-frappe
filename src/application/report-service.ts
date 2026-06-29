@@ -19,7 +19,6 @@ import {
   type ReportFormulaOperand,
   type ReportGroupDefinition,
   type ReportOrder,
-  type ReportSummaryAggregate,
   type ReportSummaryDefinition,
   isReportFilterGroup
 } from "../core/reports.js";
@@ -27,22 +26,17 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
+import {
+  primitiveReportRowValue,
+  reportSummaryValue,
+  type ReportRow,
+  type ReportSummaryValue
+} from "./report-policy.js";
 
 export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
-export type ReportRow = Readonly<Record<string, JsonValue>>;
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
-
-export interface ReportSummaryValue {
-  readonly name: string;
-  readonly label: string;
-  readonly aggregate: ReportSummaryAggregate;
-  readonly value: JsonPrimitive;
-  readonly field?: string;
-  readonly type?: FieldType;
-  readonly indicator?: string;
-}
 
 export interface ReportGroupRow {
   readonly key: JsonPrimitive;
@@ -984,7 +978,7 @@ function buildReportSummary(
   rows: readonly ReportRow[],
   summaries: readonly ReportSummaryDefinition[]
 ): readonly ReportSummaryValue[] {
-  return summaries.map((summary) => summaryValue(summary, rows));
+  return summaries.map((summary) => reportSummaryValue(summary, rows));
 }
 
 function buildReportGroups(
@@ -994,7 +988,7 @@ function buildReportGroups(
   return groups.map((group) => {
     const buckets = new Map<string, { readonly key: JsonPrimitive; readonly rows: ReportRow[] }>();
     for (const row of rows) {
-      const key = primitiveRowValue(row, group.field) ?? null;
+      const key = primitiveReportRowValue(row, group.field) ?? null;
       const bucketKey = JSON.stringify(key);
       const existing = buckets.get(bucketKey);
       if (existing) {
@@ -1135,97 +1129,6 @@ function compareChartValues(left: number | null, right: number | null, direction
     return left === null ? 1 : -1;
   }
   return compareValues(left, right) * direction;
-}
-
-function summaryValue(
-  summary: ReportSummaryDefinition,
-  rows: readonly ReportRow[]
-): ReportSummaryValue {
-  return {
-    name: summary.name,
-    label: summary.label ?? summary.name,
-    aggregate: summary.aggregate,
-    value: aggregateValue(summary, rows),
-    ...(summary.field ? { field: summary.field } : {}),
-    ...(summary.type ? { type: summary.type } : summary.aggregate === "count" ? { type: "integer" } : {}),
-    ...(summary.indicator ? { indicator: summary.indicator } : {})
-  };
-}
-
-function aggregateValue(summary: ReportSummaryDefinition, rows: readonly ReportRow[]): JsonPrimitive {
-  const field = summary.field;
-  switch (summary.aggregate) {
-    case "count":
-      return field
-        ? rows.filter((row) => isPresentValue(row[field])).length
-        : rows.length;
-    case "sum":
-      return numericValues(rows, requiredSummaryField(summary)).reduce((total, value) => total + value, 0);
-    case "avg": {
-      const values = numericValues(rows, requiredSummaryField(summary));
-      return values.length === 0 ? null : values.reduce((total, value) => total + value, 0) / values.length;
-    }
-    case "min":
-      return minMaxValue(rows, requiredSummaryField(summary), "min");
-    case "max":
-      return minMaxValue(rows, requiredSummaryField(summary), "max");
-  }
-}
-
-function requiredSummaryField(summary: ReportSummaryDefinition): string {
-  if (!summary.field) {
-    throw badRequest(`Report summary '${summary.name}' requires a field for ${summary.aggregate}`);
-  }
-  return summary.field;
-}
-
-function numericValues(rows: readonly ReportRow[], field: string): readonly number[] {
-  return rows
-    .map((row) => primitiveRowValue(row, field))
-    .filter((value): value is number => typeof value === "number");
-}
-
-function minMaxValue(
-  rows: readonly ReportRow[],
-  field: string,
-  direction: "min" | "max"
-): JsonPrimitive {
-  const values = rows
-    .map((row) => primitiveRowValue(row, field))
-    .filter((value): value is Exclude<JsonPrimitive, null> => value !== undefined && value !== null);
-  if (values.length === 0) {
-    return null;
-  }
-  return values.slice(1).reduce((selected, value) => {
-    const comparison = compareValues(value, selected);
-    return direction === "min"
-      ? comparison < 0 ? value : selected
-      : comparison > 0 ? value : selected;
-  }, firstMinMaxCandidate(values, field, direction));
-}
-
-function firstMinMaxCandidate(
-  values: readonly Exclude<JsonPrimitive, null>[],
-  field: string,
-  direction: "min" | "max"
-): Exclude<JsonPrimitive, null> {
-  const value = values[0];
-  if (value === undefined) {
-    throw new Error(`Report ${direction} summary for field '${field}' has no candidate values`);
-  }
-  return value;
-}
-
-function primitiveRowValue(row: ReportRow, field: string): JsonPrimitive | undefined {
-  const value = row[field];
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  return undefined;
-}
-
-function isPresentValue(value: JsonValue | undefined): boolean {
-  return value !== undefined && value !== null;
 }
 
 function groupLabel(value: JsonPrimitive): string {

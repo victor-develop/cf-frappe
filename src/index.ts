@@ -60,6 +60,7 @@ export * from "./application/print-settings-events.js";
 export * from "./application/print-settings-service.js";
 export * from "./application/query-service.js";
 export * from "./application/realtime.js";
+export * from "./application/report-policy.js";
 export * from "./application/report-service.js";
 export * from "./application/role-events.js";
 export * from "./application/role-service.js";
