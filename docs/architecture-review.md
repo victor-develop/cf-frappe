@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized email-notification outbox event payload-kind matching through bounded event helpers so outbox folds ignore misleading event type names.
 - Centralized user-notification inbox event payload-kind matching through bounded event helpers so inbox folds and recorded-notification projection ignore misleading event type names.
 - Centralized user-account state event payload-kind matching through core user-account helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized document-share state event payload-kind matching through core document-share helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.

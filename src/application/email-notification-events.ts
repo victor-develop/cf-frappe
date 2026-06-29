@@ -125,6 +125,9 @@ export function foldEmailOutbox(tenantId: TenantId, events: readonly DomainEvent
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
+    if (!isEmailNotificationEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "EmailNotificationQueued":
         messages.set(event.payload.messageId, {

@@ -111,6 +111,30 @@ describe("email notification events", () => {
       stateEvent(2, messageId, { kind: "DocumentDeleted" }, "2026-01-01T00:01:00.000Z")
     )).toBe(false);
   });
+
+  it("folds email outbox state by payload kind when event type names are custom", () => {
+    const messageId = emailNotificationMessageId("evt_update", "Email owners", "reviewer@example.com");
+    const misleadingUnrelated = stateEvent(
+      1,
+      messageId,
+      { kind: "DocumentDeleted" },
+      "2026-01-01T00:00:00.000Z",
+      "EmailNotificationQueued"
+    );
+    const customTypedQueued = {
+      ...queuedEvent(2, messageId),
+      type: "NoteEmailDeliveryQueued"
+    };
+
+    const state = foldEmailOutbox("acme", [misleadingUnrelated, customTypedQueued]);
+
+    expect(state.version).toBe(2);
+    expect(state.messages.get(messageId)).toMatchObject({
+      messageId,
+      status: "queued",
+      sourceEventId: "evt_update"
+    });
+  });
 });
 
 function queuedEvent(sequence: number, messageId: string): DomainEvent {
@@ -173,13 +197,19 @@ function sentEvent(sequence: number, messageId: string, claimId: string, provide
   }, "2026-01-01T00:06:00.000Z");
 }
 
-function stateEvent(sequence: number, messageId: string, payload: DomainEvent["payload"], occurredAt: string): DomainEvent {
+function stateEvent(
+  sequence: number,
+  messageId: string,
+  payload: DomainEvent["payload"],
+  occurredAt: string,
+  type: string = payload.kind
+): DomainEvent {
   return {
     id: `evt_${sequence}`,
     tenantId: "acme",
     stream: `acme:__EmailOutbox:${messageId}`,
     sequence,
-    type: payload.kind,
+    type,
     doctype: "__EmailOutbox",
     documentName: messageId,
     actorId: "system:email-outbox",
