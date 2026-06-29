@@ -20,6 +20,7 @@ import {
 import {
   printSettingsChangedPayload,
   printSettingsEventType,
+  PRINT_SETTINGS_PAYLOAD_KINDS,
   type PrintSettingsEventPayload
 } from "./print-settings-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -87,7 +88,10 @@ export class PrintSettingsService {
       settings: patch
     });
     return foldPrintSettings(tenantId, [
-      ...(await this.events.readStream(printSettingsStream(tenantId), { maxSequence: state.version })),
+      ...(await this.events.readStream(printSettingsStream(tenantId), {
+        maxSequence: state.version,
+        payloadKinds: PRINT_SETTINGS_PAYLOAD_KINDS
+      })),
       ...saved
     ]);
   }
@@ -117,7 +121,9 @@ export class PrintSettingsService {
   }
 
   private async stateFor(tenantId: TenantId): Promise<PrintSettingsState> {
-    return foldPrintSettings(tenantId, await this.events.readStream(printSettingsStream(tenantId)));
+    return foldPrintSettings(tenantId, await this.events.readStream(printSettingsStream(tenantId), {
+      payloadKinds: PRINT_SETTINGS_PAYLOAD_KINDS
+    }));
   }
 
   private ensureAdmin(actor: Actor): void {
