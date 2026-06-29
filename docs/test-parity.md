@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule event projection slice:
+As of the job schedule event factory slice:
 
 - Vitest files: `178`
-- Vitest cases: `2075`
-- Remaining gap to Frappe static markers: `709`
+- Vitest cases: `2077`
+- Remaining gap to Frappe static markers: `707`
 
 ## Implication
 

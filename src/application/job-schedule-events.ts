@@ -1,4 +1,5 @@
-import type { DocumentData, DomainEvent, TenantId } from "../core/types.js";
+import { jobScheduleDefinitionsStream, jobScheduleOverridesStream } from "../core/streams.js";
+import type { DocumentData, DomainEvent, NewDomainEvent, TenantId } from "../core/types.js";
 
 export interface JobScheduleOverrideRecord {
   readonly scheduleId: string;
@@ -65,6 +66,108 @@ export type JobScheduleEventPayload =
       readonly scheduleId: string;
       readonly tenantId: TenantId;
     };
+
+interface JobScheduleEventEnvelopeOptions {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly metadata: DocumentData;
+}
+
+interface JobScheduleSavedEventSchedule {
+  readonly id: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly enabled: boolean;
+  readonly payload?: DocumentData;
+  readonly metadata?: DocumentData;
+  readonly idempotencyKey?: string;
+  readonly delaySeconds?: number;
+}
+
+export function createJobScheduleSavedEvent(
+  options: JobScheduleEventEnvelopeOptions & {
+    readonly schedule: JobScheduleSavedEventSchedule;
+  }
+): NewDomainEvent<JobScheduleEventPayload> {
+  return {
+    ...jobScheduleEventEnvelope(options, jobScheduleDefinitionsStream(), "JobScheduleSaved", "definitions"),
+    payload: {
+      kind: "JobScheduleSaved",
+      scheduleId: options.schedule.id,
+      cron: options.schedule.cron,
+      jobName: options.schedule.jobName,
+      tenantId: options.tenantId,
+      enabled: options.schedule.enabled,
+      ...(options.schedule.payload === undefined ? {} : { payload: options.schedule.payload }),
+      ...(options.schedule.metadata === undefined ? {} : { metadata: options.schedule.metadata }),
+      ...(options.schedule.idempotencyKey === undefined ? {} : { idempotencyKey: options.schedule.idempotencyKey }),
+      ...(options.schedule.delaySeconds === undefined ? {} : { delaySeconds: options.schedule.delaySeconds })
+    }
+  };
+}
+
+export function createJobScheduleDeletedEvent(
+  options: JobScheduleEventEnvelopeOptions & {
+    readonly scheduleId: string;
+  }
+): NewDomainEvent<JobScheduleEventPayload> {
+  return {
+    ...jobScheduleEventEnvelope(options, jobScheduleDefinitionsStream(), "JobScheduleDeleted", "definitions"),
+    payload: {
+      kind: "JobScheduleDeleted",
+      scheduleId: options.scheduleId,
+      tenantId: options.tenantId
+    }
+  };
+}
+
+export function createJobScheduleOverrideSetEvent(
+  options: JobScheduleEventEnvelopeOptions & {
+    readonly scheduleId: string;
+    readonly enabled: boolean;
+  }
+): NewDomainEvent<JobScheduleEventPayload> {
+  return {
+    ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobScheduleOverrideSet", "overrides"),
+    payload: {
+      kind: "JobScheduleOverrideSet",
+      scheduleId: options.scheduleId,
+      enabled: options.enabled
+    }
+  };
+}
+
+export function createJobSchedulePausedEvent(
+  options: JobScheduleEventEnvelopeOptions & {
+    readonly scheduleId: string;
+    readonly pausedUntil: string;
+  }
+): NewDomainEvent<JobScheduleEventPayload> {
+  return {
+    ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobSchedulePaused", "overrides"),
+    payload: {
+      kind: "JobSchedulePaused",
+      scheduleId: options.scheduleId,
+      pausedUntil: options.pausedUntil
+    }
+  };
+}
+
+export function createJobScheduleOverrideClearedEvent(
+  options: JobScheduleEventEnvelopeOptions & {
+    readonly scheduleId: string;
+  }
+): NewDomainEvent<JobScheduleEventPayload> {
+  return {
+    ...jobScheduleEventEnvelope(options, jobScheduleOverridesStream(options.tenantId), "JobScheduleOverrideCleared", "overrides"),
+    payload: {
+      kind: "JobScheduleOverrideCleared",
+      scheduleId: options.scheduleId
+    }
+  };
+}
 
 export function jobScheduleDefinitionKey(tenantId: TenantId, scheduleId: string): string {
   return JSON.stringify([tenantId, scheduleId]);
@@ -135,6 +238,25 @@ export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobS
   return {
     version: events.at(-1)?.sequence ?? 0,
     schedules
+  };
+}
+
+function jobScheduleEventEnvelope(
+  options: JobScheduleEventEnvelopeOptions,
+  stream: string,
+  type: string,
+  documentName: string
+): Omit<NewDomainEvent<JobScheduleEventPayload>, "payload"> {
+  return {
+    id: options.id,
+    tenantId: options.tenantId,
+    stream,
+    type,
+    doctype: "__JobSchedules",
+    documentName,
+    actorId: options.actorId,
+    occurredAt: options.occurredAt,
+    metadata: options.metadata
   };
 }
 

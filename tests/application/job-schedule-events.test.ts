@@ -1,12 +1,100 @@
 import {
+  createJobScheduleDeletedEvent,
+  createJobScheduleOverrideClearedEvent,
+  createJobScheduleOverrideSetEvent,
+  createJobSchedulePausedEvent,
+  createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
   jobScheduleDefinitionKey,
+  jobScheduleDefinitionsStream,
+  jobScheduleOverridesStream,
   type DomainEvent,
   type JobScheduleEventPayload
 } from "../../src";
 
 describe("job schedule events", () => {
+  it("creates runtime schedule definition events with the definitions stream envelope", () => {
+    expect(createJobScheduleSavedEvent({
+      ...eventEnvelope(),
+      schedule: {
+        id: "runtime-daily",
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        enabled: true,
+        payload: { scope: "daily" },
+        metadata: { owner: "ops" },
+        idempotencyKey: "daily-acme",
+        delaySeconds: 30
+      }
+    })).toEqual({
+      ...expectedEnvelope("evt_1", jobScheduleDefinitionsStream(), "JobScheduleSaved", "definitions"),
+      payload: {
+        kind: "JobScheduleSaved",
+        scheduleId: "runtime-daily",
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        tenantId: "acme",
+        enabled: true,
+        payload: { scope: "daily" },
+        metadata: { owner: "ops" },
+        idempotencyKey: "daily-acme",
+        delaySeconds: 30
+      }
+    });
+
+    expect(createJobScheduleDeletedEvent({
+      ...eventEnvelope({ id: "evt_2" }),
+      scheduleId: "runtime-daily"
+    })).toEqual({
+      ...expectedEnvelope("evt_2", jobScheduleDefinitionsStream(), "JobScheduleDeleted", "definitions"),
+      payload: {
+        kind: "JobScheduleDeleted",
+        scheduleId: "runtime-daily",
+        tenantId: "acme"
+      }
+    });
+  });
+
+  it("creates override events with tenant-scoped override stream envelopes", () => {
+    expect(createJobScheduleOverrideSetEvent({
+      ...eventEnvelope(),
+      scheduleId: "daily",
+      enabled: false
+    })).toEqual({
+      ...expectedEnvelope("evt_1", jobScheduleOverridesStream("acme"), "JobScheduleOverrideSet", "overrides"),
+      payload: {
+        kind: "JobScheduleOverrideSet",
+        scheduleId: "daily",
+        enabled: false
+      }
+    });
+
+    expect(createJobSchedulePausedEvent({
+      ...eventEnvelope({ id: "evt_2" }),
+      scheduleId: "daily",
+      pausedUntil: "2026-01-02T00:00:00.000Z"
+    })).toEqual({
+      ...expectedEnvelope("evt_2", jobScheduleOverridesStream("acme"), "JobSchedulePaused", "overrides"),
+      payload: {
+        kind: "JobSchedulePaused",
+        scheduleId: "daily",
+        pausedUntil: "2026-01-02T00:00:00.000Z"
+      }
+    });
+
+    expect(createJobScheduleOverrideClearedEvent({
+      ...eventEnvelope({ id: "evt_3" }),
+      scheduleId: "daily"
+    })).toEqual({
+      ...expectedEnvelope("evt_3", jobScheduleOverridesStream("acme"), "JobScheduleOverrideCleared", "overrides"),
+      payload: {
+        kind: "JobScheduleOverrideCleared",
+        scheduleId: "daily"
+      }
+    });
+  });
+
   it("folds override set, pause, and clear events into tenant override state", () => {
     const overrideEvents = [
       scheduleEvent(1, "JobScheduleOverrideSet", {
@@ -119,5 +207,34 @@ function scheduleEvent(
     occurredAt: `2026-01-01T00:0${sequence}:00.000Z`,
     payload,
     metadata: {}
+  };
+}
+
+function eventEnvelope(overrides: { readonly id?: string } = {}) {
+  return {
+    id: overrides.id ?? "evt_1",
+    tenantId: "acme",
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    metadata: { source: "test" }
+  };
+}
+
+function expectedEnvelope(
+  id: string,
+  stream: string,
+  type: string,
+  documentName: string
+) {
+  return {
+    id,
+    tenantId: "acme",
+    stream,
+    type,
+    doctype: "__JobSchedules",
+    documentName,
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    metadata: { source: "test" }
   };
 }

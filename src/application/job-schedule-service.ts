@@ -6,15 +6,18 @@ import {
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
-  type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
 import {
+  createJobScheduleDeletedEvent,
+  createJobScheduleOverrideClearedEvent,
+  createJobScheduleOverrideSetEvent,
+  createJobSchedulePausedEvent,
+  createJobScheduleSavedEvent,
   foldJobScheduleDefinitions,
   foldJobScheduleOverrides,
   jobScheduleDefinitionKey,
   type JobScheduleDefinitionState,
-  type JobScheduleEventPayload,
   type JobScheduleOverrideState,
   type RuntimeJobScheduleRecord
 } from "./job-schedule-events.js";
@@ -240,29 +243,14 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       throw badRequest(saveDecision.message);
     }
     const stream = jobScheduleDefinitionsStream();
-    const event: NewDomainEvent<JobScheduleEventPayload> = {
+    const event = createJobScheduleSavedEvent({
       id: this.ids.next("evt_"),
       tenantId,
-      stream,
-      type: "JobScheduleSaved",
-      doctype: "__JobSchedules",
-      documentName: "definitions",
       actorId: actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "JobScheduleSaved",
-        scheduleId: schedule.id,
-        cron: schedule.cron,
-        jobName: schedule.jobName,
-        tenantId,
-        enabled: schedule.enabled,
-        ...(schedule.payload === undefined ? {} : { payload: schedule.payload }),
-        ...(schedule.metadata === undefined ? {} : { metadata: schedule.metadata }),
-        ...(schedule.idempotencyKey === undefined ? {} : { idempotencyKey: schedule.idempotencyKey }),
-        ...(schedule.delaySeconds === undefined ? {} : { delaySeconds: schedule.delaySeconds })
-      },
-      metadata: command.eventMetadata ?? {}
-    };
+      metadata: command.eventMetadata ?? {},
+      schedule
+    });
     await events.append(stream, state.version, [event]);
     const updated = await this.definitionState();
     const saved = requireSavedRuntimeSchedule(updated, tenantId, schedule.id);
@@ -295,22 +283,14 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       throw new Error(`Runtime job schedule '${scheduleId}' passed delete policy but was not loaded`);
     }
     const stream = jobScheduleDefinitionsStream();
-    const event: NewDomainEvent<JobScheduleEventPayload> = {
+    const event = createJobScheduleDeletedEvent({
       id: this.ids.next("evt_"),
       tenantId,
-      stream,
-      type: "JobScheduleDeleted",
-      doctype: "__JobSchedules",
-      documentName: "definitions",
       actorId: actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "JobScheduleDeleted",
-        scheduleId,
-        tenantId
-      },
+      scheduleId,
       metadata: command.metadata ?? {}
-    };
+    });
     await events.append(stream, state.version, [event]);
     const schedule = this.summaryFor(current, runtimeScheduleIndex(state, tenantId, current.id), await this.overrideState(tenantId), "runtime");
     return {
@@ -355,21 +335,14 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent<JobScheduleEventPayload> = {
+    const event = createJobScheduleOverrideClearedEvent({
       id: this.ids.next("evt_"),
       tenantId,
-      stream,
-      type: "JobScheduleOverrideCleared",
-      doctype: "__JobSchedules",
-      documentName: "overrides",
       actorId: actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "JobScheduleOverrideCleared",
-        scheduleId: summary.id
-      },
+      scheduleId: summary.id,
       metadata: command.metadata ?? {}
-    };
+    });
     await events.append(stream, state.version, [event]);
     return {
       schedule: this.summaryFor(schedule, index, await this.overrideState(tenantId))
@@ -398,22 +371,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent<JobScheduleEventPayload> = {
+    const event = createJobSchedulePausedEvent({
       id: this.ids.next("evt_"),
       tenantId,
-      stream,
-      type: "JobSchedulePaused",
-      doctype: "__JobSchedules",
-      documentName: "overrides",
       actorId: actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "JobSchedulePaused",
-        scheduleId: summary.id,
-        pausedUntil
-      },
+      scheduleId: summary.id,
+      pausedUntil,
       metadata: command.metadata ?? {}
-    };
+    });
     await events.append(stream, state.version, [event]);
     return {
       schedule: this.summaryFor(schedule, index, await this.overrideState(tenantId))
@@ -468,22 +434,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       return { schedule: this.summaryFor(schedule, index, state) };
     }
     const stream = jobScheduleOverridesStream(tenantId);
-    const event: NewDomainEvent<JobScheduleEventPayload> = {
+    const event = createJobScheduleOverrideSetEvent({
       id: this.ids.next("evt_"),
       tenantId,
-      stream,
-      type: "JobScheduleOverrideSet",
-      doctype: "__JobSchedules",
-      documentName: "overrides",
       actorId: command.actor.id,
       occurredAt: this.clock.now(),
-      payload: {
-        kind: "JobScheduleOverrideSet",
-        scheduleId: summary.id,
-        enabled: command.enabled
-      },
+      scheduleId: summary.id,
+      enabled: command.enabled,
       metadata: command.metadata ?? {}
-    };
+    });
     await events.append(stream, state.version, [event]);
     return {
       schedule: this.summaryFor(schedule, index, await this.overrideState(tenantId))
