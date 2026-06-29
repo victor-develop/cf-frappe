@@ -1,3 +1,4 @@
+import type { JobRetryPolicy } from "../core/jobs.js";
 import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 
 export interface JobScheduleVisibilitySummary {
@@ -14,6 +15,43 @@ export interface JobScheduleDispatchSummary extends JobScheduleVisibilitySummary
   readonly dynamic: JobScheduleVisibilitySummary["dynamic"] & {
     readonly enabled: boolean;
   };
+}
+
+export interface JobScheduleSummary {
+  readonly id: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly source: "configured" | "runtime";
+  readonly editable: boolean;
+  readonly deleted?: boolean;
+  readonly enabled: boolean;
+  readonly configuredEnabled: boolean;
+  readonly overridden: boolean;
+  readonly overrideEnabled?: boolean;
+  readonly pausedUntil?: string;
+  readonly overrideUpdatedAt?: string;
+  readonly overrideUpdatedBy?: string;
+  readonly overrideable: boolean;
+  readonly registered: boolean;
+  readonly dispatchable: boolean;
+  readonly description?: string;
+  readonly retry?: JobRetryPolicy;
+  readonly delaySeconds?: number;
+  readonly tenantId?: string;
+  readonly dynamic: {
+    readonly enabled: boolean;
+    readonly tenantId: boolean;
+    readonly payload: boolean;
+    readonly metadata: boolean;
+    readonly idempotencyKey: boolean;
+  };
+}
+
+export interface JobScheduleSummaryOverride {
+  readonly enabled?: boolean;
+  readonly pausedUntil?: string;
+  readonly updatedAt: string;
+  readonly updatedBy: string;
 }
 
 export type JobScheduleAccessDecision =
@@ -198,4 +236,70 @@ export function planJobSchedulePauseOverride(options: {
   return options.currentPausedUntil === options.pausedUntil && Date.parse(options.pausedUntil) > Date.parse(options.now)
     ? { status: "noop" }
     : { status: "write" };
+}
+
+export function planJobScheduleSummary(options: {
+  readonly id: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly source: "configured" | "runtime";
+  readonly hasScheduleId: boolean;
+  readonly configuredEnabled: boolean;
+  readonly canOverride: boolean;
+  readonly canDispatch: boolean;
+  readonly registered: boolean;
+  readonly now: string;
+  readonly dynamic: JobScheduleSummary["dynamic"];
+  readonly job?: {
+    readonly description?: string;
+    readonly retry?: JobRetryPolicy;
+  };
+  readonly override?: JobScheduleSummaryOverride;
+  readonly delaySeconds?: number;
+  readonly tenantId?: string;
+}): JobScheduleSummary {
+  const overrideable =
+    options.source === "configured" &&
+    options.canOverride &&
+    options.hasScheduleId &&
+    !options.dynamic.tenantId &&
+    !options.dynamic.enabled;
+  const override = overrideable ? options.override : undefined;
+  const pausedUntil = override?.pausedUntil;
+  const paused = pausedUntil !== undefined && Date.parse(pausedUntil) > Date.parse(options.now);
+  const overrideEnabled = override?.enabled;
+  const baseEnabled = overrideEnabled ?? options.configuredEnabled;
+  const enabled = baseEnabled && !paused;
+  const overridden = overrideEnabled !== undefined || paused;
+  return {
+    id: options.id,
+    cron: options.cron,
+    jobName: options.jobName,
+    source: options.source,
+    editable: options.source === "runtime",
+    enabled,
+    configuredEnabled: options.configuredEnabled,
+    overridden,
+    ...(overrideEnabled === undefined ? {} : { overrideEnabled }),
+    ...(paused ? { pausedUntil } : {}),
+    ...(override === undefined || !overridden
+      ? {}
+      : {
+          overrideUpdatedAt: override.updatedAt,
+          overrideUpdatedBy: override.updatedBy
+        }),
+    overrideable,
+    registered: options.registered,
+    dispatchable:
+      options.registered &&
+      enabled &&
+      options.canDispatch &&
+      !options.dynamic.tenantId &&
+      !options.dynamic.enabled,
+    ...(options.job?.description === undefined ? {} : { description: options.job.description }),
+    ...(options.job?.retry === undefined ? {} : { retry: options.job.retry }),
+    ...(options.delaySeconds === undefined ? {} : { delaySeconds: options.delaySeconds }),
+    ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+    dynamic: options.dynamic
+  };
 }

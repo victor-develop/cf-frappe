@@ -8,6 +8,7 @@ import {
   planJobScheduleOverride,
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
+  planJobScheduleSummary,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 
@@ -267,6 +268,83 @@ describe("job schedule policy", () => {
       now: "2026-01-03T00:00:00.000Z"
     })).toEqual({ status: "write" });
   });
+
+  it("plans registered configured schedule summaries as overrideable and dispatchable", () => {
+    expect(planJobScheduleSummary(summaryOptions({
+      job: { description: "Daily report" },
+      tenantId: "acme"
+    }))).toMatchObject({
+      id: "daily",
+      source: "configured",
+      editable: false,
+      enabled: true,
+      configuredEnabled: true,
+      overridden: false,
+      overrideable: true,
+      registered: true,
+      dispatchable: true,
+      description: "Daily report",
+      tenantId: "acme"
+    });
+  });
+
+  it("plans active pause overrides as disabled summaries with audit metadata", () => {
+    expect(planJobScheduleSummary(summaryOptions({
+      override: {
+        pausedUntil: "2026-01-02T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        updatedBy: "ops@example.com"
+      }
+    }))).toMatchObject({
+      enabled: false,
+      overridden: true,
+      pausedUntil: "2026-01-02T00:00:00.000Z",
+      overrideUpdatedAt: "2026-01-01T00:00:00.000Z",
+      overrideUpdatedBy: "ops@example.com",
+      dispatchable: false
+    });
+  });
+
+  it("ignores expired pause overrides when shaping schedule summaries", () => {
+    const summary = planJobScheduleSummary(summaryOptions({
+      override: {
+        pausedUntil: "2025-12-31T00:00:00.000Z",
+        updatedAt: "2025-12-30T00:00:00.000Z",
+        updatedBy: "ops@example.com"
+      }
+    }));
+
+    expect(summary).toMatchObject({
+      enabled: true,
+      overridden: false,
+      dispatchable: true
+    });
+    expect(summary.pausedUntil).toBeUndefined();
+    expect(summary.overrideUpdatedAt).toBeUndefined();
+    expect(summary.overrideUpdatedBy).toBeUndefined();
+  });
+
+  it("keeps dynamic tenant and enabled schedules non-overrideable and non-dispatchable", () => {
+    expect(planJobScheduleSummary(summaryOptions({
+      dynamic: {
+        tenantId: true,
+        enabled: true,
+        payload: false,
+        metadata: false,
+        idempotencyKey: false
+      },
+      override: {
+        enabled: false,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        updatedBy: "ops@example.com"
+      }
+    }))).toMatchObject({
+      enabled: true,
+      overridden: false,
+      overrideable: false,
+      dispatchable: false
+    });
+  });
 });
 
 function scheduleSummary(overrides: {
@@ -296,4 +374,27 @@ function withoutTenantId<TSummary extends { readonly tenantId?: string }>(
 ): Omit<TSummary, "tenantId"> {
   const { tenantId: _tenantId, ...rest } = summary;
   return rest;
+}
+
+function summaryOptions(overrides: Partial<Parameters<typeof planJobScheduleSummary>[0]> = {}) {
+  return {
+    id: "daily",
+    cron: "0 0 * * *",
+    jobName: "reports.daily",
+    source: "configured" as const,
+    hasScheduleId: true,
+    configuredEnabled: true,
+    canOverride: true,
+    canDispatch: true,
+    registered: true,
+    now: "2026-01-01T00:00:00.000Z",
+    dynamic: {
+      tenantId: false,
+      enabled: false,
+      payload: false,
+      metadata: false,
+      idempotencyKey: false
+    },
+    ...overrides
+  };
 }

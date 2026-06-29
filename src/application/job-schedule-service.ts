@@ -29,10 +29,13 @@ import {
   planJobScheduleEnabledOverride,
   planJobScheduleOverride,
   planJobScheduleOverrideClear,
-  planJobSchedulePauseOverride
+  planJobSchedulePauseOverride,
+  planJobScheduleSummary,
+  type JobScheduleSummary
 } from "./job-schedule-policy.js";
 
 export type { JobScheduleEventPayload } from "./job-schedule-events.js";
+export type { JobScheduleSummary } from "./job-schedule-policy.js";
 
 export type DynamicJobScheduleValue = (...args: never[]) => unknown;
 
@@ -77,36 +80,6 @@ export interface JobScheduleServiceOptions<TSchedule extends JobScheduleDefiniti
 export interface JobScheduleQuery {
   readonly cron?: string;
   readonly jobName?: string;
-}
-
-export interface JobScheduleSummary {
-  readonly id: string;
-  readonly cron: string;
-  readonly jobName: string;
-  readonly source: "configured" | "runtime";
-  readonly editable: boolean;
-  readonly deleted?: boolean;
-  readonly enabled: boolean;
-  readonly configuredEnabled: boolean;
-  readonly overridden: boolean;
-  readonly overrideEnabled?: boolean;
-  readonly pausedUntil?: string;
-  readonly overrideUpdatedAt?: string;
-  readonly overrideUpdatedBy?: string;
-  readonly overrideable: boolean;
-  readonly registered: boolean;
-  readonly dispatchable: boolean;
-  readonly description?: string;
-  readonly retry?: JobRetryPolicy;
-  readonly delaySeconds?: number;
-  readonly tenantId?: string;
-  readonly dynamic: {
-    readonly enabled: boolean;
-    readonly tenantId: boolean;
-    readonly payload: boolean;
-    readonly metadata: boolean;
-    readonly idempotencyKey: boolean;
-  };
 }
 
 export interface JobScheduleDashboard {
@@ -646,51 +619,24 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       metadata: isDynamic(schedule.metadata),
       idempotencyKey: isDynamic(schedule.idempotencyKey)
     };
-    const overrideable =
-      source === "configured" &&
-      this.canOverride() &&
-      schedule.id !== undefined &&
-      !dynamic.tenantId &&
-      !dynamic.enabled;
-    const override = overrideable && tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
-    const pausedUntil = override?.pausedUntil;
-    const paused = pausedUntil !== undefined && pauseIsActive(pausedUntil, this.clock.now());
-    const configuredEnabled = schedule.enabled !== false;
-    const overrideEnabled = override?.enabled;
-    const baseEnabled = overrideEnabled ?? configuredEnabled;
-    const enabled = baseEnabled && !paused;
-    const overridden = overrideEnabled !== undefined || paused;
-    return {
+    const override = tenantId === overrides.tenantId ? overrides.overrides.get(id) : undefined;
+    return planJobScheduleSummary({
       id,
       cron: schedule.cron,
       jobName: schedule.jobName,
       source,
-      editable: source === "runtime",
-      enabled,
-      configuredEnabled,
-      overridden,
-      ...(overrideEnabled === undefined ? {} : { overrideEnabled }),
-      ...(paused ? { pausedUntil } : {}),
-      ...(override === undefined || !overridden
-        ? {}
-        : {
-            overrideUpdatedAt: override.updatedAt,
-            overrideUpdatedBy: override.updatedBy
-          }),
-      overrideable,
+      hasScheduleId: schedule.id !== undefined,
+      configuredEnabled: schedule.enabled !== false,
+      canOverride: this.canOverride(),
+      canDispatch: this.canDispatch(),
       registered,
-      dispatchable:
-        registered &&
-        enabled &&
-        this.canDispatch() &&
-        !dynamic.tenantId &&
-        !dynamic.enabled,
-      ...(job?.description === undefined ? {} : { description: job.description }),
-      ...(job?.retry === undefined ? {} : { retry: job.retry }),
+      now: this.clock.now(),
+      dynamic,
+      ...(job === undefined ? {} : { job }),
+      ...(override === undefined ? {} : { override }),
       ...(schedule.delaySeconds === undefined ? {} : { delaySeconds: schedule.delaySeconds }),
       ...(tenantId === undefined ? {} : { tenantId }),
-      dynamic
-    };
+    });
   }
 
   private requireOverrides(): EventStore {
@@ -911,10 +857,6 @@ function normalizePauseUntil(value: string, now: string): string {
     throw badRequest("Job schedule pauseUntil must be in the future");
   }
   return new Date(timestamp).toISOString();
-}
-
-function pauseIsActive(pausedUntil: string, now: string): boolean {
-  return Date.parse(pausedUntil) > Date.parse(now);
 }
 
 function normalizeDocumentData(value: DocumentData, field: string): DocumentData {
