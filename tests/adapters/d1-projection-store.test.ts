@@ -461,6 +461,35 @@ describe("D1ProjectionStore", () => {
     );
   });
 
+  it("orders rows by system updatedAt without JSON path extraction", async () => {
+    const db = new FakeD1Database([
+      documentRow({
+        name: "D1 Old",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        data: { title: "old" }
+      }),
+      documentRow({
+        name: "D1 New",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+        data: { title: "new" }
+      })
+    ]);
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    const result = await store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      orderBy: "updatedAt",
+      order: "desc"
+    });
+
+    expect(result.data.map((document) => document.name)).toEqual(["D1 New", "D1 Old"]);
+    const [rows] = db.statements;
+    expect(rows?.sql).toContain("ORDER BY updated_at COLLATE BINARY DESC");
+    expect(rows?.sql).not.toContain("json_extract(data_json, '$.updatedAt')");
+    expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
+  });
+
   it("applies advanced scalar operators to D1 rows and counts", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Match", data: { title: "D1 Match", priority: "High", count: 5 } }),
@@ -751,6 +780,9 @@ class FakeD1PreparedStatement {
         const updated = binaryCompare(right.updated_at, left.updated_at);
         return updated !== 0 ? updated : binaryCompare(left.name, right.name);
       });
+    }
+    if (this.sql.includes("ORDER BY updated_at COLLATE BINARY DESC")) {
+      return [...rows].sort((left, right) => binaryCompare(right.updated_at, left.updated_at));
     }
     return rows;
   }

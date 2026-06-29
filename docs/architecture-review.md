@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted D1 projection query planning from projection-store I/O and covered system updatedAt ordering without JSON path extraction.
 - Extracted shared D1 event-reader helpers and covered empty payload-kind filters so event and document stores use one Cloudflare persistence read path.
 - Covered D1 stream and audit payload-kind filtering so Cloudflare persistence queries ignore misleading source event names while preserving them on returned events.
 - Covered notification rule email payload-kind rendering so rule emails keep custom source event names while rendering operator-facing event labels from the domain payload.
