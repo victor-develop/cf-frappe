@@ -155,6 +155,10 @@ export type JobScheduleCapabilityDecision =
   | { readonly status: "enabled" }
   | { readonly status: "not-found"; readonly message: string };
 
+export type JobScheduleLookupDecision =
+  | { readonly status: "found" }
+  | { readonly status: "not-found"; readonly message: string };
+
 export function planJobScheduleAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -175,6 +179,16 @@ export function planJobScheduleAccess(options: {
     };
   }
   return { status: "allow", tenantId };
+}
+
+export function planJobScheduleLookup(options: {
+  readonly scheduleId: string;
+  readonly configuredFound: boolean;
+  readonly runtimeFound: boolean;
+}): JobScheduleLookupDecision {
+  return options.configuredFound || options.runtimeFound
+    ? { status: "found" }
+    : { status: "not-found", message: `Job schedule '${options.scheduleId}' was not found` };
 }
 
 export function planJobScheduleCapability(options: {

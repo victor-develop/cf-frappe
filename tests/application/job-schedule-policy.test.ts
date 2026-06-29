@@ -18,6 +18,7 @@ import {
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
   planJobScheduleEnabledOverride,
+  planJobScheduleLookup,
   planJobScheduleOverride,
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
@@ -71,6 +72,27 @@ describe("job schedule policy", () => {
     expect(planJobScheduleCapability({ capability: "definitions", enabled: false })).toEqual({
       status: "not-found",
       message: "Job schedule definitions are not enabled"
+    });
+  });
+
+  it("plans configured and runtime schedule lookup misses before service error mapping", () => {
+    expect(planJobScheduleLookup({
+      scheduleId: "static-daily",
+      configuredFound: true,
+      runtimeFound: false
+    })).toEqual({ status: "found" });
+    expect(planJobScheduleLookup({
+      scheduleId: "runtime-daily",
+      configuredFound: false,
+      runtimeFound: true
+    })).toEqual({ status: "found" });
+    expect(planJobScheduleLookup({
+      scheduleId: "missing-daily",
+      configuredFound: false,
+      runtimeFound: false
+    })).toEqual({
+      status: "not-found",
+      message: "Job schedule 'missing-daily' was not found"
     });
   });
 

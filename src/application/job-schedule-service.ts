@@ -50,6 +50,7 @@ import {
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
   planJobScheduleEnabledOverride,
+  planJobScheduleLookup,
   planJobScheduleOverride,
   planJobScheduleOverrideClear,
   planJobSchedulePauseOverride,
@@ -544,8 +545,16 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (index < 0) {
       const definitions = await this.definitionState();
       const runtime = runtimeJobScheduleForTenant(definitions, tenantId, scheduleId);
-      if (!runtime) {
-        throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
+      const lookup = planJobScheduleLookup({
+        scheduleId,
+        configuredFound: false,
+        runtimeFound: runtime !== undefined
+      });
+      if (lookup.status === "not-found") {
+        throw notFound(lookup.message, "JOB_SCHEDULE_NOT_FOUND");
+      }
+      if (runtime === undefined) {
+        throw new Error(`Job schedule '${scheduleId}' lookup succeeded without a runtime schedule`);
       }
       const runtimeIndex = runtimeJobScheduleIndex(definitions, tenantId, runtime.id);
       return {
