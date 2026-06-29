@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the kanban policy slice:
+As of the web-view policy slice:
 
-- Vitest files: `219`
-- Vitest cases: `2525`
-- Remaining gap to Frappe static markers: `259`
+- Vitest files: `220`
+- Vitest cases: `2532`
+- Remaining gap to Frappe static markers: `252`
 
 ## Implication
 
