@@ -1,5 +1,7 @@
 import {
   findUserAuthProviderLink,
+  isUserAccountEvent,
+  isUserAccountPayloadKind,
   providerSyncChangesState,
   replayUserAccountAppend,
   userAccountCreatedPayload,
@@ -394,6 +396,18 @@ describe("user account events", () => {
     ]);
   });
 
+  it("narrows user account events by payload kind when event type names are custom", () => {
+    const created = {
+      ...accountCreatedEvent(1),
+      type: "AccessUserProvisioned"
+    };
+
+    expect(isUserAccountPayloadKind("UserAccountCreated")).toBe(true);
+    expect(isUserAccountPayloadKind("DocumentDeleted")).toBe(false);
+    expect(isUserAccountEvent(created)).toBe(true);
+    expect(isUserAccountEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
   it("finds provider links by provider and subject", () => {
     expect(findUserAuthProviderLink([
       baseProviderLink(),
@@ -460,6 +474,22 @@ describe("user account events", () => {
 
 function userAccountPayload(payload: UserAccountEventPayload): UserAccountEventPayload {
   return payload;
+}
+
+function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+  return {
+    id: "evt_other",
+    tenantId: "acme",
+    stream: "acme:Note:NOTE-1",
+    sequence: 1,
+    type,
+    doctype: "Note",
+    documentName: "NOTE-1",
+    actorId: "admin@example.com",
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload,
+    metadata: {}
+  };
 }
 
 function accountCreatedEvent(sequence: number): DomainEvent {

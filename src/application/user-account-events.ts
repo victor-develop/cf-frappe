@@ -1,3 +1,4 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { foldUserAccount, type UserAccountState, type UserAuthProviderLink } from "../core/user-accounts.js";
 import type {
   DocumentData,
@@ -88,6 +89,8 @@ export type UserAccountEventPayload =
       readonly userId: string;
     };
 
+export type UserAccountPayloadKind = UserAccountEventPayload["kind"];
+
 export const USER_ACCOUNT_PAYLOAD_KINDS = Object.freeze([
   "UserAccountCreated",
   "UserAuthProviderLinked",
@@ -102,7 +105,9 @@ export const USER_ACCOUNT_PAYLOAD_KINDS = Object.freeze([
   "UserRolesChanged",
   "UserAccountEnabled",
   "UserAccountDisabled"
-] as const);
+] as const satisfies readonly UserAccountPayloadKind[]);
+
+const USER_ACCOUNT_PAYLOAD_KIND_SET = new Set<string>(USER_ACCOUNT_PAYLOAD_KINDS);
 
 export interface UserPasswordChangedPayloadInput {
   readonly userId: string;
@@ -382,8 +387,16 @@ export function userAccountDocumentName(payload: UserAccountEventPayload): strin
   return payload.userId;
 }
 
-export function userAccountEventType(payload: UserAccountEventPayload): UserAccountEventPayload["kind"] {
+export function userAccountEventType(payload: UserAccountEventPayload): UserAccountPayloadKind {
   return payload.kind;
+}
+
+export function isUserAccountPayloadKind(kind: string): kind is UserAccountPayloadKind {
+  return USER_ACCOUNT_PAYLOAD_KIND_SET.has(kind);
+}
+
+export function isUserAccountEvent(event: DomainEvent): event is DomainEvent<UserAccountEventPayload> {
+  return isUserAccountPayloadKind(domainEventPayloadKind(event));
 }
 
 export function replayUserAccountAppend(
