@@ -23,6 +23,8 @@ import {
 import {
   canInspectJobSchedule,
   planJobScheduleAccess,
+  planJobScheduleDefinitionDelete,
+  planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
   planJobScheduleOverride
 } from "./job-schedule-policy.js";
@@ -277,12 +279,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
       existing,
       command
     );
-    if (configuredScheduleIds(this.schedules).has(schedule.id)) {
-      throw badRequest(`Configured job schedule '${schedule.id}' cannot be edited at runtime`);
-    }
     this.ensureRuntimeCronTrigger(schedule.cron);
-    if (!this.registry.has(schedule.jobName)) {
-      throw badRequest(`Scheduled job '${schedule.jobName}' is not registered`);
+    const saveDecision = planJobScheduleDefinitionSave({
+      scheduleId: schedule.id,
+      jobName: schedule.jobName,
+      configured: configuredScheduleIds(this.schedules).has(schedule.id),
+      registered: this.registry.has(schedule.jobName)
+    });
+    if (saveDecision.status === "reject") {
+      throw badRequest(saveDecision.message);
     }
     const stream = jobScheduleDefinitionsStream();
     const event: NewDomainEvent<JobScheduleEventPayload> = {
@@ -322,14 +327,22 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     command: DeleteJobScheduleDefinitionCommand = {}
   ): Promise<JobScheduleDefinitionResult> {
     const tenantId = this.authorize(actor, command.tenantId);
-    if (configuredScheduleIds(this.schedules).has(scheduleId)) {
-      throw badRequest(`Configured job schedule '${scheduleId}' cannot be deleted at runtime`);
-    }
     const events = this.requireDefinitions();
     const state = await this.definitionState();
     const current = runtimeScheduleForTenant(state, tenantId, scheduleId);
-    if (!current) {
-      throw notFound(`Job schedule '${scheduleId}' was not found`, "JOB_SCHEDULE_NOT_FOUND");
+    const deleteDecision = planJobScheduleDefinitionDelete({
+      scheduleId,
+      configured: configuredScheduleIds(this.schedules).has(scheduleId),
+      exists: current !== undefined
+    });
+    if (deleteDecision.status === "reject") {
+      throw badRequest(deleteDecision.message);
+    }
+    if (deleteDecision.status === "not-found") {
+      throw notFound(deleteDecision.message, "JOB_SCHEDULE_NOT_FOUND");
+    }
+    if (current === undefined) {
+      throw new Error(`Runtime job schedule '${scheduleId}' passed delete policy but was not loaded`);
     }
     const stream = jobScheduleDefinitionsStream();
     const event: NewDomainEvent<JobScheduleEventPayload> = {

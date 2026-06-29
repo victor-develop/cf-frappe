@@ -30,6 +30,15 @@ export type JobScheduleOverrideDecision =
   | { readonly status: "not-found"; readonly message: string }
   | { readonly status: "reject"; readonly message: string };
 
+export type JobScheduleDefinitionSaveDecision =
+  | { readonly status: "save" }
+  | { readonly status: "reject"; readonly message: string };
+
+export type JobScheduleDefinitionDeleteDecision =
+  | { readonly status: "delete" }
+  | { readonly status: "not-found"; readonly message: string }
+  | { readonly status: "reject"; readonly message: string };
+
 export function planJobScheduleAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -118,4 +127,45 @@ export function planJobScheduleOverride(options: {
     return { status: "reject", message: "Job schedule id is required for runtime overrides" };
   }
   return { status: "override" };
+}
+
+export function planJobScheduleDefinitionSave(options: {
+  readonly scheduleId: string;
+  readonly jobName: string;
+  readonly configured: boolean;
+  readonly registered: boolean;
+}): JobScheduleDefinitionSaveDecision {
+  if (options.configured) {
+    return {
+      status: "reject",
+      message: `Configured job schedule '${options.scheduleId}' cannot be edited at runtime`
+    };
+  }
+  if (!options.registered) {
+    return {
+      status: "reject",
+      message: `Scheduled job '${options.jobName}' is not registered`
+    };
+  }
+  return { status: "save" };
+}
+
+export function planJobScheduleDefinitionDelete(options: {
+  readonly scheduleId: string;
+  readonly configured: boolean;
+  readonly exists: boolean;
+}): JobScheduleDefinitionDeleteDecision {
+  if (options.configured) {
+    return {
+      status: "reject",
+      message: `Configured job schedule '${options.scheduleId}' cannot be deleted at runtime`
+    };
+  }
+  if (!options.exists) {
+    return {
+      status: "not-found",
+      message: `Job schedule '${options.scheduleId}' was not found`
+    };
+  }
+  return { status: "delete" };
 }

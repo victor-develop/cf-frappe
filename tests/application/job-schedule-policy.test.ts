@@ -1,6 +1,8 @@
 import {
   canInspectJobSchedule,
   planJobScheduleAccess,
+  planJobScheduleDefinitionDelete,
+  planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
   planJobScheduleOverride,
   SYSTEM_MANAGER_ROLE
@@ -170,6 +172,65 @@ describe("job schedule policy", () => {
       summary: scheduleSummary(),
       hasScheduleId: true
     })).toEqual({ status: "override" });
+  });
+
+  it("plans runtime schedule save rejection for configured ids and unknown jobs", () => {
+    expect(planJobScheduleDefinitionSave({
+      scheduleId: "static-daily",
+      jobName: "reports.daily",
+      configured: true,
+      registered: true
+    })).toEqual({
+      status: "reject",
+      message: "Configured job schedule 'static-daily' cannot be edited at runtime"
+    });
+
+    expect(planJobScheduleDefinitionSave({
+      scheduleId: "runtime-daily",
+      jobName: "missing.job",
+      configured: false,
+      registered: false
+    })).toEqual({
+      status: "reject",
+      message: "Scheduled job 'missing.job' is not registered"
+    });
+  });
+
+  it("allows runtime schedule saves for non-configured registered jobs", () => {
+    expect(planJobScheduleDefinitionSave({
+      scheduleId: "runtime-daily",
+      jobName: "reports.daily",
+      configured: false,
+      registered: true
+    })).toEqual({ status: "save" });
+  });
+
+  it("plans runtime schedule delete rejection for configured and missing ids", () => {
+    expect(planJobScheduleDefinitionDelete({
+      scheduleId: "static-daily",
+      configured: true,
+      exists: true
+    })).toEqual({
+      status: "reject",
+      message: "Configured job schedule 'static-daily' cannot be deleted at runtime"
+    });
+
+    expect(planJobScheduleDefinitionDelete({
+      scheduleId: "runtime-daily",
+      configured: false,
+      exists: false
+    })).toEqual({
+      status: "not-found",
+      message: "Job schedule 'runtime-daily' was not found"
+    });
+  });
+
+  it("allows runtime schedule deletes for existing non-configured ids", () => {
+    expect(planJobScheduleDefinitionDelete({
+      scheduleId: "runtime-daily",
+      configured: false,
+      exists: true
+    })).toEqual({ status: "delete" });
   });
 });
 
