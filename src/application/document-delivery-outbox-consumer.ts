@@ -1,5 +1,5 @@
 import { badRequest, notFound } from "../core/errors.js";
-import { domainEventPayloadKind, hasDomainEventPayloadKind } from "../core/domain-events.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { realtimeEventFromDomainEvent, realtimeUserNotificationsFromDomainEvent } from "../core/realtime.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, TenantId } from "../core/types.js";
@@ -9,14 +9,29 @@ import type {
   DocumentDeliveryOutboxRecord,
   DocumentDeliveryOutboxTarget
 } from "./document-delivery-outbox-service.js";
+import {
+  documentDeliveryOutboxDrainLimit,
+  documentDeliveryOutboxDrainResultJson,
+  documentDeliveryOutboxRecordClaimId,
+  documentDeliveryOutboxRetryAt,
+  documentDeliveryOutboxRetryDelaySeconds,
+  documentDeliveryOutboxSourceFromRecord,
+  parseDocumentDeliveryOutboxDrainJobClaimId,
+  parseDocumentDeliveryOutboxDrainJobLimit,
+  type DocumentDeliveryOutboxDeliveryOutcome,
+  type DocumentDeliveryOutboxDrainResult
+} from "./document-delivery-outbox-consumer-policy.js";
 import type { EmailNotificationDeliveryQueue } from "./realtime.js";
 
-const DEFAULT_DRAIN_LIMIT = 25;
-const MAX_DRAIN_LIMIT = 100;
 const DEFAULT_RETRY_BASE_DELAY_SECONDS = 30;
 const DEFAULT_RETRY_MAX_DELAY_SECONDS = 1_800;
 
 export const DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME = "cf-frappe.document-delivery-outbox.drain";
+
+export type {
+  DocumentDeliveryOutboxDeliveryOutcome,
+  DocumentDeliveryOutboxDrainResult
+} from "./document-delivery-outbox-consumer-policy.js";
 
 export interface DocumentDeliveryOutboxConsumerOutbox {
   claimPending(command: {
@@ -64,23 +79,6 @@ export interface DrainDocumentDeliveryOutboxCommand {
   readonly claimId?: string;
   readonly limit?: number;
   readonly now?: string;
-}
-
-export interface DocumentDeliveryOutboxDeliveryOutcome {
-  readonly outboxId: string;
-  readonly target: DocumentDeliveryOutboxTarget;
-  readonly status: "delivered" | "failed";
-  readonly attempts: number;
-  readonly error?: string;
-  readonly retryAt?: string;
-}
-
-export interface DocumentDeliveryOutboxDrainResult {
-  readonly tenantId: TenantId;
-  readonly claimed: number;
-  readonly delivered: number;
-  readonly failed: number;
-  readonly outcomes: readonly DocumentDeliveryOutboxDeliveryOutcome[];
 }
 
 export interface DocumentDeliveryOutboxDeliveryServices {
@@ -136,11 +134,11 @@ export class DocumentDeliveryOutboxConsumer {
     this.outbox = options.outbox;
     this.deliveries = options.deliveries;
     this.clock = options.clock ?? systemClock;
-    this.retryBaseDelaySeconds = normalizeDelaySeconds(
+    this.retryBaseDelaySeconds = documentDeliveryOutboxRetryDelaySeconds(
       options.retry?.baseDelaySeconds ?? DEFAULT_RETRY_BASE_DELAY_SECONDS,
       "Document delivery outbox retry baseDelaySeconds"
     );
-    this.retryMaxDelaySeconds = normalizeDelaySeconds(
+    this.retryMaxDelaySeconds = documentDeliveryOutboxRetryDelaySeconds(
       options.retry?.maxDelaySeconds ?? DEFAULT_RETRY_MAX_DELAY_SECONDS,
       "Document delivery outbox retry maxDelaySeconds"
     );
@@ -154,7 +152,7 @@ export class DocumentDeliveryOutboxConsumer {
     const claimed = await this.outbox.claimPending({
       tenantId: command.tenantId,
       ...(command.claimId === undefined ? {} : { claimId: command.claimId }),
-      limit: normalizeLimit(command.limit),
+      limit: documentDeliveryOutboxDrainLimit(command.limit),
       now
     });
     const outcomes: DocumentDeliveryOutboxDeliveryOutcome[] = [];
@@ -174,7 +172,7 @@ export class DocumentDeliveryOutboxConsumer {
     record: DocumentDeliveryOutboxRecord,
     now: string
   ): Promise<DocumentDeliveryOutboxDeliveryOutcome> {
-    const claimId = requireClaimId(record);
+    const claimId = documentDeliveryOutboxRecordClaimId(record);
     const handler = this.deliveries[record.target];
     if (handler === undefined) {
       return this.fail(record, claimId, now, `No document delivery handler is configured for target '${record.target}'`);
@@ -208,7 +206,12 @@ export class DocumentDeliveryOutboxConsumer {
     now: string,
     error: string
   ): Promise<DocumentDeliveryOutboxDeliveryOutcome> {
-    const retryAt = retryAtFrom(now, record.attempts, this.retryBaseDelaySeconds, this.retryMaxDelaySeconds);
+    const retryAt = documentDeliveryOutboxRetryAt({
+      now,
+      attempts: record.attempts,
+      baseDelaySeconds: this.retryBaseDelaySeconds,
+      maxDelaySeconds: this.retryMaxDelaySeconds
+    });
     const failed = await this.outbox.markFailed({
       tenantId: record.tenantId,
       outboxId: record.id,
@@ -244,7 +247,7 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
       : {
           notification: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
-              const source = sourceFromOutboxRecord(record);
+              const source = documentDeliveryOutboxSourceFromRecord(record);
               await notifications.recordFromDomainEvent(source.event, source.snapshot);
               return { deliveredBy: "notifications" };
             }
@@ -255,7 +258,7 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
       : {
           realtime: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
-              const source = sourceFromOutboxRecord(record);
+              const source = documentDeliveryOutboxSourceFromRecord(record);
               const published = await Promise.all([
                 realtime.publish(realtimeEventFromDomainEvent(source.event, source.snapshot)),
                 ...realtimeUserNotificationsFromDomainEvent(source.event).map((event) => realtime.publish(event))
@@ -272,7 +275,7 @@ export function createDocumentDeliveryOutboxDeliveryHandlers(
       : {
           email: {
             async deliver(record: DocumentDeliveryOutboxRecord): Promise<DocumentData> {
-              const source = sourceFromOutboxRecord(record);
+              const source = documentDeliveryOutboxSourceFromRecord(record);
               if (
                 emailNotificationDeliveryQueue !== undefined &&
                 emailNotifications.queueFromDomainEvent !== undefined
@@ -322,139 +325,16 @@ export function createDocumentDeliveryOutboxDrainJob<
       if (consumer === undefined) {
         throw notFound("Document delivery outbox consumer is not available");
       }
-      const limit = parseOptionalLimit(payload.limit);
-      const claimId = parseOptionalClaimId(payload.claimId);
+      const limit = parseDocumentDeliveryOutboxDrainJobLimit(payload.limit);
+      const claimId = parseDocumentDeliveryOutboxDrainJobClaimId(payload.claimId);
       const result = await consumer.drain({
         tenantId: tenantId ?? "default",
         ...(limit === undefined ? {} : { limit }),
         ...(claimId === undefined ? {} : { claimId })
       });
-      return drainResultJson(result);
+      return documentDeliveryOutboxDrainResultJson(result);
     }
   };
-}
-
-function drainResultJson(result: DocumentDeliveryOutboxDrainResult): DocumentData {
-  return {
-    tenantId: result.tenantId,
-    claimed: result.claimed,
-    delivered: result.delivered,
-    failed: result.failed,
-    outcomes: result.outcomes.map((outcome) => ({
-      outboxId: outcome.outboxId,
-      target: outcome.target,
-      status: outcome.status,
-      attempts: outcome.attempts,
-      ...(outcome.error === undefined ? {} : { error: outcome.error }),
-      ...(outcome.retryAt === undefined ? {} : { retryAt: outcome.retryAt })
-    }))
-  };
-}
-
-function sourceFromOutboxRecord(record: DocumentDeliveryOutboxRecord): {
-  readonly event: DomainEvent;
-  readonly snapshot: DocumentSnapshot | null;
-} {
-  const event = record.payload.event;
-  if (!isDomainEvent(event)) {
-    throw badRequest(`Document delivery outbox record '${record.id}' does not contain a source domain event`);
-  }
-  const snapshot = record.payload.snapshot;
-  if (snapshot === undefined || snapshot === null) {
-    return { event, snapshot: null };
-  }
-  if (!isDocumentSnapshot(snapshot)) {
-    throw badRequest(`Document delivery outbox record '${record.id}' contains an invalid source snapshot`);
-  }
-  return { event, snapshot };
-}
-
-function isDomainEvent(value: unknown): value is DomainEvent {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.id === "string" &&
-    typeof value.tenantId === "string" &&
-    typeof value.stream === "string" &&
-    typeof value.sequence === "number" &&
-    typeof value.type === "string" &&
-    typeof value.doctype === "string" &&
-    typeof value.documentName === "string" &&
-    typeof value.actorId === "string" &&
-    typeof value.occurredAt === "string" &&
-    hasDomainEventPayloadKind(value) &&
-    isRecord(value.metadata)
-  );
-}
-
-function isDocumentSnapshot(value: unknown): value is DocumentSnapshot {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.tenantId === "string" &&
-    typeof value.doctype === "string" &&
-    typeof value.name === "string" &&
-    typeof value.version === "number" &&
-    typeof value.docstatus === "string" &&
-    isRecord(value.data) &&
-    typeof value.createdAt === "string" &&
-    typeof value.updatedAt === "string"
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function requireClaimId(record: DocumentDeliveryOutboxRecord): string {
-  if (record.claimId === undefined || record.claimId.trim().length === 0) {
-    throw badRequest(`Document delivery outbox record '${record.id}' is not claimed`);
-  }
-  return record.claimId;
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) {
-    return DEFAULT_DRAIN_LIMIT;
-  }
-  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > MAX_DRAIN_LIMIT) {
-    throw badRequest(`Document delivery outbox drain limit must be an integer between 1 and ${MAX_DRAIN_LIMIT}`);
-  }
-  return limit;
-}
-
-function parseOptionalLimit(value: unknown): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number") {
-    throw badRequest("Document delivery outbox drain job limit is invalid");
-  }
-  return normalizeLimit(value);
-}
-
-function parseOptionalClaimId(value: unknown): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw badRequest("Document delivery outbox drain job claimId is invalid");
-  }
-  return value;
-}
-
-function normalizeDelaySeconds(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw badRequest(`${label} must be a positive integer`);
-  }
-  return value;
-}
-
-function retryAtFrom(now: string, attempts: number, baseDelaySeconds: number, maxDelaySeconds: number): string {
-  const delaySeconds = Math.min(maxDelaySeconds, baseDelaySeconds * 2 ** Math.max(0, attempts - 1));
-  return new Date(Date.parse(now) + delaySeconds * 1000).toISOString();
 }
 
 function errorMessage(error: unknown): string {
