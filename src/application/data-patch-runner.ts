@@ -1,13 +1,14 @@
 import type { DataPatchDefinition } from "../core/data-patch.js";
 import {
+  assertRecordedDataPatchAllowsApplySkip,
+  dataPatchApplyClaimDecision,
+  dataPatchRollbackClaimDecision
+} from "./data-patch-claim-policy.js";
+import {
   normalizeDataPatchDefinitions,
   normalizeSingleDataPatchDefinition,
   snapshotDataPatchDefinitions
 } from "./data-patch-definition-policy.js";
-import {
-  assertAppliedDataPatchChecksumMatches,
-  assertDataPatchChecksumMatches
-} from "./data-patch-journal-policy.js";
 import { badRequest, FrameworkError } from "../core/errors.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { JsonValue } from "../core/types.js";
@@ -19,7 +20,6 @@ import type {
   AppliedDataPatch,
   ClaimedRollbackDataPatch,
   DataPatchLog,
-  RecordedDataPatch,
   RolledBackDataPatch
 } from "../ports/data-patch-log.js";
 
@@ -82,7 +82,7 @@ export class DataPatchRunner<TResources = unknown> {
         pending.push(patch);
         continue;
       }
-      assertRecordedPatchAllowsSkip(patch, recorded);
+      assertRecordedDataPatchAllowsApplySkip(patch, recorded);
     }
     return pending;
   }
@@ -96,7 +96,7 @@ export class DataPatchRunner<TResources = unknown> {
     for (const patch of planned) {
       const existing = recordedById.get(patch.id);
       if (existing !== undefined) {
-        skipped.push(assertRecordedPatchAllowsSkip(patch, existing));
+        skipped.push(assertRecordedDataPatchAllowsApplySkip(patch, existing));
         continue;
       }
 
@@ -106,27 +106,11 @@ export class DataPatchRunner<TResources = unknown> {
         claimId: this.ids.next(),
         claimedAt: this.clock.now()
       });
-      if (claim.kind === "applied") {
-        assertChecksumMatches(patch, claim.patch);
-        skipped.push(claim.patch);
-        recordedById.set(claim.patch.id, { ...claim.patch, status: "applied" });
+      const decision = dataPatchApplyClaimDecision(patch, claim);
+      if (decision.action === "skip") {
+        skipped.push(decision.patch);
+        recordedById.set(decision.patch.id, { ...decision.patch, status: "applied" });
         continue;
-      }
-      if (claim.kind === "pending") {
-        assertChecksumValueMatches(patch, claim.patch.checksum);
-        throw new FrameworkError(
-          "DATA_PATCH_PENDING",
-          `Data patch '${patch.id}' is already claimed and has not completed`,
-          { status: 409 }
-        );
-      }
-      if (claim.kind === "failed") {
-        assertChecksumValueMatches(patch, claim.patch.checksum);
-        throw new FrameworkError(
-          "DATA_PATCH_FAILED",
-          `Data patch '${patch.id}' previously failed at '${claim.patch.failedAt}': ${claim.patch.error}`,
-          { status: 409 }
-        );
       }
 
       let result: JsonValue | undefined;
@@ -136,7 +120,7 @@ export class DataPatchRunner<TResources = unknown> {
         await this.log.failDataPatch({
           id: patch.id,
           checksum: patch.checksum,
-          claimId: claim.claim.claimId,
+          claimId: decision.claim.claimId,
           failedAt: this.clock.now(),
           error: errorMessage(error)
         });
@@ -151,7 +135,7 @@ export class DataPatchRunner<TResources = unknown> {
       };
       await this.log.completeDataPatch({
         ...record,
-        claimId: claim.claim.claimId
+        claimId: decision.claim.claimId
       });
       applied.push(record);
       recordedById.set(record.id, { ...record, status: "applied" });
@@ -181,40 +165,13 @@ export class DataPatchRunner<TResources = unknown> {
         claimId: this.ids.next(),
         claimedAt: this.clock.now()
       });
-      if (claim.kind === "rolled_back") {
-        skipped.push(claim.patch);
+      const decision = dataPatchRollbackClaimDecision(patch.id, claim);
+      if (decision.action === "skip") {
+        skipped.push(decision.patch);
         continue;
       }
-      if (claim.kind === "pending") {
-        throw new FrameworkError(
-          "DATA_PATCH_PENDING",
-          `Data patch '${patch.id}' is already claimed and has not completed`,
-          { status: 409 }
-        );
-      }
-      if (claim.kind === "failed") {
-        throw new FrameworkError(
-          "DATA_PATCH_FAILED",
-          `Data patch '${patch.id}' previously failed at '${claim.patch.failedAt}': ${claim.patch.error}`,
-          { status: 409 }
-        );
-      }
-      if (claim.kind === "rollback_pending") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_PENDING",
-          `Data patch '${patch.id}' rollback is already claimed and has not completed`,
-          { status: 409 }
-        );
-      }
-      if (claim.kind === "rollback_failed") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_FAILED",
-          `Data patch '${patch.id}' rollback previously failed at '${claim.patch.rollbackFailedAt}': ${claim.patch.rollbackError}`,
-          { status: 409 }
-        );
-      }
 
-      rolledBack.push(await this.rollbackClaimedPatch(patch, claim.claim));
+      rolledBack.push(await this.rollbackClaimedPatch(patch, decision.claim));
     }
 
     return { rolledBack, skipped };
@@ -275,68 +232,6 @@ export class DataPatchRunner<TResources = unknown> {
     });
     return record;
   }
-}
-
-function patchChecksum<TResources>(patch: DataPatchDefinition<TResources>): string {
-  return patch.checksum;
-}
-
-function assertChecksumMatches<TResources>(patch: DataPatchDefinition<TResources>, applied: AppliedDataPatch): void {
-  assertAppliedDataPatchChecksumMatches(patch.id, patchChecksum(patch), applied.checksum);
-}
-
-function assertRecordedPatchAllowsSkip<TResources>(
-  patch: DataPatchDefinition<TResources>,
-  recorded: RecordedDataPatch
-): AppliedDataPatch {
-  if (recorded.status === "applied") {
-    const applied = appliedPatchFromRecord(recorded);
-    assertChecksumMatches(patch, applied);
-    return applied;
-  }
-  assertChecksumValueMatches(patch, recorded.checksum);
-  if (recorded.status === "pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_PENDING",
-      `Data patch '${patch.id}' is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  if (recorded.status === "rollback_pending") {
-    throw new FrameworkError(
-      "DATA_PATCH_ROLLBACK_PENDING",
-      `Data patch '${patch.id}' rollback is already claimed and has not completed`,
-      { status: 409 }
-    );
-  }
-  if (recorded.status === "rollback_failed") {
-    throw new FrameworkError(
-      "DATA_PATCH_ROLLBACK_FAILED",
-      `Data patch '${patch.id}' rollback previously failed at '${recorded.rollbackFailedAt}': ${recorded.rollbackError}`,
-      { status: 409 }
-    );
-  }
-  if (recorded.status === "rolled_back") {
-    throw new FrameworkError(
-      "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-      `Data patch '${patch.id}' has already been rolled back`,
-      { status: 409 }
-    );
-  }
-  throw new FrameworkError(
-    "DATA_PATCH_FAILED",
-    `Data patch '${patch.id}' previously failed at '${recorded.failedAt}': ${recorded.error}`,
-    { status: 409 }
-  );
-}
-
-function appliedPatchFromRecord(record: RecordedDataPatch & { readonly status: "applied" }): AppliedDataPatch {
-  const { status: _status, ...patch } = record;
-  return patch;
-}
-
-function assertChecksumValueMatches<TResources>(patch: DataPatchDefinition<TResources>, appliedChecksum: string): void {
-  assertDataPatchChecksumMatches(patch.id, patchChecksum(patch), appliedChecksum);
 }
 
 function normalizeResult(result: JsonValue | void, label: string): JsonValue | undefined {
