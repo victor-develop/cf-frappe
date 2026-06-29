@@ -4,6 +4,7 @@ import {
   calendarFilterExpression,
   calendarRunResult,
   defineCalendar,
+  planCalendarReadAccess,
   type DocumentSnapshot
 } from "../../src";
 
@@ -150,6 +151,35 @@ describe("calendar policy", () => {
       hasMore: true,
       events: [event]
     });
+  });
+
+  it("plans calendar read access from calendar roles and DocType readability", () => {
+    const calendar = defineCalendar({
+      ...baseCalendar,
+      roles: ["Event Manager"]
+    });
+
+    expect(
+      planCalendarReadAccess({
+        actor: { id: "manager", roles: ["Event Manager"] },
+        calendar,
+        doctypeReadable: true
+      })
+    ).toEqual({ status: "allow" });
+    expect(
+      planCalendarReadAccess({
+        actor: { id: "manager", roles: ["Event Manager"] },
+        calendar,
+        doctypeReadable: false
+      })
+    ).toEqual({ status: "deny", message: "Actor 'manager' cannot read calendar 'Event Calendar'" });
+    expect(
+      planCalendarReadAccess({
+        actor: { id: "guest", roles: ["Guest"] },
+        calendar,
+        doctypeReadable: true
+      })
+    ).toEqual({ status: "deny", message: "Actor 'guest' cannot read calendar 'Event Calendar'" });
   });
 });
 

@@ -1,8 +1,13 @@
 import { andListFilterExpressions } from "../core/list-view.js";
+import { canReadCalendar } from "../core/calendar.js";
 import type { CalendarDefinition } from "../core/calendar.js";
-import type { DocumentSnapshot, JsonValue, ListFilterExpression } from "../core/types.js";
+import type { Actor, DocumentSnapshot, JsonValue, ListFilterExpression } from "../core/types.js";
 
 export const DEFAULT_CALENDAR_MAX_EVENTS = 100;
+
+export type CalendarReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export interface CalendarRunOptions {
   readonly from?: string;
@@ -31,6 +36,20 @@ export interface CalendarRunResult {
   readonly total: number;
   readonly hasMore: boolean;
   readonly events: readonly CalendarEventResult[];
+}
+
+export function planCalendarReadAccess(options: {
+  readonly actor: Actor;
+  readonly calendar: CalendarDefinition;
+  readonly doctypeReadable: boolean;
+}): CalendarReadAccessDecision {
+  if (!canReadCalendar(options.actor, options.calendar) || !options.doctypeReadable) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot read calendar '${options.calendar.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function calendarEventLimit(requested: number | undefined, maximum: number): number {

@@ -1,5 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
-import { canReadCalendar, type CalendarDefinition } from "../core/calendar.js";
+import type { CalendarDefinition } from "../core/calendar.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
@@ -11,8 +11,10 @@ import {
   calendarRunResult,
   DEFAULT_CALENDAR_MAX_EVENTS,
   type CalendarEventResult,
+  type CalendarReadAccessDecision,
   type CalendarRunOptions,
-  type CalendarRunResult
+  type CalendarRunResult,
+  planCalendarReadAccess
 } from "./calendar-policy.js";
 
 const PAGE_SIZE = 200;
@@ -36,7 +38,7 @@ export class CalendarService {
   async listCalendars(actor: Actor): Promise<readonly CalendarDefinition[]> {
     const readable: CalendarDefinition[] = [];
     for (const calendar of this.registry.listCalendars()) {
-      if (await this.canAccessCalendar(actor, calendar)) {
+      if ((await this.calendarReadAccess(actor, calendar)).status === "allow") {
         readable.push(calendar);
       }
     }
@@ -45,8 +47,9 @@ export class CalendarService {
 
   async getCalendar(actor: Actor, calendarName: string): Promise<CalendarDefinition> {
     const calendar = this.registry.getCalendar(calendarName);
-    if (!(await this.canAccessCalendar(actor, calendar))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read calendar '${calendar.name}'`);
+    const decision = await this.calendarReadAccess(actor, calendar);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return calendar;
   }
@@ -93,16 +96,13 @@ export class CalendarService {
     });
   }
 
-  private async canAccessCalendar(actor: Actor, calendar: CalendarDefinition): Promise<boolean> {
-    if (!canReadCalendar(actor, calendar)) {
-      return false;
-    }
+  private async calendarReadAccess(actor: Actor, calendar: CalendarDefinition): Promise<CalendarReadAccessDecision> {
     try {
       this.queries.getMeta(actor, calendar.doctype);
-      return true;
+      return planCalendarReadAccess({ actor, calendar, doctypeReadable: true });
     } catch (error) {
       if (isPermissionDeniedError(error)) {
-        return false;
+        return planCalendarReadAccess({ actor, calendar, doctypeReadable: false });
       }
       throw error;
     }
