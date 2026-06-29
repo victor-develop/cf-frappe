@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   canExecuteDomainCommandForRoles,
+  documentCreateEventCommand,
   documentCreateValidationIssues,
   documentDeleteEventCommand,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
   documentStatusChangeEventCommand,
+  documentUpdateEventCommand,
   documentUpdateValidationIssues,
   ensureDocumentCreateAvailable,
   ensureDocumentStatus,
@@ -260,6 +262,45 @@ describe("document command policy", () => {
     });
   });
 
+  it("shapes create event commands from policy plans", () => {
+    expect(
+      documentCreateEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentCreatePolicy({ doctype: { name: "Note" }, data: { title: "Hello" } }),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteCreated",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: { kind: "DocumentCreated", data: { title: "Hello" }, docstatus: "draft" },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults create event command metadata", () => {
+    expect(
+      documentCreateEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentCreatePolicy({ doctype: { name: "Note" }, data: { title: "Hello" } })
+      }).metadata
+    ).toEqual({});
+  });
+
   it("plans document update lifecycle events with explicit unset payloads", () => {
     expect(
       planDocumentUpdatePolicy({
@@ -284,6 +325,49 @@ describe("document command policy", () => {
       eventType: "NoteTitleEdited",
       payload: { kind: "DocumentUpdated", patch: { title: "Updated" } }
     });
+  });
+
+  it("shapes update event commands from policy plans", () => {
+    expect(
+      documentUpdateEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentUpdatePolicy({
+          doctype: { name: "Note" },
+          patch: { title: "Updated" },
+          unset: ["body"]
+        }),
+        metadata: { requestId: "req-1" }
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "tenant/acme/document/Note/NOTE-1",
+      type: "NoteUpdated",
+      doctype: "Note",
+      documentName: "NOTE-1",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: { kind: "DocumentUpdated", patch: { title: "Updated" }, unset: ["body"] },
+      metadata: { requestId: "req-1" }
+    });
+  });
+
+  it("defaults update event command metadata", () => {
+    expect(
+      documentUpdateEventCommand({
+        tenantId: "acme",
+        stream: "tenant/acme/document/Note/NOTE-1",
+        doctypeName: "Note",
+        documentName: "NOTE-1",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan: planDocumentUpdatePolicy({ doctype: { name: "Note" }, patch: { title: "Updated" } })
+      }).metadata
+    ).toEqual({});
   });
 
   it("plans field-picked domain command patches with default execution policy", () => {

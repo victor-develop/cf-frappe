@@ -192,6 +192,29 @@ export function planDocumentCreatePolicy(input: {
   };
 }
 
+export function documentCreateEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: Pick<DocumentCreatePolicyPlan, "eventType" | "payload">;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<NewDomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentCreated" }>>, "id" | "sequence"> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: input.plan.payload,
+    metadata: input.metadata ?? {}
+  };
+}
+
 export interface DocumentUpdatePolicyPlan {
   readonly eventType: string;
   readonly payload: Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentUpdated" }>;
@@ -211,6 +234,29 @@ export function planDocumentUpdatePolicy(input: {
       updateEventType: input.doctype.events?.update
     }),
     payload: documentUpdatedPayload(input.patch, input.unset ?? [])
+  };
+}
+
+export function documentUpdateEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly doctypeName: string;
+  readonly documentName: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: Pick<DocumentUpdatePolicyPlan, "eventType" | "payload">;
+  readonly metadata?: DocumentData | undefined;
+}): Omit<NewDomainEvent<Extract<DocumentLifecycleEventPayload, { readonly kind: "DocumentUpdated" }>>, "id" | "sequence"> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: input.doctypeName,
+    documentName: input.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: input.plan.payload,
+    metadata: input.metadata ?? {}
   };
 }
 

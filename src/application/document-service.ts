@@ -49,11 +49,13 @@ import {
   ensureDocumentCreateAvailable,
   mergeSnapshotFromDocument,
   normalizeUnsetFields,
+  documentCreateEventCommand,
   documentDeleteEventCommand,
   documentCreateValidationIssues,
   documentDomainCommandValidationIssues,
   documentMergeDisposition,
   documentStatusChangeEventCommand,
+  documentUpdateEventCommand,
   ensureDomainCommandRoleAccess,
   documentUpdateValidationIssues,
   planDocumentCopyPolicy,
@@ -589,17 +591,16 @@ export class DocumentService implements DocumentCommandExecutor {
       data,
       eventType: command.eventType
     });
-    const event = this.newEvent({
+    const event = this.newEvent(documentCreateEventCommand({
       tenantId,
       stream,
-      type: plan.eventType,
-      doctype: doctype.name,
+      doctypeName: doctype.name,
       documentName: name,
       actorId: command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commitBatch(
       [
         ...uniqueReservationWrites.map((write) => ({
@@ -806,17 +807,16 @@ export class DocumentService implements DocumentCommandExecutor {
       unset,
       eventType: options.command.eventType
     });
-    const event = this.newEvent({
+    const event = this.newEvent(documentUpdateEventCommand({
       tenantId: options.tenantId,
       stream: options.stream,
-      type: plan.eventType,
-      doctype: options.doctype.name,
+      doctypeName: options.doctype.name,
       documentName: options.command.name,
       actorId: options.command.actor.id,
       occurredAt: now,
-      payload: plan.payload,
+      plan,
       metadata: options.command.metadata ?? {}
-    });
+    }));
     const commit = await this.store.commitBatch(
       [
         ...uniqueReservationWrites.map((write) => ({
