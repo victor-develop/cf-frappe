@@ -71,6 +71,9 @@ export function foldUserNotifications(
   const notifications = new Map<string, UserNotificationRecord>();
   const orderedEvents = [...events].sort((left, right) => left.sequence - right.sequence);
   for (const event of orderedEvents) {
+    if (!isUserNotificationEvent(event)) {
+      continue;
+    }
     switch (event.payload.kind) {
       case "UserNotificationRecorded":
         notifications.set(event.payload.notificationId, notificationFromRecordedEvent(event));
@@ -110,7 +113,7 @@ export function foldUserNotifications(
 }
 
 export function notificationFromRecordedEvent(event: DomainEvent): UserNotificationRecord {
-  if (event.payload.kind !== "UserNotificationRecorded") {
+  if (!isUserNotificationRecordedEvent(event)) {
     throw new Error("Expected UserNotificationRecorded event");
   }
   return {
@@ -149,6 +152,12 @@ export function isUserNotificationPayloadKind(kind: string): kind is UserNotific
 
 export function isUserNotificationEvent(event: DomainEvent): event is DomainEvent<UserNotificationEventPayload> {
   return isUserNotificationPayloadKind(domainEventPayloadKind(event));
+}
+
+function isUserNotificationRecordedEvent(
+  event: DomainEvent
+): event is DomainEvent<Extract<UserNotificationEventPayload, { readonly kind: "UserNotificationRecorded" }>> {
+  return domainEventPayloadKind(event) === "UserNotificationRecorded";
 }
 
 export function requireReplayedNotification(

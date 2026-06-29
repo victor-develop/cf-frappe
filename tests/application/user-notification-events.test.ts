@@ -147,6 +147,32 @@ describe("user notification events", () => {
     expect(isUserNotificationEvent(recorded)).toBe(true);
     expect(isUserNotificationEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
   });
+
+  it("folds user notification state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "UserNotificationRecorded");
+    const customTypedRecorded = {
+      ...recordedEvent("evt_assign", 2, {
+        notificationId: "evt_assign:user:support%40example.com",
+        sourceEventId: "evt_assign",
+        documentName: "Alpha Note",
+        occurredAt: "2026-01-01T00:00:00.000Z"
+      }),
+      type: "DeskNotificationCreated"
+    };
+
+    const state = foldUserNotifications("acme", "support@example.com", [
+      misleadingUnrelated,
+      customTypedRecorded
+    ]);
+
+    expect(state.version).toBe(2);
+    expect(requireReplayedNotification(state, "evt_assign:user:support%40example.com")).toMatchObject({
+      id: "evt_assign:user:support%40example.com",
+      sourceEventId: "evt_assign",
+      read: false,
+      dismissed: false
+    });
+  });
 });
 
 function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
