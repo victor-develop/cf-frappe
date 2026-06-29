@@ -1,10 +1,11 @@
 import { badRequest, notFound, permissionDenied } from "../core/errors.js";
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocumentData, type TenantId } from "../core/types.js";
+import { SYSTEM_MANAGER_ROLE, type Actor } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { JobExecutionLogReader, JobExecutionRecord } from "../ports/job-execution-log.js";
 import type { JobMessage } from "../ports/job-queue.js";
 import type { JobDispatcher } from "./job-dispatcher.js";
+import { planJobExecutionRetry, planJobRetryAccess } from "./job-retry-policy.js";
 
 export interface JobRetryServiceOptions<TResources = unknown> {
   readonly executionLog: JobExecutionLogReader;
@@ -36,45 +37,19 @@ export class JobRetryService<TResources = unknown> implements JobRetryPort {
   }
 
   async retry(actor: Actor, idempotencyKey: string): Promise<JobRetryResult> {
-    const tenantId = this.authorize(actor);
-    const original = await this.executionLog.get(idempotencyKey, { tenantId });
+    const access = planJobRetryAccess({ actor, adminRoles: this.adminRoles });
+    if (access.status === "deny") {
+      throw permissionDenied(access.message);
+    }
+    const original = await this.executionLog.get(idempotencyKey, { tenantId: access.tenantId });
     if (!original) {
       throw notFound(`Job execution '${idempotencyKey}' was not found`, "JOB_EXECUTION_NOT_FOUND");
     }
-    if (original.status !== "failed") {
-      throw badRequest("Only failed job executions can be retried");
+    const retry = planJobExecutionRetry({ actor, original, retriedAt: this.clock.now() });
+    if (retry.status === "reject") {
+      throw badRequest(retry.message);
     }
-    if (original.payload === undefined || original.metadata === undefined) {
-      throw badRequest("Job execution cannot be retried because its original message snapshot is missing");
-    }
-    const message = await this.dispatcher.dispatch({
-      tenantId,
-      jobName: original.jobName,
-      payload: original.payload,
-      idempotencyKey: original.idempotencyKey,
-      metadata: retryMetadata(original.metadata, actor, original.runId, this.clock.now())
-    });
+    const message = await this.dispatcher.dispatch(retry.command);
     return { original, message };
   }
-
-  private authorize(actor: Actor): TenantId {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot retry jobs`);
-    }
-    return actor.tenantId ?? DEFAULT_TENANT_ID;
-  }
-}
-
-function retryMetadata(
-  metadata: DocumentData,
-  actor: Actor,
-  runId: string,
-  retriedAt: string
-): DocumentData {
-  return {
-    ...metadata,
-    retriedAt,
-    retriedBy: actor.id,
-    retriedFromRunId: runId
-  };
 }

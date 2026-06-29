@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document share management access slice:
+As of the job retry policy slice:
 
-- Vitest files: `174`
-- Vitest cases: `2043`
-- Remaining gap to Frappe static markers: `741`
+- Vitest files: `175`
+- Vitest cases: `2048`
+- Remaining gap to Frappe static markers: `736`
 
 ## Implication
 
