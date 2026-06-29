@@ -9,9 +9,8 @@ import {
   type TenantId
 } from "../core/types.js";
 import {
-  userAccountDisabledPayload,
   userAccountCreatedPayload,
-  userAccountEnabledPayload,
+  userAccountStatusChangedPayload,
   findUserAuthProviderLink,
   userAccountEvent,
   userAuthProviderChangePayload,
@@ -578,7 +577,7 @@ export class UserAccountService {
       expectedVersion: state.version,
       actorId: command.actor.id,
       metadata: command.metadata,
-      payload: enabled ? userAccountEnabledPayload({ userId }) : userAccountDisabledPayload({ userId })
+      payload: userAccountStatusChangedPayload({ userId, enabled })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }

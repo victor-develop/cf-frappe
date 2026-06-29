@@ -160,6 +160,10 @@ export interface UserAccountStatusPayloadInput {
   readonly userId: string;
 }
 
+export interface UserAccountStatusChangedPayloadInput extends UserAccountStatusPayloadInput {
+  readonly enabled: boolean;
+}
+
 export function userPasswordChangedPayload(
   input: UserPasswordChangedPayloadInput
 ): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordChanged" }> {
@@ -339,6 +343,12 @@ export function userAccountDisabledPayload(
     kind: "UserAccountDisabled",
     userId: input.userId
   };
+}
+
+export function userAccountStatusChangedPayload(
+  input: UserAccountStatusChangedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAccountEnabled" | "UserAccountDisabled" }> {
+  return input.enabled ? userAccountEnabledPayload(input) : userAccountDisabledPayload(input);
 }
 
 export interface UserAccountEventOptions<TPayload extends UserAccountEventPayload> {

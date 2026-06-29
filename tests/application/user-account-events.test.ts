@@ -7,6 +7,7 @@ import {
   userAccountEnabledPayload,
   userAccountDocumentName,
   userAccountEvent,
+  userAccountStatusChangedPayload,
   userAuthProviderChangePayload,
   userAuthProviderCreatedPayloads,
   userAuthProviderLinkedPayload,
@@ -294,6 +295,17 @@ describe("user account events", () => {
       userId: "owner@example.com"
     });
     expect(userAccountPayload(userAccountDisabledPayload({ userId: "owner@example.com" }))).toEqual({
+      kind: "UserAccountDisabled",
+      userId: "owner@example.com"
+    });
+  });
+
+  it("builds account status payloads from enabled state", () => {
+    expect(userAccountPayload(userAccountStatusChangedPayload({ userId: "owner@example.com", enabled: true }))).toEqual({
+      kind: "UserAccountEnabled",
+      userId: "owner@example.com"
+    });
+    expect(userAccountPayload(userAccountStatusChangedPayload({ userId: "owner@example.com", enabled: false }))).toEqual({
       kind: "UserAccountDisabled",
       userId: "owner@example.com"
     });
