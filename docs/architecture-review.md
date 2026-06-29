@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted job-schedule dispatch, override, and definition-edit capability decisions into job-schedule policy so JobScheduleService keeps runner/event-store orchestration and framework error mapping.
 - Extracted job-retry execution lookup decisions into job-retry policy so JobRetryService keeps execution-log reads, retry command dispatch, and framework error mapping.
 - Extracted job-history record lookup decisions into job-history policy so JobHistoryService keeps execution-log reads and framework error mapping.
 - Extracted user-notification record idempotency decisions into user-notification policy so UserNotificationService keeps retry, event append, and replay orchestration.

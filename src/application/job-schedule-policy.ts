@@ -149,6 +149,12 @@ export type JobScheduleOverrideWriteDecision =
   | { readonly status: "write" }
   | { readonly status: "noop" };
 
+export type JobScheduleCapabilityKind = "dispatch" | "overrides" | "definitions";
+
+export type JobScheduleCapabilityDecision =
+  | { readonly status: "enabled" }
+  | { readonly status: "not-found"; readonly message: string };
+
 export function planJobScheduleAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
@@ -169,6 +175,22 @@ export function planJobScheduleAccess(options: {
     };
   }
   return { status: "allow", tenantId };
+}
+
+export function planJobScheduleCapability(options: {
+  readonly capability: JobScheduleCapabilityKind;
+  readonly enabled: boolean;
+}): JobScheduleCapabilityDecision {
+  if (options.enabled) {
+    return { status: "enabled" };
+  }
+  if (options.capability === "dispatch") {
+    return { status: "not-found", message: "Job schedule dispatch is not enabled" };
+  }
+  if (options.capability === "overrides") {
+    return { status: "not-found", message: "Job schedule overrides are not enabled" };
+  }
+  return { status: "not-found", message: "Job schedule definitions are not enabled" };
 }
 
 export function canInspectJobSchedule(

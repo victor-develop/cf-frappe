@@ -45,6 +45,7 @@ import {
   normalizeJobScheduleRuntimeDefinition,
   normalizeJobScheduleText,
   planJobScheduleAccess,
+  planJobScheduleCapability,
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
@@ -184,15 +185,15 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   }
 
   canDispatch(): boolean {
-    return this.runner !== undefined;
+    return planJobScheduleCapability({ capability: "dispatch", enabled: this.runner !== undefined }).status === "enabled";
   }
 
   canOverride(): boolean {
-    return this.events !== undefined;
+    return planJobScheduleCapability({ capability: "overrides", enabled: this.events !== undefined }).status === "enabled";
   }
 
   canEditDefinitions(): boolean {
-    return this.events !== undefined;
+    return planJobScheduleCapability({ capability: "definitions", enabled: this.events !== undefined }).status === "enabled";
   }
 
   async dashboard(actor: Actor, query: JobScheduleQuery = {}): Promise<JobScheduleDashboard> {
@@ -221,8 +222,10 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
 
   async dispatch(actor: Actor, scheduleId: string): Promise<JobScheduleDispatchResult> {
     const tenantId = this.authorize(actor);
-    if (!this.runner) {
-      throw notFound("Job schedule dispatch is not enabled", "JOB_SCHEDULE_NOT_FOUND");
+    const runner = this.runner;
+    const dispatchCapability = planJobScheduleCapability({ capability: "dispatch", enabled: runner !== undefined });
+    if (dispatchCapability.status === "not-found") {
+      throw notFound(dispatchCapability.message, "JOB_SCHEDULE_NOT_FOUND");
     }
     const { schedule, summary } = await this.requireSchedule(scheduleId, tenantId);
     const decision = planJobScheduleDispatch({ scheduleId, tenantId, summary });
@@ -232,7 +235,10 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     if (decision.status === "reject") {
       throw badRequest(decision.message);
     }
-    const message = await this.runner.run(effectiveJobSchedule(schedule, summary) as TSchedule, actor);
+    if (runner === undefined) {
+      throw new Error("Job schedule dispatch passed capability policy without a runner");
+    }
+    const message = await runner.run(effectiveJobSchedule(schedule, summary) as TSchedule, actor);
     return { schedule: summary, message };
   }
 
@@ -571,17 +577,27 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
   }
 
   private requireOverrides(): EventStore {
-    if (!this.events) {
-      throw notFound("Job schedule overrides are not enabled", "JOB_SCHEDULE_NOT_FOUND");
+    const events = this.events;
+    const capability = planJobScheduleCapability({ capability: "overrides", enabled: events !== undefined });
+    if (capability.status === "not-found") {
+      throw notFound(capability.message, "JOB_SCHEDULE_NOT_FOUND");
     }
-    return this.events;
+    if (events === undefined) {
+      throw new Error("Job schedule overrides passed capability policy without an event store");
+    }
+    return events;
   }
 
   private requireDefinitions(): EventStore {
-    if (!this.events) {
-      throw notFound("Job schedule definitions are not enabled", "JOB_SCHEDULE_NOT_FOUND");
+    const events = this.events;
+    const capability = planJobScheduleCapability({ capability: "definitions", enabled: events !== undefined });
+    if (capability.status === "not-found") {
+      throw notFound(capability.message, "JOB_SCHEDULE_NOT_FOUND");
     }
-    return this.events;
+    if (events === undefined) {
+      throw new Error("Job schedule definitions passed capability policy without an event store");
+    }
+    return events;
   }
 
   private async overrideState(tenantId: TenantId): Promise<JobScheduleOverrideState> {

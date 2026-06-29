@@ -13,6 +13,7 @@ import {
   normalizeJobScheduleQuery,
   normalizeJobScheduleRuntimeDefinition,
   planJobScheduleAccess,
+  planJobScheduleCapability,
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
   planJobScheduleDispatch,
@@ -54,6 +55,22 @@ describe("job schedule policy", () => {
     })).toEqual({
       status: "deny",
       message: "Actor 'admin@example.com' cannot inspect job schedules for tenant 'other'"
+    });
+  });
+
+  it("plans schedule capability availability with service error messages", () => {
+    expect(planJobScheduleCapability({ capability: "dispatch", enabled: true })).toEqual({ status: "enabled" });
+    expect(planJobScheduleCapability({ capability: "dispatch", enabled: false })).toEqual({
+      status: "not-found",
+      message: "Job schedule dispatch is not enabled"
+    });
+    expect(planJobScheduleCapability({ capability: "overrides", enabled: false })).toEqual({
+      status: "not-found",
+      message: "Job schedule overrides are not enabled"
+    });
+    expect(planJobScheduleCapability({ capability: "definitions", enabled: false })).toEqual({
+      status: "not-found",
+      message: "Job schedule definitions are not enabled"
     });
   });
 
