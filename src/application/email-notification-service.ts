@@ -3,22 +3,27 @@ import { emailOutboxStream, userAccountsStream } from "../core/streams.js";
 import type { DocumentSnapshot, DomainEvent, NewDomainEvent, NotificationRuleDefinition, TenantId } from "../core/types.js";
 import { foldUserAccount } from "../core/user-accounts.js";
 import { FrameworkError } from "../core/errors.js";
-import type { EmailNotificationEventPayload } from "./email-notification-events.js";
+import {
+  EMAIL_OUTBOX_PAYLOAD_KINDS,
+  claimedDeliveryId,
+  emailNotificationMessageId,
+  foldEmailOutbox,
+  isStaleEmailClaim,
+  requireAppendedEmailOutboxEvent,
+  type EmailNotificationEventPayload,
+  type EmailOutboxRecord,
+  type EmailOutboxRecordEntry,
+  type EmailOutboxState
+} from "./email-notification-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EmailAddress, EmailMessage, EmailSender } from "../ports/email.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
 export type { EmailNotificationAddressPayload, EmailNotificationEventPayload } from "./email-notification-events.js";
+export { emailNotificationMessageId } from "./email-notification-events.js";
 
 const EMAIL_OUTBOX_ACTOR_ID = "system:email-outbox";
-const EMAIL_OUTBOX_PAYLOAD_KINDS = Object.freeze([
-  "EmailNotificationQueued",
-  "EmailNotificationSent",
-  "EmailNotificationDeliveryClaimed",
-  "EmailNotificationFailed",
-  "EmailNotificationSkipped"
-] as const);
 const DEFAULT_EMAIL_DELIVERY_CLAIM_TIMEOUT_SECONDS = 300;
 
 export interface EmailNotificationRuleProvider {
@@ -85,47 +90,6 @@ export type DocumentEmailNotificationQueueResult =
       readonly subject: string;
     }
   | Extract<DocumentEmailNotificationDelivery, { readonly status: "skipped" }>;
-
-interface QueuedEmailMessage {
-  readonly messageId: string;
-  readonly sourceEventId: string;
-  readonly sourceEventType: string;
-  readonly payloadKind: string;
-  readonly ruleName: string;
-  readonly recipientId: string;
-  readonly from: EmailAddress;
-  readonly to: EmailAddress;
-  readonly subject: string;
-  readonly text: string;
-  readonly headers?: Readonly<Record<string, string>>;
-}
-
-interface EmailOutboxRecord extends QueuedEmailMessage {
-  readonly status: "claimed" | "failed" | "queued" | "sent";
-  readonly claimId?: string;
-  readonly claimedAt?: string;
-  readonly providerMessageId?: string;
-  readonly error?: string;
-}
-
-interface SkippedEmailOutboxRecord {
-  readonly messageId: string;
-  readonly status: "skipped";
-  readonly sourceEventId: string;
-  readonly sourceEventType: string;
-  readonly payloadKind: string;
-  readonly ruleName: string;
-  readonly recipientId: string;
-  readonly reason?: string;
-}
-
-type EmailOutboxRecordEntry = EmailOutboxRecord | SkippedEmailOutboxRecord;
-
-interface EmailOutboxState {
-  readonly tenantId: TenantId;
-  readonly version: number;
-  readonly messages: ReadonlyMap<string, EmailOutboxRecordEntry>;
-}
 
 export class EmailNotificationService {
   private readonly events: EventStore;
@@ -358,7 +322,7 @@ export class EmailNotificationService {
     if (record.status === "sent" || record.status === "skipped") {
       return undefined;
     }
-    if (record.status === "claimed" && !isStaleClaim(record, this.clock.now(), this.claimTimeoutMs)) {
+    if (record.status === "claimed" && !isStaleEmailClaim(record, this.clock.now(), this.claimTimeoutMs)) {
       return undefined;
     }
     const claimId = this.ids.next("claim_");
@@ -420,27 +384,6 @@ function isSkippedDelivery(
   return delivery.status === "skipped";
 }
 
-function requireAppendedEmailOutboxEvent(
-  event: DomainEvent | undefined,
-  tenantId: TenantId,
-  messageId: string,
-  payloadKind: EmailNotificationEventPayload["kind"]
-): DomainEvent {
-  if (event === undefined) {
-    throw new Error(
-      `Email outbox append for '${messageId}' in tenant '${tenantId}' did not return '${payloadKind}'`
-    );
-  }
-  return event;
-}
-
-function claimedDeliveryId(record: EmailOutboxRecord, messageId: string): string {
-  if (record.claimId === undefined) {
-    throw new Error(`Claimed email outbox message '${messageId}' has no claim id`);
-  }
-  return record.claimId;
-}
-
 function queueResultFromOutboxRecord(
   record: EmailOutboxRecordEntry
 ): DocumentEmailNotificationQueueResult | undefined {
@@ -489,84 +432,6 @@ export class UserAccountEmailRecipientResolver implements EmailRecipientResolver
   }
 }
 
-export function emailNotificationMessageId(eventId: string, ruleName: string, recipientId: string): string {
-  return `${eventId}:rule:${encodeURIComponent(ruleName)}:email:${encodeURIComponent(recipientId)}`;
-}
-
-function foldEmailOutbox(tenantId: TenantId, events: readonly DomainEvent[]): EmailOutboxState {
-  const messages = new Map<string, EmailOutboxRecordEntry>();
-  let version = 0;
-  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    version = Math.max(version, event.sequence);
-    switch (event.payload.kind) {
-      case "EmailNotificationQueued":
-        messages.set(event.payload.messageId, {
-          messageId: event.payload.messageId,
-          status: "queued",
-          sourceEventId: event.payload.sourceEventId,
-          sourceEventType: event.payload.sourceEventType,
-          payloadKind: event.payload.payloadKind,
-          ruleName: event.payload.ruleName,
-          recipientId: event.payload.recipientId,
-          from: event.payload.from,
-          to: event.payload.to,
-          subject: event.payload.subject,
-          text: event.payload.text,
-          ...(event.payload.headers === undefined ? {} : { headers: event.payload.headers })
-        });
-        break;
-      case "EmailNotificationSent": {
-        const existing = messages.get(event.payload.messageId);
-        if (existing !== undefined && existing.status === "claimed" && existing.claimId === event.payload.claimId) {
-          messages.set(event.payload.messageId, {
-            ...existing,
-            status: "sent",
-            ...(event.payload.providerMessageId === undefined ? {} : { providerMessageId: event.payload.providerMessageId }),
-            ...(existing.error === undefined ? {} : { error: existing.error })
-          });
-        }
-        break;
-      }
-      case "EmailNotificationDeliveryClaimed": {
-        const existing = messages.get(event.payload.messageId);
-        if (existing !== undefined && existing.status !== "skipped" && existing.status !== "sent") {
-          messages.set(event.payload.messageId, {
-            ...existing,
-            status: "claimed",
-            claimId: event.payload.claimId,
-            claimedAt: event.occurredAt
-          });
-        }
-        break;
-      }
-      case "EmailNotificationFailed": {
-        const existing = messages.get(event.payload.messageId);
-        if (existing !== undefined && existing.status === "claimed" && existing.claimId === event.payload.claimId) {
-          messages.set(event.payload.messageId, {
-            ...existing,
-            status: "failed",
-            error: event.payload.error
-          });
-        }
-        break;
-      }
-      case "EmailNotificationSkipped":
-        messages.set(event.payload.messageId, {
-          messageId: event.payload.messageId,
-          status: "skipped",
-          sourceEventId: event.payload.sourceEventId,
-          sourceEventType: event.payload.sourceEventType,
-          payloadKind: event.payload.payloadKind,
-          ruleName: event.payload.ruleName,
-          recipientId: event.payload.recipientId,
-          reason: event.payload.reason
-        });
-        break;
-    }
-  }
-  return { tenantId, version, messages };
-}
-
 function looksLikeEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
@@ -577,15 +442,6 @@ function errorMessage(error: unknown): string {
 
 function isConflict(error: unknown): boolean {
   return error instanceof FrameworkError && error.code === "DOCUMENT_CONFLICT";
-}
-
-function isStaleClaim(record: EmailOutboxRecord, now: string, claimTimeoutMs: number): boolean {
-  if (record.claimedAt === undefined) {
-    return false;
-  }
-  const claimedAt = Date.parse(record.claimedAt);
-  const current = Date.parse(now);
-  return !Number.isNaN(claimedAt) && !Number.isNaN(current) && current - claimedAt >= claimTimeoutMs;
 }
 
 function emailAddressPayload(address: EmailAddress): EmailAddress {
