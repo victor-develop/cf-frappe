@@ -85,6 +85,7 @@ export * from "./application/role-events.js";
 export * from "./application/role-policy.js";
 export * from "./application/role-service.js";
 export * from "./application/saved-report-events.js";
+export * from "./application/saved-report-policy.js";
 export * from "./application/saved-report-service.js";
 export * from "./application/saved-list-filter-events.js";
 export * from "./application/saved-list-filter-service.js";

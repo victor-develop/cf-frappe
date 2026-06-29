@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted saved-report command target decisions and saved-report write projection into saved-report policy so SavedReportService keeps permission checks, stream loading, report definition normalization, event append, and report execution/export orchestration.
 - Extracted custom-field save and disable change decisions into custom-field policy so CustomFieldService keeps registry resolution, validation, event append, and replay orchestration.
 - Extracted field-property save and clear noop decisions into field-property policy so FieldPropertyService keeps metadata resolution, effective DocType projection, event append, and replay orchestration.
 - Extracted workflow save and clear noop decisions into workflow policy so WorkflowService keeps registry resolution, state loading, event append, and replay orchestration.

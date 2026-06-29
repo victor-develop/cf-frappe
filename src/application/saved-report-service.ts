@@ -23,6 +23,12 @@ import {
   type SavedReportDefinition,
   type SavedReportEventPayload
 } from "./saved-report-events.js";
+import {
+  findSavedReport,
+  planSavedReportDelete,
+  planSavedReportSave,
+  projectSavedReportSave
+} from "./saved-report-policy.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -102,7 +108,7 @@ export class SavedReportService {
 
   async get(actor: Actor, doctypeName: string, id: string, tenantId = resolveTenant(actor)): Promise<SavedReport> {
     const doctype = this.readableDoctype(actor, doctypeName);
-    const report = (await this.readAll(tenantId, doctype, actor.id)).find((item) => item.id === id);
+    const report = findSavedReport(await this.readAll(tenantId, doctype, actor.id), id);
     if (!report) {
       throw notFound(`Saved report '${id}' was not found`);
     }
@@ -117,9 +123,10 @@ export class SavedReportService {
       payloadKinds: SAVED_REPORT_PAYLOAD_KINDS
     });
     const current = savedReportsForOwner(foldSavedReports(tenantId, doctype, events), command.actor.id);
-    const existing = command.id ? current.find((report) => report.id === command.id) : undefined;
-    if (command.id && !existing) {
-      throw notFound(`Saved report '${command.id}' was not found`);
+    const existing = command.id === undefined ? undefined : findSavedReport(current, command.id);
+    const decision = planSavedReportSave(existing, command.id);
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
     const label = normalizeSavedReportLabel(command.label);
     const definition = normalizeSavedReportDefinition(doctype, label, command.definition);
@@ -144,16 +151,16 @@ export class SavedReportService {
       metadata: {}
     });
     await this.events.append(stream, savedReportCurrentVersion(events), [event]);
-    return {
+    return projectSavedReportSave({
       tenantId,
       doctype: doctype.name,
       id,
       label,
       ownerId: command.actor.id,
       definition,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    };
+      existing,
+      now
+    });
   }
 
   async delete(command: DeleteSavedReportCommand): Promise<void> {
@@ -163,10 +170,13 @@ export class SavedReportService {
     const events = await this.events.readStream(stream, {
       payloadKinds: SAVED_REPORT_PAYLOAD_KINDS
     });
-    const existing = savedReportsForOwner(foldSavedReports(tenantId, doctype, events), command.actor.id)
-      .find((report) => report.id === command.id);
-    if (!existing) {
-      throw notFound(`Saved report '${command.id}' was not found`);
+    const existing = findSavedReport(
+      savedReportsForOwner(foldSavedReports(tenantId, doctype, events), command.actor.id),
+      command.id
+    );
+    const decision = planSavedReportDelete(existing, command.id);
+    if (decision.status === "missing") {
+      throw notFound(decision.message);
     }
     const now = this.clock.now();
     await this.events.append(stream, savedReportCurrentVersion(events), [
