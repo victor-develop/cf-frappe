@@ -1,10 +1,10 @@
-import { notFound } from "../core/errors.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import type { DocumentData, TenantId } from "../core/types.js";
 import {
   emailNotificationDeliveryIdempotencyKey,
   emailNotificationDeliveryRequiredString,
   emailNotificationDeliveryResultJson,
+  ensureEmailNotificationDeliveryServiceAvailable,
   parseEmailNotificationDeliveryJobMessageId
 } from "./email-notification-job-policy.js";
 import { retryableJobError } from "./job-errors.js";
@@ -94,9 +94,7 @@ export function createEmailNotificationDeliveryJob<
     retry: { maxAttempts: 5, baseDelaySeconds: 30, maxDelaySeconds: 1_800 },
     async handler({ tenantId, payload, resources }) {
       const emailNotifications = resources.emailNotifications;
-      if (emailNotifications === undefined) {
-        throw notFound("Email notification delivery service is not available");
-      }
+      ensureEmailNotificationDeliveryServiceAvailable(emailNotifications);
       const messageId = parseEmailNotificationDeliveryJobMessageId(payload.messageId);
       const delivery = await emailNotifications.deliverOutboxMessage(tenantId ?? "default", messageId);
       if (delivery?.status === "failed") {

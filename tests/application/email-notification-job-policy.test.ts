@@ -2,6 +2,7 @@ import {
   emailNotificationDeliveryIdempotencyKey,
   emailNotificationDeliveryRequiredString,
   emailNotificationDeliveryResultJson,
+  ensureEmailNotificationDeliveryServiceAvailable,
   parseEmailNotificationDeliveryJobMessageId
 } from "../../src/application/email-notification-job-policy.js";
 import type { DocumentEmailNotificationDelivery } from "../../src/application/email-notification-service.js";
@@ -43,6 +44,22 @@ describe("email notification job policy", () => {
     expect(emailNotificationDeliveryIdempotencyKey("job", "acme", "msg-fhepmp5ifx-9eu")).not.toBe(
       emailNotificationDeliveryIdempotencyKey("job", "acme", "msg-sn2vtehoee-x0n")
     );
+  });
+
+  it("guards email notification delivery service availability before job execution", () => {
+    const service = { deliverOutboxMessage: async () => undefined };
+
+    expect(() => ensureEmailNotificationDeliveryServiceAvailable(service)).not.toThrow();
+    expect(() => ensureEmailNotificationDeliveryServiceAvailable(undefined)).toThrow(
+      "Email notification delivery service is not available"
+    );
+    let error: unknown;
+    try {
+      ensureEmailNotificationDeliveryServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
   });
 
   it("shapes missing deliveries as not delivered", () => {

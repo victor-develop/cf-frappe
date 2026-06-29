@@ -1,6 +1,14 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import type { DocumentData } from "../core/types.js";
 import type { DocumentEmailNotificationDelivery } from "./email-notification-service.js";
+
+export function ensureEmailNotificationDeliveryServiceAvailable<T>(
+  emailNotifications: T | undefined
+): asserts emailNotifications is T {
+  if (emailNotifications === undefined) {
+    throw notFound("Email notification delivery service is not available");
+  }
+}
 
 export function emailNotificationDeliveryRequiredString(value: string, label: string): string {
   const normalized = value.trim();
