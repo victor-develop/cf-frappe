@@ -1,5 +1,4 @@
 import type {
-  CoreDocumentEventPayload,
   DocTypeName,
   DocStatus,
   DocumentData,
@@ -8,7 +7,26 @@ import type {
 } from "../core/types.js";
 import { FrameworkError, notFound } from "../core/errors.js";
 
-export type DocumentLifecycleEventPayload = CoreDocumentEventPayload;
+export type DocumentLifecycleEventPayload =
+  | {
+      readonly kind: "DocumentCreated";
+      readonly data: DocumentData;
+      readonly docstatus: DocStatus;
+    }
+  | {
+      readonly kind: "DocumentUpdated";
+      readonly patch: DocumentData;
+      readonly unset?: readonly string[];
+    }
+  | {
+      readonly kind: "DocumentDeleted";
+    }
+  | {
+      readonly kind: "DocumentSubmitted";
+    }
+  | {
+      readonly kind: "DocumentCancelled";
+    };
 
 export const DOCUMENT_LIFECYCLE_PAYLOAD_KINDS = Object.freeze([
   "DocumentCreated",
@@ -140,4 +158,29 @@ export function requireFirstSavedEvent(events: readonly DomainEvent[]): DomainEv
     throw new FrameworkError("BAD_REQUEST", "Event store did not return saved event", { status: 500 });
   }
   return event;
+}
+
+declare module "../core/types.js" {
+  interface DomainEventPayloadMap {
+    readonly DocumentCreated: Extract<
+      DocumentLifecycleEventPayload,
+      { readonly kind: "DocumentCreated" }
+    >;
+    readonly DocumentUpdated: Extract<
+      DocumentLifecycleEventPayload,
+      { readonly kind: "DocumentUpdated" }
+    >;
+    readonly DocumentDeleted: Extract<
+      DocumentLifecycleEventPayload,
+      { readonly kind: "DocumentDeleted" }
+    >;
+    readonly DocumentSubmitted: Extract<
+      DocumentLifecycleEventPayload,
+      { readonly kind: "DocumentSubmitted" }
+    >;
+    readonly DocumentCancelled: Extract<
+      DocumentLifecycleEventPayload,
+      { readonly kind: "DocumentCancelled" }
+    >;
+  }
 }

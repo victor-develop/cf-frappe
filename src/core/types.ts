@@ -307,32 +307,7 @@ export interface DocumentSnapshot<TData extends DocumentData = DocumentData> {
 
 export interface DomainEventPayloadMap {}
 
-type ExtendedDomainEventPayload = DomainEventPayloadMap[keyof DomainEventPayloadMap];
-
-export type DocumentEventPayload =
-  | CoreDocumentEventPayload
-  | ExtendedDomainEventPayload;
-
-export type CoreDocumentEventPayload =
-  | {
-      readonly kind: "DocumentCreated";
-      readonly data: DocumentData;
-      readonly docstatus: DocStatus;
-    }
-  | {
-      readonly kind: "DocumentUpdated";
-      readonly patch: DocumentData;
-      readonly unset?: readonly string[];
-    }
-  | {
-      readonly kind: "DocumentDeleted";
-    }
-  | {
-      readonly kind: "DocumentSubmitted";
-    }
-  | {
-      readonly kind: "DocumentCancelled";
-    };
+export type DocumentEventPayload = DomainEventPayloadMap[keyof DomainEventPayloadMap];
 
 export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> {
   readonly id: string;

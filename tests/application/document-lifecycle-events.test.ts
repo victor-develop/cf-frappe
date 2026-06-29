@@ -12,9 +12,11 @@ import {
   requireSavedEvent,
   snapshotFromCommittedDocumentEvent,
   snapshotFromDocumentCreatedEvent,
+  type DocumentEventPayload,
   type DocumentLifecycleEventPayload,
   type DocumentSnapshot,
-  type DomainEvent
+  type DomainEvent,
+  type DomainEventPayloadMap
 } from "../../src";
 
 describe("document lifecycle events", () => {
@@ -84,6 +86,13 @@ describe("document lifecycle events", () => {
       "DocumentSubmitted",
       "DocumentCancelled"
     ]);
+  });
+
+  it("registers lifecycle payloads through the domain event payload map", () => {
+    expect(lifecycleMapPayload(documentUpdatedPayload({ title: "Mapped" }))).toEqual({
+      kind: "DocumentUpdated",
+      patch: { title: "Mapped" }
+    });
   });
 
   it("projects a document-created event into a document snapshot", () => {
@@ -181,6 +190,17 @@ describe("document lifecycle events", () => {
 });
 
 function lifecyclePayload(payload: DocumentLifecycleEventPayload): DocumentLifecycleEventPayload {
+  return payload;
+}
+
+type DocumentLifecycleMapPayload =
+  | DomainEventPayloadMap["DocumentCreated"]
+  | DomainEventPayloadMap["DocumentUpdated"]
+  | DomainEventPayloadMap["DocumentDeleted"]
+  | DomainEventPayloadMap["DocumentSubmitted"]
+  | DomainEventPayloadMap["DocumentCancelled"];
+
+function lifecycleMapPayload(payload: DocumentLifecycleMapPayload): DocumentEventPayload {
   return payload;
 }
 
