@@ -21,17 +21,16 @@ import {
   type JobScheduleOverrideState,
   type RuntimeJobScheduleRecord
 } from "./job-schedule-events.js";
-import { normalizeJobDocumentData } from "./job-payload-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
-import {
-  MAX_JOB_QUEUE_DELAY_SECONDS,
-  MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH,
-  type JobMessage
-} from "../ports/job-queue.js";
+import { type JobMessage } from "../ports/job-queue.js";
 import {
   canInspectJobSchedule,
+  mergePreservedJobScheduleRuntimeFields,
+  normalizeJobScheduleId,
+  normalizeJobScheduleRuntimeDefinition,
+  normalizeJobScheduleText,
   planJobScheduleAccess,
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
@@ -168,7 +167,7 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     this.adminRoles = options.adminRoles ?? [SYSTEM_MANAGER_ROLE];
     this.runtimeCronTriggers = options.runtimeCronTriggers === undefined
       ? undefined
-      : new Set(options.runtimeCronTriggers.map((cron) => normalizeScheduleText(cron, "cron")));
+      : new Set(options.runtimeCronTriggers.map((cron) => normalizeJobScheduleText(cron, "cron")));
     ensureUniqueScheduleIds(options.schedules);
   }
 
@@ -226,12 +225,22 @@ export class JobScheduleService<TSchedule extends JobScheduleDefinitionForAdmin 
     const state = await this.definitionState();
     const existing = command.id === undefined
       ? undefined
-      : runtimeScheduleForTenant(state, tenantId, normalizeScheduleId(command.id));
-    const schedule = mergePreservedRuntimeFields(
-      normalizeRuntimeSchedule(command, tenantId, command.id ?? this.ids.next("schedule_")),
-      existing,
-      command
-    );
+      : runtimeScheduleForTenant(state, tenantId, normalizeJobScheduleId(command.id));
+    const normalized = normalizeJobScheduleRuntimeDefinition({
+      command,
+      tenantId,
+      generatedId: command.id ?? this.ids.next("schedule_")
+    });
+    const schedule = mergePreservedJobScheduleRuntimeFields({
+      schedule: normalized,
+      ...(existing === undefined ? {} : { existing }),
+      preserve: {
+        ...(command.preserveExistingFields === undefined ? {} : { preserveExistingFields: command.preserveExistingFields }),
+        payloadProvided: command.payload !== undefined,
+        metadataProvided: command.metadata !== undefined,
+        idempotencyKeyProvided: command.idempotencyKey !== undefined
+      }
+    });
     this.ensureRuntimeCronTrigger(schedule.cron);
     const saveDecision = planJobScheduleDefinitionSave({
       scheduleId: schedule.id,
@@ -704,80 +713,8 @@ function effectiveSchedule<TSchedule extends JobScheduleDefinitionForAdmin>(
   };
 }
 
-function normalizeRuntimeSchedule(
-  command: SaveJobScheduleDefinitionCommand,
-  tenantId: TenantId,
-  generatedId: string
-): RuntimeJobScheduleRecord {
-  const id = normalizeScheduleId(generatedId);
-  return {
-    id,
-    cron: normalizeScheduleText(command.cron, "cron"),
-    jobName: normalizeScheduleText(command.jobName, "jobName"),
-    tenantId,
-    enabled: command.enabled ?? true,
-    ...(command.payload === undefined ? {} : { payload: normalizeDocumentData(command.payload, "payload") }),
-    ...(command.metadata === undefined ? {} : { metadata: normalizeDocumentData(command.metadata, "metadata") }),
-    ...(command.idempotencyKey === undefined
-      ? {}
-      : { idempotencyKey: normalizeScheduleIdempotencyKey(command.idempotencyKey) }),
-    ...(command.delaySeconds === undefined ? {} : { delaySeconds: normalizeDelaySeconds(command.delaySeconds) }),
-    updatedAt: "",
-    updatedBy: ""
-  };
-}
-
-function mergePreservedRuntimeFields(
-  schedule: RuntimeJobScheduleRecord,
-  existing: RuntimeJobScheduleRecord | undefined,
-  command: SaveJobScheduleDefinitionCommand
-): RuntimeJobScheduleRecord {
-  if (!command.preserveExistingFields || existing === undefined) {
-    return schedule;
-  }
-  return {
-    ...schedule,
-    ...(command.payload === undefined && existing.payload !== undefined ? { payload: existing.payload } : {}),
-    ...(command.metadata === undefined && existing.metadata !== undefined ? { metadata: existing.metadata } : {}),
-    ...(command.idempotencyKey === undefined && existing.idempotencyKey !== undefined
-      ? { idempotencyKey: existing.idempotencyKey }
-      : {})
-  };
-}
-
-function normalizeScheduleId(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    throw badRequest("Job schedule id is required");
-  }
-  return normalized;
-}
-
-function normalizeScheduleText(value: string, field: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    throw badRequest(`Job schedule ${field} is required`);
-  }
-  return normalized;
-}
-
-function normalizeScheduleIdempotencyKey(value: string): string {
-  const normalized = normalizeScheduleText(value, "idempotencyKey");
-  if (normalized.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
-    throw badRequest(`Job schedule idempotencyKey must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`);
-  }
-  return normalized;
-}
-
-function normalizeDelaySeconds(value: number): number {
-  if (!Number.isInteger(value) || value < 0 || value > MAX_JOB_QUEUE_DELAY_SECONDS) {
-    throw badRequest(`delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
-  }
-  return value;
-}
-
 function normalizePauseUntil(value: string, now: string): string {
-  const normalized = normalizeScheduleText(value, "pauseUntil");
+  const normalized = normalizeJobScheduleText(value, "pauseUntil");
   const timestamp = Date.parse(normalized);
   if (!Number.isFinite(timestamp)) {
     throw badRequest("Job schedule pauseUntil must be a valid timestamp");
@@ -786,8 +723,4 @@ function normalizePauseUntil(value: string, now: string): string {
     throw badRequest("Job schedule pauseUntil must be in the future");
   }
   return new Date(timestamp).toISOString();
-}
-
-function normalizeDocumentData(value: DocumentData, field: string): DocumentData {
-  return normalizeJobDocumentData(value, `Job schedule ${field}`);
 }

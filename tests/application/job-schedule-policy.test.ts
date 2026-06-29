@@ -1,5 +1,7 @@
 import {
   canInspectJobSchedule,
+  mergePreservedJobScheduleRuntimeFields,
+  normalizeJobScheduleRuntimeDefinition,
   planJobScheduleAccess,
   planJobScheduleDefinitionDelete,
   planJobScheduleDefinitionSave,
@@ -345,6 +347,87 @@ describe("job schedule policy", () => {
       dispatchable: false
     });
   });
+
+  it("normalizes runtime schedule definitions from save commands", () => {
+    expect(normalizeJobScheduleRuntimeDefinition({
+      tenantId: "acme",
+      generatedId: " runtime-daily ",
+      command: {
+        cron: " 0 0 * * * ",
+        jobName: " reports.daily ",
+        payload: { scope: "daily" },
+        metadata: { owner: "ops" },
+        idempotencyKey: " daily-acme ",
+        delaySeconds: 30
+      }
+    })).toEqual({
+      id: "runtime-daily",
+      cron: "0 0 * * *",
+      jobName: "reports.daily",
+      tenantId: "acme",
+      enabled: true,
+      payload: { scope: "daily" },
+      metadata: { owner: "ops" },
+      idempotencyKey: "daily-acme",
+      delaySeconds: 30,
+      updatedAt: "",
+      updatedBy: ""
+    });
+  });
+
+  it("preserves selected existing runtime fields only when command fields are omitted", () => {
+    expect(mergePreservedJobScheduleRuntimeFields({
+      schedule: runtimeSchedule({
+        payload: { scope: "new" }
+      }),
+      existing: runtimeSchedule({
+        payload: { scope: "old" },
+        metadata: { owner: "ops" },
+        idempotencyKey: "old-key"
+      }),
+      preserve: {
+        preserveExistingFields: true,
+        payloadProvided: true,
+        metadataProvided: false,
+        idempotencyKeyProvided: false
+      }
+    })).toMatchObject({
+      payload: { scope: "new" },
+      metadata: { owner: "ops" },
+      idempotencyKey: "old-key"
+    });
+  });
+
+  it("rejects invalid runtime schedule definition command fields", () => {
+    expect(() => normalizeJobScheduleRuntimeDefinition({
+      tenantId: "acme",
+      generatedId: " ",
+      command: {
+        cron: "0 0 * * *",
+        jobName: "reports.daily"
+      }
+    })).toThrow("Job schedule id is required");
+
+    expect(() => normalizeJobScheduleRuntimeDefinition({
+      tenantId: "acme",
+      generatedId: "daily",
+      command: {
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        delaySeconds: 86_401
+      }
+    })).toThrow("delaySeconds must be an integer between 0 and 86400");
+
+    expect(() => normalizeJobScheduleRuntimeDefinition({
+      tenantId: "acme",
+      generatedId: "daily",
+      command: {
+        cron: "0 0 * * *",
+        jobName: "reports.daily",
+        payload: [] as never
+      }
+    })).toThrow("Job schedule payload must be a JSON object");
+  });
 });
 
 function scheduleSummary(overrides: {
@@ -395,6 +478,19 @@ function summaryOptions(overrides: Partial<Parameters<typeof planJobScheduleSumm
       metadata: false,
       idempotencyKey: false
     },
+    ...overrides
+  };
+}
+
+function runtimeSchedule(overrides: Partial<ReturnType<typeof normalizeJobScheduleRuntimeDefinition>> = {}) {
+  return {
+    id: "runtime-daily",
+    cron: "0 0 * * *",
+    jobName: "reports.daily",
+    tenantId: "acme",
+    enabled: true,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    updatedBy: "admin@example.com",
     ...overrides
   };
 }

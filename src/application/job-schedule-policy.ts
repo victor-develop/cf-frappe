@@ -1,5 +1,12 @@
 import type { JobRetryPolicy } from "../core/jobs.js";
-import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
+import { badRequest } from "../core/errors.js";
+import { DEFAULT_TENANT_ID, type Actor, type DocumentData, type TenantId } from "../core/types.js";
+import {
+  MAX_JOB_QUEUE_DELAY_SECONDS,
+  MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH
+} from "../ports/job-queue.js";
+import { normalizeJobDocumentData } from "./job-payload-policy.js";
+import type { RuntimeJobScheduleRecord } from "./job-schedule-events.js";
 
 export interface JobScheduleVisibilitySummary {
   readonly tenantId?: string;
@@ -52,6 +59,24 @@ export interface JobScheduleSummaryOverride {
   readonly pausedUntil?: string;
   readonly updatedAt: string;
   readonly updatedBy: string;
+}
+
+export interface JobScheduleRuntimeDefinitionInput {
+  readonly id?: string;
+  readonly cron: string;
+  readonly jobName: string;
+  readonly enabled?: boolean;
+  readonly payload?: DocumentData;
+  readonly metadata?: DocumentData;
+  readonly idempotencyKey?: string;
+  readonly delaySeconds?: number;
+}
+
+export interface JobScheduleRuntimeDefinitionPreserveOptions {
+  readonly preserveExistingFields?: boolean;
+  readonly payloadProvided: boolean;
+  readonly metadataProvided: boolean;
+  readonly idempotencyKeyProvided: boolean;
 }
 
 export type JobScheduleAccessDecision =
@@ -302,4 +327,86 @@ export function planJobScheduleSummary(options: {
     ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
     dynamic: options.dynamic
   };
+}
+
+export function normalizeJobScheduleRuntimeDefinition(options: {
+  readonly command: JobScheduleRuntimeDefinitionInput;
+  readonly tenantId: TenantId;
+  readonly generatedId: string;
+}): RuntimeJobScheduleRecord {
+  const id = normalizeJobScheduleId(options.generatedId);
+  return {
+    id,
+    cron: normalizeJobScheduleText(options.command.cron, "cron"),
+    jobName: normalizeJobScheduleText(options.command.jobName, "jobName"),
+    tenantId: options.tenantId,
+    enabled: options.command.enabled ?? true,
+    ...(options.command.payload === undefined
+      ? {}
+      : { payload: normalizeJobDocumentData(options.command.payload, "Job schedule payload") }),
+    ...(options.command.metadata === undefined
+      ? {}
+      : { metadata: normalizeJobDocumentData(options.command.metadata, "Job schedule metadata") }),
+    ...(options.command.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: normalizeJobScheduleIdempotencyKey(options.command.idempotencyKey) }),
+    ...(options.command.delaySeconds === undefined
+      ? {}
+      : { delaySeconds: normalizeJobScheduleDelaySeconds(options.command.delaySeconds) }),
+    updatedAt: "",
+    updatedBy: ""
+  };
+}
+
+export function mergePreservedJobScheduleRuntimeFields(options: {
+  readonly schedule: RuntimeJobScheduleRecord;
+  readonly existing?: RuntimeJobScheduleRecord;
+  readonly preserve: JobScheduleRuntimeDefinitionPreserveOptions;
+}): RuntimeJobScheduleRecord {
+  if (!options.preserve.preserveExistingFields || options.existing === undefined) {
+    return options.schedule;
+  }
+  return {
+    ...options.schedule,
+    ...(!options.preserve.payloadProvided && options.existing.payload !== undefined
+      ? { payload: options.existing.payload }
+      : {}),
+    ...(!options.preserve.metadataProvided && options.existing.metadata !== undefined
+      ? { metadata: options.existing.metadata }
+      : {}),
+    ...(!options.preserve.idempotencyKeyProvided && options.existing.idempotencyKey !== undefined
+      ? { idempotencyKey: options.existing.idempotencyKey }
+      : {})
+  };
+}
+
+export function normalizeJobScheduleId(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw badRequest("Job schedule id is required");
+  }
+  return normalized;
+}
+
+export function normalizeJobScheduleText(value: string, field: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw badRequest(`Job schedule ${field} is required`);
+  }
+  return normalized;
+}
+
+export function normalizeJobScheduleIdempotencyKey(value: string): string {
+  const normalized = normalizeJobScheduleText(value, "idempotencyKey");
+  if (normalized.length > MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH) {
+    throw badRequest(`Job schedule idempotencyKey must be at most ${MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH} characters`);
+  }
+  return normalized;
+}
+
+export function normalizeJobScheduleDelaySeconds(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_JOB_QUEUE_DELAY_SECONDS) {
+    throw badRequest(`delaySeconds must be an integer between 0 and ${MAX_JOB_QUEUE_DELAY_SECONDS}`);
+  }
+  return value;
 }

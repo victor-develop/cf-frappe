@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the job schedule event factory slice:
+As of the job schedule runtime definition command shaping slice:
 
 - Vitest files: `178`
-- Vitest cases: `2077`
-- Remaining gap to Frappe static markers: `707`
+- Vitest cases: `2080`
+- Remaining gap to Frappe static markers: `704`
 
 ## Implication
 
