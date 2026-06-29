@@ -74,7 +74,7 @@ export function notificationRuleEvent<TPayload extends NotificationRuleEventPayl
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: options.payload.kind,
+    type: notificationRuleEventType(options.payload),
     doctype: "__NotificationRules",
     documentName: notificationRuleDocumentName(options.payload),
     actorId: options.actor.id,
@@ -82,6 +82,12 @@ export function notificationRuleEvent<TPayload extends NotificationRuleEventPayl
     payload: options.payload,
     metadata: options.metadata ?? {}
   };
+}
+
+export function notificationRuleEventType(
+  payload: NotificationRuleEventPayload
+): NotificationRuleEventPayload["kind"] {
+  return payload.kind;
 }
 
 export function notificationRuleDocumentName(payload: NotificationRuleEventPayload): string {

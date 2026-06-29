@@ -3,6 +3,7 @@ import {
   notificationRuleClearedPayload,
   notificationRuleDocumentName,
   notificationRuleEvent,
+  notificationRuleEventType,
   notificationRuleEventsVisibleAt,
   notificationRuleNameForPayload,
   notificationRuleSavedPayload,
@@ -24,6 +25,19 @@ const rule: NotificationRuleDefinition = {
 };
 
 describe("notification rule events", () => {
+  it("derives notification rule event types from payload identity", () => {
+    expect(notificationRuleEventType({
+      kind: "NotificationRuleSaved",
+      doctypeName: "Note",
+      rule
+    })).toBe("NotificationRuleSaved");
+    expect(notificationRuleEventType({
+      kind: "NotificationRuleCleared",
+      doctypeName: "Note",
+      ruleName: "Managers on updates"
+    })).toBe("NotificationRuleCleared");
+  });
+
   it("builds saved notification rule payloads", () => {
     expect(notificationRulePayload(notificationRuleSavedPayload({
       doctypeName: "Note",
