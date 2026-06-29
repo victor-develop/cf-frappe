@@ -1,5 +1,13 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldAssignmentRules, type AssignmentRuleState } from "../core/assignment-rules.js";
+import {
+  ASSIGNMENT_RULE_STATE_PAYLOAD_KINDS,
+  assignmentRuleStateEventType,
+  foldAssignmentRules,
+  isAssignmentRuleStatePayloadKind,
+  type AssignmentRuleState,
+  type AssignmentRuleStateEventPayload,
+  type AssignmentRuleStatePayloadKind
+} from "../core/assignment-rules.js";
 import type {
   Actor,
   AssignmentRuleDefinition,
@@ -11,26 +19,11 @@ import type {
   TenantId
 } from "../core/types.js";
 
-export type AssignmentRuleEventPayload =
-  | {
-      readonly kind: "AssignmentRuleSaved";
-      readonly doctypeName: DocTypeName;
-      readonly rule: AssignmentRuleDefinition;
-    }
-  | {
-      readonly kind: "AssignmentRuleCleared";
-      readonly doctypeName: DocTypeName;
-      readonly ruleName: string;
-    };
+export type AssignmentRuleEventPayload = AssignmentRuleStateEventPayload;
 
-export type AssignmentRulePayloadKind = AssignmentRuleEventPayload["kind"];
+export type AssignmentRulePayloadKind = AssignmentRuleStatePayloadKind;
 
-export const ASSIGNMENT_RULE_PAYLOAD_KINDS = Object.freeze([
-  "AssignmentRuleSaved",
-  "AssignmentRuleCleared"
-] as const satisfies readonly AssignmentRulePayloadKind[]);
-
-const ASSIGNMENT_RULE_PAYLOAD_KIND_SET = new Set<string>(ASSIGNMENT_RULE_PAYLOAD_KINDS);
+export const ASSIGNMENT_RULE_PAYLOAD_KINDS = ASSIGNMENT_RULE_STATE_PAYLOAD_KINDS;
 
 export interface AssignmentRuleSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -108,11 +101,11 @@ export function assignmentRuleEvent<TPayload extends AssignmentRuleEventPayload>
 }
 
 export function assignmentRuleEventType(payload: AssignmentRuleEventPayload): AssignmentRulePayloadKind {
-  return payload.kind;
+  return assignmentRuleStateEventType(payload);
 }
 
 export function isAssignmentRulePayloadKind(kind: string): kind is AssignmentRulePayloadKind {
-  return ASSIGNMENT_RULE_PAYLOAD_KIND_SET.has(kind);
+  return isAssignmentRuleStatePayloadKind(kind);
 }
 
 export function isAssignmentRuleEvent(event: DomainEvent): event is DomainEvent<AssignmentRuleEventPayload> {

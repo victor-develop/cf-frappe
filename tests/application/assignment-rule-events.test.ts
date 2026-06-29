@@ -119,6 +119,19 @@ describe("assignment rule events", () => {
     expect(replayed).toMatchObject({ tenantId: "acme", doctypeName: "Ticket", version: 2, rules: [] });
   });
 
+  it("folds assignment rule state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "AssignmentRuleSaved");
+    const customTypedSaved = {
+      ...savedEvent(2, rule),
+      type: "TicketAutoAssignmentConfigured"
+    };
+
+    const state = foldAssignmentRules("acme", "Ticket", [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.rules.map((entry) => entry.rule.name)).toEqual(["High priority triage"]);
+  });
+
   it("filters assignment rule events by occurrence time for delivery-time reads", () => {
     const events = [
       savedEvent(1, rule, "2026-01-01T00:00:00.000Z"),

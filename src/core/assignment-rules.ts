@@ -5,6 +5,7 @@ import type {
   AssignmentRuleAssigneeDefinition,
   AssignmentRuleDefinition,
   AssignmentRuleEventKind,
+  DocTypeName,
   DocTypeDefinition,
   DocumentData,
   DocumentSnapshot,
@@ -20,6 +21,27 @@ export const ASSIGNMENT_RULE_EVENT_KINDS = Object.freeze([
   "WorkflowTransitioned",
   "DomainCommandApplied"
 ] as const satisfies readonly AssignmentRuleEventKind[]);
+
+export type AssignmentRuleStatePayloadKind = "AssignmentRuleSaved" | "AssignmentRuleCleared";
+
+export type AssignmentRuleStateEventPayload =
+  | {
+      readonly kind: "AssignmentRuleSaved";
+      readonly doctypeName: DocTypeName;
+      readonly rule: AssignmentRuleDefinition;
+    }
+  | {
+      readonly kind: "AssignmentRuleCleared";
+      readonly doctypeName: DocTypeName;
+      readonly ruleName: string;
+    };
+
+export const ASSIGNMENT_RULE_STATE_PAYLOAD_KINDS = Object.freeze([
+  "AssignmentRuleSaved",
+  "AssignmentRuleCleared"
+] as const satisfies readonly AssignmentRuleStatePayloadKind[]);
+
+const ASSIGNMENT_RULE_STATE_PAYLOAD_KIND_SET = new Set<string>(ASSIGNMENT_RULE_STATE_PAYLOAD_KINDS);
 
 export interface AssignmentRuleEvaluationContext {
   readonly event: DomainEvent;
@@ -57,7 +79,7 @@ export function foldAssignmentRules(
   const rules = new Map<string, AssignmentRuleEntry>();
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    if (event.payload.kind !== "AssignmentRuleSaved" && event.payload.kind !== "AssignmentRuleCleared") {
+    if (!isAssignmentRuleStateEvent(event)) {
       continue;
     }
     version = Math.max(version, event.sequence);
@@ -85,6 +107,20 @@ export function foldAssignmentRules(
     version,
     rules: Object.freeze([...rules.values()].sort((left, right) => left.rule.name.localeCompare(right.rule.name)))
   });
+}
+
+export function assignmentRuleStateEventType(payload: AssignmentRuleStateEventPayload): AssignmentRuleStatePayloadKind {
+  return payload.kind;
+}
+
+export function isAssignmentRuleStatePayloadKind(kind: string): kind is AssignmentRuleStatePayloadKind {
+  return ASSIGNMENT_RULE_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isAssignmentRuleStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: AssignmentRuleStateEventPayload } {
+  return isAssignmentRuleStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function normalizeAssignmentRules(

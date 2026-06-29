@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized assignment-rule state event payload-kind matching through core assignment-rule helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized document-lifecycle event payload-kind matching through domain events so lifecycle snapshot helpers can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized document-delivery outbox event payload-kind matching through domain events so delivery outbox replay selectors can rely on bounded event helpers instead of inline source payload-kind reads.
 - Centralized job-schedule event payload-kind matching through domain events so runtime schedule definition and override stream selectors can rely on bounded event helpers instead of inline source payload-kind reads.
