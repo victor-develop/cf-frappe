@@ -20,6 +20,7 @@ import {
   roleDescriptionChangedPayload,
   roleEventType,
   roleStatusChangedPayload,
+  ROLE_PAYLOAD_KINDS,
   type RoleEventPayload
 } from "./role-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -159,7 +160,9 @@ export class RoleService {
   }
 
   private async stateFor(tenantId: TenantId): Promise<RoleCatalogState> {
-    return foldRoleCatalog(tenantId, await this.events.readStream(roleCatalogStream(tenantId)));
+    return foldRoleCatalog(tenantId, await this.events.readStream(roleCatalogStream(tenantId), {
+      payloadKinds: ROLE_PAYLOAD_KINDS
+    }));
   }
 
   private async appendAndFold<TPayload extends RoleEventPayload>(
@@ -186,7 +189,10 @@ export class RoleService {
     const saved = await this.events.append(stream, state.version, [event]);
     return foldRoleCatalog(
       state.tenantId,
-      [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
+      [...(await this.events.readStream(stream, {
+        maxSequence: state.version,
+        payloadKinds: ROLE_PAYLOAD_KINDS
+      })), ...saved]
     );
   }
 
