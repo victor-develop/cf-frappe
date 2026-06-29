@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user-permission policy slice:
+As of the role policy slice:
 
-- Vitest files: `210`
-- Vitest cases: `2470`
-- Remaining gap to Frappe static markers: `314`
+- Vitest files: `211`
+- Vitest cases: `2475`
+- Remaining gap to Frappe static markers: `309`
 
 ## Implication
 

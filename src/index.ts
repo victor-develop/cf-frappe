@@ -70,6 +70,7 @@ export * from "./application/realtime.js";
 export * from "./application/report-policy.js";
 export * from "./application/report-service.js";
 export * from "./application/role-events.js";
+export * from "./application/role-policy.js";
 export * from "./application/role-service.js";
 export * from "./application/saved-report-events.js";
 export * from "./application/saved-report-service.js";

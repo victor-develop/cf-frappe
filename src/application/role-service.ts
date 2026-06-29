@@ -1,14 +1,11 @@
-import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   foldRoleCatalog,
   normalizeRoleDescription,
-  normalizeRoleName,
   type RoleCatalogState,
   type RoleRecord
 } from "../core/roles.js";
 import { roleCatalogStream } from "../core/streams.js";
 import {
-  DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocumentData,
@@ -23,6 +20,13 @@ import {
   ROLE_PAYLOAD_KINDS,
   type RoleEventPayload
 } from "./role-events.js";
+import {
+  authorizeRoleAdministration,
+  ensureRoleDoesNotExist,
+  ensureRoleExpectedVersion,
+  existingRole,
+  normalizeRequiredRoleName
+} from "./role-policy.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -77,31 +81,26 @@ export class RoleService {
   }
 
   async list(actor: Actor, tenantId?: TenantId): Promise<RoleCatalogState> {
-    this.authorizeAdministration(actor, tenantId);
-    return this.stateFor(resolveActorTenant(actor, tenantId));
+    return this.stateFor(this.authorizeAdministration(actor, tenantId));
   }
 
   async get(actor: Actor, role: string, tenantId?: TenantId): Promise<RoleRecord> {
-    this.authorizeAdministration(actor, tenantId);
-    const state = await this.stateFor(resolveActorTenant(actor, tenantId));
+    const resolvedTenantId = this.authorizeAdministration(actor, tenantId);
+    const state = await this.stateFor(resolvedTenantId);
     return existingRole(state, normalizeRequiredRoleName(role));
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizeRoleAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async create(command: CreateRoleCommand): Promise<RoleCatalogState> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const role = normalizeRequiredRoleName(command.role);
     const description = normalizeRoleDescription(command.description);
     const state = await this.stateFor(tenantId);
-    ensureExpectedVersion(state, command.expectedVersion);
-    if (state.roles.some((existing) => existing.name === role)) {
-      throw conflict(`Role '${role}' already exists`);
-    }
+    ensureRoleExpectedVersion(state, command.expectedVersion);
+    ensureRoleDoesNotExist(state, role);
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
@@ -114,12 +113,11 @@ export class RoleService {
   }
 
   async changeDescription(command: ChangeRoleDescriptionCommand): Promise<RoleCatalogState> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const role = normalizeRequiredRoleName(command.role);
     const description = normalizeRoleDescription(command.description);
     const state = await this.stateFor(tenantId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureRoleExpectedVersion(state, command.expectedVersion);
     const existing = existingRole(state, role);
     if (existing.description === description) {
       return state;
@@ -143,11 +141,10 @@ export class RoleService {
   }
 
   private async changeEnabled(command: SetRoleEnabledCommand, enabled: boolean): Promise<RoleCatalogState> {
-    this.ensureAdmin(command.actor);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const role = normalizeRequiredRoleName(command.role);
     const state = await this.stateFor(tenantId);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureRoleExpectedVersion(state, command.expectedVersion);
     const existing = existingRole(state, role);
     if (existing.enabled === enabled) {
       return state;
@@ -196,43 +193,4 @@ export class RoleService {
     );
   }
 
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage roles`);
-    }
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage roles for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function existingRole(state: RoleCatalogState, role: string): RoleRecord {
-  const existing = state.roles.find((item) => item.name === role);
-  if (!existing) {
-    throw notFound(`Role '${role}' was not found`);
-  }
-  return existing;
-}
-
-function normalizeRequiredRoleName(role: string): string {
-  const normalized = normalizeRoleName(role);
-  if (normalized.length === 0) {
-    throw badRequest("Role name is required");
-  }
-  if (normalized.includes("/")) {
-    throw badRequest("Role name cannot contain '/'");
-  }
-  return normalized;
-}
-
-function ensureExpectedVersion(state: RoleCatalogState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected role catalog at version ${expectedVersion}, found ${state.version}`);
-  }
 }
