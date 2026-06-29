@@ -9,7 +9,14 @@ import {
   type NewDomainEvent,
   type TenantId
 } from "../core/types.js";
-import type { UserAccountEventPayload } from "./user-account-events.js";
+import {
+  userAccountDisabledPayload,
+  userAccountEnabledPayload,
+  userPasswordChangedPayload,
+  userPasswordResetCompletedPayload,
+  userRolesChangedPayload,
+  type UserAccountEventPayload
+} from "./user-account-events.js";
 import {
   foldUserAccount,
   normalizeUserRoles,
@@ -242,11 +249,10 @@ export class UserAccountService {
       documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
-      payload: {
-        kind: "UserPasswordChanged",
+      payload: userPasswordChangedPayload({
         userId,
         passwordHash
-      }
+      })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }
@@ -270,11 +276,10 @@ export class UserAccountService {
       documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
-      payload: {
-        kind: "UserRolesChanged",
+      payload: userRolesChangedPayload({
         userId,
         roles
-      }
+      })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }
@@ -471,11 +476,10 @@ export class UserAccountService {
       documentName: userId,
       actorId: RECOVERY_ACTOR_ID,
       metadata: command.metadata,
-      payload: {
-        kind: "UserPasswordResetCompleted",
+      payload: userPasswordResetCompletedPayload({
         userId,
         passwordHash
-      }
+      })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }
@@ -592,10 +596,7 @@ export class UserAccountService {
       documentName: userId,
       actorId: command.actor.id,
       metadata: command.metadata,
-      payload: {
-        kind: enabled ? "UserAccountEnabled" : "UserAccountDisabled",
-        userId
-      }
+      payload: enabled ? userAccountEnabledPayload({ userId }) : userAccountDisabledPayload({ userId })
     });
     return this.refold(tenantId, userId, state.version, saved);
   }

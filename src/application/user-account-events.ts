@@ -79,6 +79,68 @@ export type UserAccountEventPayload =
       readonly userId: string;
     };
 
+export interface UserPasswordChangedPayloadInput {
+  readonly userId: string;
+  readonly passwordHash: string;
+}
+
+export interface UserRolesChangedPayloadInput {
+  readonly userId: string;
+  readonly roles: readonly string[];
+}
+
+export interface UserAccountStatusPayloadInput {
+  readonly userId: string;
+}
+
+export function userPasswordChangedPayload(
+  input: UserPasswordChangedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordChanged" }> {
+  return {
+    kind: "UserPasswordChanged",
+    userId: input.userId,
+    passwordHash: input.passwordHash
+  };
+}
+
+export function userPasswordResetCompletedPayload(
+  input: UserPasswordChangedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordResetCompleted" }> {
+  return {
+    kind: "UserPasswordResetCompleted",
+    userId: input.userId,
+    passwordHash: input.passwordHash
+  };
+}
+
+export function userRolesChangedPayload(
+  input: UserRolesChangedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserRolesChanged" }> {
+  return {
+    kind: "UserRolesChanged",
+    userId: input.userId,
+    roles: input.roles
+  };
+}
+
+export function userAccountEnabledPayload(
+  input: UserAccountStatusPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAccountEnabled" }> {
+  return {
+    kind: "UserAccountEnabled",
+    userId: input.userId
+  };
+}
+
+export function userAccountDisabledPayload(
+  input: UserAccountStatusPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserAccountDisabled" }> {
+  return {
+    kind: "UserAccountDisabled",
+    userId: input.userId
+  };
+}
+
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
     readonly UserAccountCreated: Extract<

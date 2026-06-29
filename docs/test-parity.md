@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the user profile payload helper slice:
+As of the user account password/roles/status payload helper slice:
 
-- Vitest files: `192`
-- Vitest cases: `2149`
-- Remaining gap to Frappe static markers: `635`
+- Vitest files: `193`
+- Vitest cases: `2153`
+- Remaining gap to Frappe static markers: `631`
 
 ## Implication
 
