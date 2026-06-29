@@ -37,6 +37,12 @@ export interface AssignmentRuleClearedPayloadInput {
   readonly ruleName: string;
 }
 
+export interface AssignmentRuleEnabledPayloadInput {
+  readonly doctypeName: DocTypeName;
+  readonly rule: AssignmentRuleDefinition;
+  readonly enabled: boolean;
+}
+
 export function assignmentRuleSavedPayload(
   input: AssignmentRuleSavedPayloadInput
 ): Extract<AssignmentRuleEventPayload, { readonly kind: "AssignmentRuleSaved" }> {
@@ -55,6 +61,18 @@ export function assignmentRuleClearedPayload(
     doctypeName: input.doctypeName,
     ruleName: input.ruleName
   };
+}
+
+export function assignmentRuleEnabledPayload(
+  input: AssignmentRuleEnabledPayloadInput
+): Extract<AssignmentRuleEventPayload, { readonly kind: "AssignmentRuleSaved" }> {
+  return assignmentRuleSavedPayload({
+    doctypeName: input.doctypeName,
+    rule: {
+      ...input.rule,
+      enabled: input.enabled
+    }
+  });
 }
 
 export interface AssignmentRuleEventOptions<TPayload extends AssignmentRuleEventPayload> {

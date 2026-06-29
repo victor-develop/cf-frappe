@@ -1,6 +1,7 @@
 import {
   assignmentRuleClearedPayload,
   assignmentRuleDocumentName,
+  assignmentRuleEnabledPayload,
   assignmentRuleEvent,
   assignmentRuleEventsVisibleAt,
   assignmentRuleNameForPayload,
@@ -43,6 +44,18 @@ describe("assignment rule events", () => {
       kind: "AssignmentRuleCleared",
       doctypeName: "Ticket",
       ruleName: "High priority triage"
+    });
+  });
+
+  it("builds saved assignment rule payloads with enabled overrides", () => {
+    expect(assignmentRulePayload(assignmentRuleEnabledPayload({
+      doctypeName: "Ticket",
+      rule,
+      enabled: false
+    }))).toEqual({
+      kind: "AssignmentRuleSaved",
+      doctypeName: "Ticket",
+      rule: { ...rule, enabled: false }
     });
   });
 

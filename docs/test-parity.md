@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the naming-series event command policy slice:
+As of the assignment-rule enabled-payload policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2305`
-- Remaining gap to Frappe static markers: `479`
+- Vitest cases: `2306`
+- Remaining gap to Frappe static markers: `478`
 
 ## Implication
 

@@ -19,6 +19,7 @@ import {
 } from "../core/types.js";
 import {
   assignmentRuleClearedPayload,
+  assignmentRuleEnabledPayload,
   assignmentRuleEvent,
   assignmentRuleEventsVisibleAt,
   assignmentRuleSavedPayload,
@@ -248,14 +249,11 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     return this.appendAndFold(state, {
       actor: command.actor,
       metadata: command.metadata,
-      payload: {
-        kind: "AssignmentRuleSaved",
+      payload: assignmentRuleEnabledPayload({
         doctypeName: doctype.name,
-        rule: {
-          ...existing.rule,
-          enabled: command.enabled
-        }
-      }
+        rule: existing.rule,
+        enabled: command.enabled
+      })
     });
   }
 
