@@ -16,6 +16,7 @@ import {
   userAccountEvent,
   userAuthProviderChangePayload,
   userAuthProviderCreatedPayloads,
+  userAuthProviderPayloadInput,
   userEmailVerificationDeliveryFailedPayload,
   userEmailVerificationRequestedPayload,
   userEmailVerifiedPayload,
@@ -368,7 +369,7 @@ export class UserAccountService {
       await this.validateRoles(tenantId, roles);
     }
     const link = findUserAuthProviderLink(state.providers, provider, subject);
-    const providerPayloadInput = {
+    const providerPayload = userAuthProviderPayloadInput({
       userId,
       provider,
       subject,
@@ -376,8 +377,8 @@ export class UserAccountService {
       ...(roles === undefined ? {} : { roles }),
       ...(command.enabled === undefined ? {} : { enabled: command.enabled }),
       ...(verifiedPatch === undefined ? {} : { emailVerifiedAt: verifiedPatch })
-    };
-    const payload = userAuthProviderChangePayload(providerPayloadInput, link);
+    });
+    const payload = userAuthProviderChangePayload(providerPayload, link);
     if (link !== undefined && !providerSyncChangesState(state, link, payload)) {
       return publicUserAccount(state);
     }

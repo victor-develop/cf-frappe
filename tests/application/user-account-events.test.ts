@@ -10,6 +10,7 @@ import {
   userAuthProviderChangePayload,
   userAuthProviderCreatedPayloads,
   userAuthProviderLinkedPayload,
+  userAuthProviderPayloadInput,
   userAuthProviderSyncedPayload,
   userEmailVerificationDeliveryFailedPayload,
   userEmailVerificationRequestedPayload,
@@ -153,6 +154,54 @@ describe("user account events", () => {
       userId: "owner@example.com",
       provider: "google",
       subject: "sub_123"
+    });
+  });
+
+  it("shapes provider payload input with only identity fields when optional values are absent", () => {
+    expect(userAuthProviderPayloadInput({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    })).toEqual({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123"
+    });
+  });
+
+  it("preserves provider payload input values that intentionally clear or disable state", () => {
+    expect(userAuthProviderPayloadInput({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      enabled: false,
+      emailVerifiedAt: null
+    })).toEqual({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      enabled: false,
+      emailVerifiedAt: null
+    });
+  });
+
+  it("shapes complete provider payload input for link and sync event construction", () => {
+    expect(userAuthProviderPayloadInput({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["System Manager", "User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
+    })).toEqual({
+      userId: "owner@example.com",
+      provider: "google",
+      subject: "sub_123",
+      email: "owner@example.com",
+      roles: ["System Manager", "User"],
+      enabled: true,
+      emailVerifiedAt: "2026-01-01T00:00:00.000Z"
     });
   });
 

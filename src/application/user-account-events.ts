@@ -214,6 +214,18 @@ export function userAuthProviderSyncedPayload(
   };
 }
 
+export function userAuthProviderPayloadInput(input: UserAuthProviderPayloadInput): UserAuthProviderPayloadInput {
+  return {
+    userId: input.userId,
+    provider: input.provider,
+    subject: input.subject,
+    ...(input.email === undefined ? {} : { email: input.email }),
+    ...(input.roles === undefined ? {} : { roles: input.roles }),
+    ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+    ...(input.emailVerifiedAt === undefined ? {} : { emailVerifiedAt: input.emailVerifiedAt })
+  };
+}
+
 export function userAuthProviderCreatedPayloads(
   input: UserAuthProviderCreatedPayloadsInput
 ): readonly [
