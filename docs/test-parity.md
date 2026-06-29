@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the document delivery outbox consumer policy slice:
+As of the field-property override normalization policy slice:
 
 - Vitest files: `229`
-- Vitest cases: `2601`
-- Remaining gap to Frappe static markers: `183`
+- Vitest cases: `2607`
+- Remaining gap to Frappe static markers: `177`
 
 ## Implication
 

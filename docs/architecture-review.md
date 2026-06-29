@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted field-property override normalization, conditional-expression rebound, JSON default-value cloning, and event document-name selection into field-property policy so FieldPropertyService keeps authorization, metadata lookup, event append, and fold orchestration.
 - Extracted document delivery outbox consumer failure-message normalization and queued-email message-id selection into consumer policy so the consumer keeps delivery/outbox orchestration while policy owns retry metadata and queueable-delivery selection.
 - Extracted job queue delay option planning, idempotency-key guarding, JSON payload snapshotting, and handler-result normalization into job payload policy so JobDispatcher keeps only registry, envelope, clock/id, and queue orchestration.
 - Extracted shared document-conflict classification from document delivery outbox, user notification, email notification, user account, and document naming-series retry flows into application concurrency policy and covered framework, structural, and unrelated error cases directly.
