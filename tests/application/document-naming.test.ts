@@ -4,6 +4,7 @@ import {
   defineDocType,
   deterministicIds,
   ensureCreateNameAllowed,
+  namingSeriesEventCommand,
   namingSeriesCurrentValue,
   planNamingSeriesEvent,
   renderNamingSeries,
@@ -100,6 +101,64 @@ describe("document naming", () => {
       eventType: "NamingSeriesAdvanced",
       documentName: "Ticket:TICK-.####",
       payload: { kind: "DocumentUpdated", patch: { current: 2 } },
+      metadata: { target_doctype: "Ticket" }
+    });
+  });
+
+  it("shapes naming series start event commands from event plans", () => {
+    const plan = planNamingSeriesEvent({
+      doctypeName: "Ticket",
+      pattern: "TICK-.####",
+      next: 1,
+      existing: null
+    });
+
+    expect(
+      namingSeriesEventCommand({
+        tenantId: "acme",
+        stream: "acme:__NamingSeries:Ticket%3ATICK-%2E%23%23%23%23",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "acme:__NamingSeries:Ticket%3ATICK-%2E%23%23%23%23",
+      type: "NamingSeriesStarted",
+      doctype: "__NamingSeries",
+      documentName: "Ticket:TICK-.####",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: plan.payload,
+      metadata: { target_doctype: "Ticket" }
+    });
+  });
+
+  it("shapes naming series advance event commands from event plans", () => {
+    const plan = planNamingSeriesEvent({
+      doctypeName: "Ticket",
+      pattern: "TICK-.####",
+      next: 2,
+      existing: namingSeriesSnapshot(1)
+    });
+
+    expect(
+      namingSeriesEventCommand({
+        tenantId: "acme",
+        stream: "acme:__NamingSeries:Ticket%3ATICK-%2E%23%23%23%23",
+        actorId: "user@example.com",
+        occurredAt: "2026-06-28T02:00:00.000Z",
+        plan
+      })
+    ).toEqual({
+      tenantId: "acme",
+      stream: "acme:__NamingSeries:Ticket%3ATICK-%2E%23%23%23%23",
+      type: "NamingSeriesAdvanced",
+      doctype: "__NamingSeries",
+      documentName: "Ticket:TICK-.####",
+      actorId: "user@example.com",
+      occurredAt: "2026-06-28T02:00:00.000Z",
+      payload: plan.payload,
       metadata: { target_doctype: "Ticket" }
     });
   });

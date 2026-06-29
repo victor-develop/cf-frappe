@@ -1,5 +1,5 @@
 import { FrameworkError, validationFailed } from "../core/errors.js";
-import type { DocTypeDefinition, DocumentData, DocumentSnapshot } from "../core/types.js";
+import type { DocTypeDefinition, DocumentData, DocumentSnapshot, NewDomainEvent } from "../core/types.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import {
   documentCreatedPayload,
@@ -85,5 +85,25 @@ export function planNamingSeriesEvent(input: {
       ? documentUpdatedPayload({ current: input.next })
       : documentCreatedPayload({ doctype: input.doctypeName, pattern: input.pattern, current: input.next }, "draft"),
     metadata: { target_doctype: input.doctypeName }
+  };
+}
+
+export function namingSeriesEventCommand(input: {
+  readonly tenantId: string;
+  readonly stream: string;
+  readonly actorId: string;
+  readonly occurredAt: string;
+  readonly plan: NamingSeriesEventPlan;
+}): Omit<NewDomainEvent<NamingSeriesEventPlan["payload"]>, "id" | "sequence"> {
+  return {
+    tenantId: input.tenantId,
+    stream: input.stream,
+    type: input.plan.eventType,
+    doctype: NAMING_SERIES_DOCTYPE,
+    documentName: input.plan.documentName,
+    actorId: input.actorId,
+    occurredAt: input.occurredAt,
+    payload: input.plan.payload,
+    metadata: input.plan.metadata
   };
 }

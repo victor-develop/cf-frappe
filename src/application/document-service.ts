@@ -97,7 +97,7 @@ import {
 import {
   ensureCreateNameAllowed,
   namingSeriesCurrentValue,
-  NAMING_SERIES_DOCTYPE,
+  namingSeriesEventCommand,
   planNamingSeriesEvent,
   renderNamingSeries,
   resolveDocumentName
@@ -1824,17 +1824,13 @@ export class DocumentService implements DocumentCommandExecutor {
         next,
         existing
       });
-      const event = this.newEvent({
+      const event = this.newEvent(namingSeriesEventCommand({
         tenantId: context.tenantId,
         stream,
-        type: eventPlan.eventType,
-        doctype: NAMING_SERIES_DOCTYPE,
-        documentName: eventPlan.documentName,
         actorId: context.actor.id,
         occurredAt: context.now,
-        payload: eventPlan.payload,
-        metadata: eventPlan.metadata
-      });
+        plan: eventPlan
+      }));
       try {
         await this.store.commit(stream, existing?.version ?? 0, [event], (savedEvents) => {
           const saved = requireFirstSavedEvent(savedEvents);
