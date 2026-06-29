@@ -5,6 +5,7 @@ import {
   fieldPropertyEventType,
   fieldPropertyOverrideClearedPayload,
   fieldPropertyOverrideSavedPayload,
+  foldFieldPropertyOverrides,
   isFieldPropertyEvent,
   type DomainEvent,
   type FieldPropertyEventPayload
@@ -79,6 +80,25 @@ describe("field property events", () => {
 
     expect(isFieldPropertyEvent(saved)).toBe(true);
     expect(isFieldPropertyEvent(event({ kind: "DocumentDeleted" }))).toBe(false);
+  });
+
+  it("folds field-property state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = event({ kind: "DocumentDeleted" }, "FieldPropertyOverrideSaved");
+    const customTypedSaved = {
+      ...event(fieldPropertyOverrideSavedPayload({
+        doctypeName: "Note",
+        fieldName: "priority",
+        overrides: { label: "Urgency" }
+      }), "NotePriorityPresentationChanged"),
+      sequence: 2
+    };
+
+    const state = foldFieldPropertyOverrides("acme", "Note", [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.fields.map((entry) => [entry.fieldName, entry.overrides])).toEqual([
+      ["priority", { label: "Urgency" }]
+    ]);
   });
 });
 

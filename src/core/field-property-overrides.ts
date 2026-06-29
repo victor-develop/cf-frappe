@@ -1,12 +1,38 @@
 import { FrameworkError } from "./errors.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import { defineDocType, validateDocumentData } from "./schema.js";
 import type {
+  DocTypeName,
   DocTypeDefinition,
   DomainEvent,
   FieldDefinition,
   FieldPropertyOverrides,
   TenantId
 } from "./types.js";
+
+export type FieldPropertyOverrideStatePayloadKind =
+  | "FieldPropertyOverrideSaved"
+  | "FieldPropertyOverrideCleared";
+
+export type FieldPropertyOverrideStateEventPayload =
+  | {
+      readonly kind: "FieldPropertyOverrideSaved";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
+      readonly overrides: FieldPropertyOverrides;
+    }
+  | {
+      readonly kind: "FieldPropertyOverrideCleared";
+      readonly doctypeName: DocTypeName;
+      readonly fieldName: string;
+    };
+
+export const FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KINDS = Object.freeze([
+  "FieldPropertyOverrideSaved",
+  "FieldPropertyOverrideCleared"
+] as const satisfies readonly FieldPropertyOverrideStatePayloadKind[]);
+
+const FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KIND_SET = new Set<string>(FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KINDS);
 
 export interface FieldPropertyOverrideEntry {
   readonly tenantId: TenantId;
@@ -32,7 +58,7 @@ export function foldFieldPropertyOverrides(
   const fields = new Map<string, FieldPropertyOverrideEntry>();
   let version = 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
-    if (event.payload.kind !== "FieldPropertyOverrideSaved" && event.payload.kind !== "FieldPropertyOverrideCleared") {
+    if (!isFieldPropertyOverrideStateEvent(event)) {
       continue;
     }
     version = Math.max(version, event.sequence);
@@ -59,6 +85,24 @@ export function foldFieldPropertyOverrides(
     version,
     fields: Object.freeze([...fields.values()].sort((left, right) => left.fieldName.localeCompare(right.fieldName)))
   });
+}
+
+export function fieldPropertyOverrideStateEventType(
+  payload: FieldPropertyOverrideStateEventPayload
+): FieldPropertyOverrideStatePayloadKind {
+  return payload.kind;
+}
+
+export function isFieldPropertyOverrideStatePayloadKind(
+  kind: string
+): kind is FieldPropertyOverrideStatePayloadKind {
+  return FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isFieldPropertyOverrideStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: FieldPropertyOverrideStateEventPayload } {
+  return isFieldPropertyOverrideStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function applyFieldPropertyOverridesToDocType(

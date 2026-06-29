@@ -1,27 +1,18 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import {
+  FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KINDS,
+  fieldPropertyOverrideStateEventType,
+  isFieldPropertyOverrideStatePayloadKind,
+  type FieldPropertyOverrideStateEventPayload,
+  type FieldPropertyOverrideStatePayloadKind
+} from "../core/field-property-overrides.js";
 import type { DocTypeName, DomainEvent, FieldPropertyOverrides } from "../core/types.js";
 
-export type FieldPropertyEventPayload =
-  | {
-      readonly kind: "FieldPropertyOverrideSaved";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-      readonly overrides: FieldPropertyOverrides;
-    }
-  | {
-      readonly kind: "FieldPropertyOverrideCleared";
-      readonly doctypeName: DocTypeName;
-      readonly fieldName: string;
-    };
+export type FieldPropertyEventPayload = FieldPropertyOverrideStateEventPayload;
 
-export type FieldPropertyPayloadKind = FieldPropertyEventPayload["kind"];
+export type FieldPropertyPayloadKind = FieldPropertyOverrideStatePayloadKind;
 
-export const FIELD_PROPERTY_PAYLOAD_KINDS = Object.freeze([
-  "FieldPropertyOverrideSaved",
-  "FieldPropertyOverrideCleared"
-] as const satisfies readonly FieldPropertyPayloadKind[]);
-
-const FIELD_PROPERTY_PAYLOAD_KIND_SET = new Set<string>(FIELD_PROPERTY_PAYLOAD_KINDS);
+export const FIELD_PROPERTY_PAYLOAD_KINDS = FIELD_PROPERTY_OVERRIDE_STATE_PAYLOAD_KINDS;
 
 export interface FieldPropertyOverrideSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -56,11 +47,11 @@ export function fieldPropertyOverrideClearedPayload(
 }
 
 export function fieldPropertyEventType(payload: FieldPropertyEventPayload): FieldPropertyPayloadKind {
-  return payload.kind;
+  return fieldPropertyOverrideStateEventType(payload);
 }
 
 export function isFieldPropertyPayloadKind(kind: string): kind is FieldPropertyPayloadKind {
-  return FIELD_PROPERTY_PAYLOAD_KIND_SET.has(kind);
+  return isFieldPropertyOverrideStatePayloadKind(kind);
 }
 
 export function isFieldPropertyEvent(event: DomainEvent): event is DomainEvent<FieldPropertyEventPayload> {
