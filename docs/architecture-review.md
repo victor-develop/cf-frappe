@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted dashboard read-access decisions into dashboard policy so DashboardService keeps metadata/report access probes and card execution orchestration.
 - Extracted data-patch administrative access decisions into data-patch definition policy so DataPatchService keeps framework error mapping and data-patch runner/log orchestration.
 - Extracted job-schedule dispatch, override, and definition-edit capability decisions into job-schedule policy so JobScheduleService keeps runner/event-store orchestration and framework error mapping.
 - Extracted job-retry execution lookup decisions into job-retry policy so JobRetryService keeps execution-log reads, retry command dispatch, and framework error mapping.

@@ -5,6 +5,7 @@ import {
   dashboardReportCardValue,
   emptyDashboardDocumentAggregate,
   finishDashboardDocumentAggregate,
+  planDashboardReadAccess,
   updateDashboardDocumentAggregate
 } from "../../src";
 
@@ -162,5 +163,30 @@ describe("dashboard policy", () => {
     expect(dashboardCardIndicator(card, 0)).toBe("gray");
     expect(dashboardCardIndicator(card, null)).toBe("gray");
     expect(dashboardCardIndicator(card, Number.NaN)).toBe("gray");
+  });
+
+  it("plans dashboard read access from dashboard roles and card source readability", () => {
+    const actor = { id: "analyst", roles: ["Analytics User"] };
+    const dashboard = {
+      name: "Operations",
+      roles: ["Analytics User"],
+      cards: [{ name: "open_notes", source: { kind: "documentCount", doctype: "Note" } }]
+    } as const;
+
+    expect(planDashboardReadAccess({ actor, dashboard, cardsReadable: true })).toEqual({ status: "allow" });
+    expect(planDashboardReadAccess({ actor, dashboard, cardsReadable: false })).toEqual({
+      status: "deny",
+      message: "Actor 'analyst' cannot read dashboard 'Operations'"
+    });
+    expect(
+      planDashboardReadAccess({
+        actor: { id: "guest", roles: ["Guest"] },
+        dashboard,
+        cardsReadable: true
+      })
+    ).toEqual({
+      status: "deny",
+      message: "Actor 'guest' cannot read dashboard 'Operations'"
+    });
   });
 });

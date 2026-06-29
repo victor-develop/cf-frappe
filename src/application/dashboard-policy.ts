@@ -1,13 +1,19 @@
 import type {
+  DashboardDefinition,
   DashboardCardDefinition,
   DashboardCardSourceDefinition,
   DashboardDocumentAggregate,
   DashboardIndicatorOperator
 } from "../core/dashboard.js";
-import type { JsonPrimitive } from "../core/types.js";
+import { canReadDashboard } from "../core/dashboard.js";
+import type { Actor, JsonPrimitive } from "../core/types.js";
 import type { ReportChartResult, ReportRunResult } from "./report-service.js";
 
 export type DashboardCardValue = JsonPrimitive | ReportChartResult;
+
+export type DashboardReadAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
 
 export interface DashboardCardShape<TValue> {
   readonly name: string;
@@ -23,6 +29,20 @@ export interface DashboardDocumentAggregateState {
   readonly sum: number;
   readonly min: number | null;
   readonly max: number | null;
+}
+
+export function planDashboardReadAccess(options: {
+  readonly actor: Actor;
+  readonly dashboard: DashboardDefinition;
+  readonly cardsReadable: boolean;
+}): DashboardReadAccessDecision {
+  if (!canReadDashboard(options.actor, options.dashboard) || !options.cardsReadable) {
+    return {
+      status: "deny",
+      message: `Actor '${options.actor.id}' cannot read dashboard '${options.dashboard.name}'`
+    };
+  }
+  return { status: "allow" };
 }
 
 export function dashboardCardResult<TValue>(

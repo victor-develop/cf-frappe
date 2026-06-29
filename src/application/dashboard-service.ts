@@ -1,6 +1,5 @@
 import { permissionDenied } from "../core/errors.js";
 import {
-  canReadDashboard,
   type DashboardCardDefinition,
   type DashboardCardSourceDefinition,
   type DashboardDefinition
@@ -9,11 +8,13 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
 import {
   dashboardCardResult,
+  type DashboardReadAccessDecision,
   dashboardReportCardValue,
   type DashboardCardValue,
   type DashboardCardShape,
   emptyDashboardDocumentAggregate,
   finishDashboardDocumentAggregate,
+  planDashboardReadAccess,
   updateDashboardDocumentAggregate
 } from "./dashboard-policy.js";
 import { isPermissionDeniedError } from "./access-policy.js";
@@ -45,13 +46,16 @@ export class DashboardService {
   }
 
   async listDashboards(actor: Actor): Promise<readonly DashboardDefinition[]> {
-    return this.registry.listDashboards().filter((dashboard) => this.canAccessDashboard(actor, dashboard));
+    return this.registry
+      .listDashboards()
+      .filter((dashboard) => this.dashboardReadAccess(actor, dashboard).status === "allow");
   }
 
   async getDashboard(actor: Actor, dashboardName: string): Promise<DashboardDefinition> {
     const dashboard = this.registry.getDashboard(dashboardName);
-    if (!this.canAccessDashboard(actor, dashboard)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot read dashboard '${dashboard.name}'`);
+    const decision = this.dashboardReadAccess(actor, dashboard);
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
     }
     return dashboard;
   }
@@ -138,8 +142,12 @@ export class DashboardService {
     }
   }
 
-  private canAccessDashboard(actor: Actor, dashboard: DashboardDefinition): boolean {
-    return canReadDashboard(actor, dashboard) && dashboard.cards.every((card) => this.canAccessCard(actor, card.source));
+  private dashboardReadAccess(actor: Actor, dashboard: DashboardDefinition): DashboardReadAccessDecision {
+    return planDashboardReadAccess({
+      actor,
+      dashboard,
+      cardsReadable: dashboard.cards.every((card) => this.canAccessCard(actor, card.source))
+    });
   }
 
   private canAccessCard(actor: Actor, source: DashboardCardSourceDefinition): boolean {
