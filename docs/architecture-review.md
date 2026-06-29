@@ -99,6 +99,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized unique-value event command shaping in unique-value policy so `DocumentService` no longer repeats reservation and release event DTO fields.
 - Centralized naming-series event command shaping in naming policy so `DocumentService` no longer repeats series start and advance event DTO fields.
 - Centralized assignment-rule enabled payload shaping in assignment-rule events so `AssignmentRuleService` no longer hand-builds saved-rule override payloads.
+- Centralized role status payload shaping in role events so `RoleService` no longer chooses enabled versus disabled payloads inline.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

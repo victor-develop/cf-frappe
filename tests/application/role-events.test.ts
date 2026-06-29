@@ -2,7 +2,8 @@ import {
   roleCreatedPayload,
   roleDescriptionChangedPayload,
   roleDisabledPayload,
-  roleEnabledPayload
+  roleEnabledPayload,
+  roleStatusChangedPayload
 } from "../../src";
 import type { RoleEventPayload } from "../../src";
 
@@ -49,6 +50,17 @@ describe("role events", () => {
       role: "Support Lead"
     });
     expect(rolePayload(roleDisabledPayload({ role: "Support Lead" }))).toEqual({
+      kind: "RoleDisabled",
+      role: "Support Lead"
+    });
+  });
+
+  it("builds role status payloads from enabled state", () => {
+    expect(rolePayload(roleStatusChangedPayload({ role: "Support Lead", enabled: true }))).toEqual({
+      kind: "RoleEnabled",
+      role: "Support Lead"
+    });
+    expect(rolePayload(roleStatusChangedPayload({ role: "Support Lead", enabled: false }))).toEqual({
       kind: "RoleDisabled",
       role: "Support Lead"
     });

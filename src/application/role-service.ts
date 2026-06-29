@@ -18,8 +18,7 @@ import {
 import {
   roleCreatedPayload,
   roleDescriptionChangedPayload,
-  roleDisabledPayload,
-  roleEnabledPayload,
+  roleStatusChangedPayload,
   type RoleEventPayload
 } from "./role-events.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -157,7 +156,7 @@ export class RoleService {
       actor: command.actor,
       type: enabled ? "RoleEnabled" : "RoleDisabled",
       metadata: command.metadata,
-      payload: enabled ? roleEnabledPayload({ role }) : roleDisabledPayload({ role })
+      payload: roleStatusChangedPayload({ role, enabled })
     });
   }
 

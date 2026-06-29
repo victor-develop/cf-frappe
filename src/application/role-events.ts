@@ -34,6 +34,10 @@ export interface RoleStatusPayloadInput {
   readonly role: string;
 }
 
+export interface RoleStatusChangedPayloadInput extends RoleStatusPayloadInput {
+  readonly enabled: boolean;
+}
+
 export function roleCreatedPayload(
   input: RoleCreatedPayloadInput
 ): Extract<RoleEventPayload, { readonly kind: "RoleCreated" }> {
@@ -71,6 +75,12 @@ export function roleDisabledPayload(
     kind: "RoleDisabled",
     role: input.role
   };
+}
+
+export function roleStatusChangedPayload(
+  input: RoleStatusChangedPayloadInput
+): Extract<RoleEventPayload, { readonly kind: "RoleEnabled" | "RoleDisabled" }> {
+  return input.enabled ? roleEnabledPayload(input) : roleDisabledPayload(input);
 }
 
 declare module "../core/types.js" {

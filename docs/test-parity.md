@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the assignment-rule enabled-payload policy slice:
+As of the role status-payload policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2306`
-- Remaining gap to Frappe static markers: `478`
+- Vitest cases: `2307`
+- Remaining gap to Frappe static markers: `477`
 
 ## Implication
 
