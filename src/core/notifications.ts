@@ -60,17 +60,30 @@ export function documentEmailNotificationsFromRules(
 }
 
 function documentUserNotificationRecipients(event: DomainEvent): readonly string[] {
-  switch (event.payload.kind) {
-    case "DocumentAssigned":
-    case "DocumentUnassigned":
-      return [event.payload.assigneeId];
-    case "DocumentFollowed":
-    case "DocumentUnfollowed":
-      return [event.payload.followerId];
-    case "DocumentShared":
-    case "DocumentShareRevoked":
-      return [event.payload.userId];
-    default:
-      return [];
+  if (
+    isNotificationRecipientEventPayloadKind(event, "DocumentAssigned") ||
+    isNotificationRecipientEventPayloadKind(event, "DocumentUnassigned")
+  ) {
+    return [event.payload.assigneeId];
   }
+  if (
+    isNotificationRecipientEventPayloadKind(event, "DocumentFollowed") ||
+    isNotificationRecipientEventPayloadKind(event, "DocumentUnfollowed")
+  ) {
+    return [event.payload.followerId];
+  }
+  if (
+    isNotificationRecipientEventPayloadKind(event, "DocumentShared") ||
+    isNotificationRecipientEventPayloadKind(event, "DocumentShareRevoked")
+  ) {
+    return [event.payload.userId];
+  }
+  return [];
+}
+
+function isNotificationRecipientEventPayloadKind<TKind extends DocumentEventPayload["kind"]>(
+  event: DomainEvent,
+  kind: TKind
+): event is DomainEvent<Extract<DocumentEventPayload, { readonly kind: TKind }>> {
+  return domainEventPayloadKind(event) === kind;
 }

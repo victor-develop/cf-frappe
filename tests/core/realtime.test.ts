@@ -475,4 +475,34 @@ describe("realtime topics", () => {
       recipientId: "support@example.com"
     });
   });
+
+  it("derives direct user notification recipients from payload kind instead of event type name", () => {
+    const notifications = documentUserNotificationsFromDomainEvent({
+      id: "evt2",
+      tenantId: "acme",
+      stream: "acme:Note:One",
+      sequence: 2,
+      type: "NoteDeleted",
+      doctype: "Note",
+      documentName: "One",
+      actorId: "owner@example.com",
+      occurredAt: now,
+      payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" },
+      metadata: {}
+    });
+
+    expect(notifications).toEqual([
+      {
+        kind: "DocumentUserNotification",
+        eventId: "evt2",
+        eventType: "NoteDeleted",
+        payloadKind: "DocumentAssigned",
+        tenantId: "acme",
+        doctype: "Note",
+        documentName: "One",
+        actorId: "owner@example.com",
+        recipientId: "support@example.com"
+      }
+    ]);
+  });
 });
