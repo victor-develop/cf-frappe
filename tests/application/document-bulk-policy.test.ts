@@ -6,8 +6,21 @@ import {
   bulkDocumentFailure,
   bulkNamedCommand,
   normalizeBulkDeleteDocumentSelections,
-  normalizeBulkDocumentSelections
+  normalizeBulkDocumentSelections,
+  runBulkDocumentSelections,
+  type DocumentSnapshot
 } from "../../src";
+
+const snapshot: DocumentSnapshot = {
+  tenantId: "acme",
+  doctype: "Note",
+  name: "NOTE-1",
+  version: 2,
+  docstatus: "draft",
+  data: { title: "Hello" },
+  createdAt: "2026-06-28T01:00:00.000Z",
+  updatedAt: "2026-06-28T01:00:00.000Z"
+};
 
 describe("document bulk policy", () => {
   it("normalizes selected document names and preserves expected versions", () => {
@@ -66,6 +79,35 @@ describe("document bulk policy", () => {
       code: "UNKNOWN",
       message: "Bulk delete failed",
       status: 500
+    });
+  });
+
+  it("runs normalized bulk selections into ordered success and failure groups", async () => {
+    await expect(runBulkDocumentSelections(
+      {
+        actor: { id: "owner@example.com", roles: ["User"], tenantId: "acme" },
+        doctype: "Note",
+        documents: [{ name: " NOTE-1 " }, { name: "NOTE-2", expectedVersion: 3 }]
+      },
+      async (selection) => selection.name === "NOTE-1"
+        ? { ok: true, snapshot }
+        : {
+            ok: false,
+            failure: {
+              name: selection.name,
+              code: "DOCUMENT_CONFLICT",
+              message: `Cannot update ${selection.name}`,
+              status: 409
+            }
+          }
+    )).resolves.toEqual({
+      succeeded: [{ name: "NOTE-1", snapshot }],
+      failed: [{
+        name: "NOTE-2",
+        code: "DOCUMENT_CONFLICT",
+        message: "Cannot update NOTE-2",
+        status: 409
+      }]
     });
   });
 

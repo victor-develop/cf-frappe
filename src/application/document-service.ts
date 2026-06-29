@@ -28,7 +28,7 @@ import {
 import {
   bulkNamedCommand,
   bulkDocumentFailure,
-  normalizeBulkDocumentSelections
+  runBulkDocumentSelections
 } from "./document-bulk-policy.js";
 import {
   canReadLinkedDocumentTarget,
@@ -1304,18 +1304,13 @@ export class DocumentService implements DocumentCommandExecutor {
     command: BulkDocumentsCommand,
     run: (selection: BulkDocumentSelection) => Promise<DocumentSnapshot>
   ): Promise<BulkDocumentCommandResult> {
-    const selections = normalizeBulkDocumentSelections(command.documents);
-    const succeeded: BulkDocumentCommandEntry[] = [];
-    const failed: BulkDocumentCommandFailure[] = [];
-    for (const selection of selections) {
+    return runBulkDocumentSelections(command, async (selection) => {
       try {
-        const snapshot = await run(selection);
-        succeeded.push({ name: selection.name, snapshot });
+        return { ok: true, snapshot: await run(selection) };
       } catch (error) {
-        failed.push(bulkDocumentFailure(selection.name, error));
+        return { ok: false, failure: bulkDocumentFailure(selection.name, error) };
       }
-    }
-    return { succeeded, failed };
+    });
   }
 
   private async requireExistingFromEvents(

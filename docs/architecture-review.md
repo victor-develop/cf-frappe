@@ -79,6 +79,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 - Centralized document update validation issue ordering and aggregation in document command policy so `DocumentService` no longer owns validation-stage concatenation before update failures.
 - Centralized document create and domain-command validation issue ordering in document command policy so `DocumentService` no longer owns those validation-stage concatenation rules.
 - Centralized schema-before-hook validation issue ordering in core document hooks so `DocumentService` no longer owns validation pipeline issue concatenation.
+- Centralized bulk document selection result aggregation in document bulk policy so `DocumentService` and the Durable Object command executor share success/failure grouping semantics.
 - Centralized readable file dashboard candidate shaping in file policy so dashboard orchestration no longer composes permission-check DTOs inline.
 - Centralized multipart completed-object reuse versus storage-completion planning in file policy so multipart orchestration no longer owns idempotent completion branching.
 - Centralized multipart completed-object read planning in file policy so multipart orchestration no longer derives object keys or upload ids before storage reads inline.

@@ -3,8 +3,6 @@ import type {
   AssignDocumentCommand,
   CancelDocumentCommand,
   AddDocumentCommentCommand,
-  BulkDocumentCommandEntry,
-  BulkDocumentCommandFailure,
   BulkDocumentCommandResult,
   BulkDocumentsCommand,
   BulkCancelDocumentsCommand,
@@ -31,7 +29,7 @@ import type {
   UnfollowDocumentCommand,
   UpdateDocumentCommand
 } from "../application/document-service.js";
-import { normalizeBulkDocumentSelections } from "../application/document-service.js";
+import { runBulkDocumentSelections } from "../application/document-bulk-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentData, DocumentSnapshot } from "../core/types.js";
 import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
@@ -159,19 +157,14 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
     command: BulkDocumentsCommand,
     buildCommand: (selection: { readonly name: string; readonly expectedVersion?: number }) => NamedAggregateCoordinatorCommand
   ): Promise<BulkDocumentCommandResult> {
-    const selections = normalizeBulkDocumentSelections(command.documents);
-    const succeeded: BulkDocumentCommandEntry[] = [];
-    const failed: BulkDocumentCommandFailure[] = [];
-    for (const selection of selections) {
+    return runBulkDocumentSelections(command, async (selection) => {
       const aggregateCommand = buildCommand(selection);
       const result = await this.stubForNamed(aggregateCommand).tryTransact(aggregateCommand);
       if (result.ok) {
-        succeeded.push({ name: selection.name, snapshot: result.snapshot });
-      } else {
-        failed.push(result.failure);
+        return { ok: true, snapshot: result.snapshot };
       }
-    }
-    return { succeeded, failed };
+      return { ok: false, failure: result.failure };
+    });
   }
 
   execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {

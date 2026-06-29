@@ -3,10 +3,13 @@ import type {
   BulkDeleteDocumentFailure,
   BulkDeleteDocumentSelection,
   BulkDocumentCommand,
+  BulkDocumentCommandEntry,
   BulkDocumentCommandFailure,
+  BulkDocumentCommandResult,
   BulkDocumentsCommand,
   BulkDocumentSelection
 } from "./document-service.js";
+import type { DocumentSnapshot } from "../core/types.js";
 
 const MAX_BULK_DOCUMENTS = 100;
 
@@ -64,6 +67,35 @@ export function bulkDocumentFailure(name: string, error: unknown): BulkDocumentC
     message: error instanceof Error ? error.message : "Bulk delete failed",
     status: 500
   };
+}
+
+export type BulkDocumentSelectionOutcome =
+  | { readonly ok: true; readonly snapshot: DocumentSnapshot }
+  | { readonly ok: false; readonly failure: BulkDocumentCommandFailure };
+
+export function bulkDocumentSelectionSuccess(
+  selection: BulkDocumentSelection,
+  snapshot: DocumentSnapshot
+): BulkDocumentCommandEntry {
+  return { name: selection.name, snapshot };
+}
+
+export async function runBulkDocumentSelections(
+  command: BulkDocumentsCommand,
+  run: (selection: BulkDocumentSelection) => Promise<BulkDocumentSelectionOutcome>
+): Promise<BulkDocumentCommandResult> {
+  const selections = normalizeBulkDocumentSelections(command.documents);
+  const succeeded: BulkDocumentCommandEntry[] = [];
+  const failed: BulkDocumentCommandFailure[] = [];
+  for (const selection of selections) {
+    const outcome = await run(selection);
+    if (outcome.ok) {
+      succeeded.push(bulkDocumentSelectionSuccess(selection, outcome.snapshot));
+    } else {
+      failed.push(outcome.failure);
+    }
+  }
+  return { succeeded, failed };
 }
 
 export function bulkNamedCommand(
