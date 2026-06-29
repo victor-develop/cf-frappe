@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the audit deleted-event recovery derivation slice:
+As of the document-history timeline event-kind derivation slice:
 
 - Vitest files: `196`
-- Vitest cases: `2332`
-- Remaining gap to Frappe static markers: `452`
+- Vitest cases: `2333`
+- Remaining gap to Frappe static markers: `451`
 
 ## Implication
 

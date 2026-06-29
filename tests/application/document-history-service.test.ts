@@ -298,6 +298,36 @@ describe("DocumentHistoryService", () => {
     expect(timeline.entries.map((entry) => entry.sequence)).toEqual([1]);
   });
 
+  it("projects timeline entry kinds from event payloads when event type names are custom", async () => {
+    const { documents, events, queries } = createServices(["create-1", "update-1"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Custom Type Note" }) });
+    await documents.update({ actor: owner, doctype: "Note", name: "Custom Type Note", patch: { body: "Typed" } });
+    const committedEvents = await events.readStream("acme:Note:Custom%20Type%20Note");
+    const history = new DocumentHistoryService({
+      queries,
+      events: {
+        readStream: async () =>
+          committedEvents.map((event) =>
+            event.sequence === 2
+              ? {
+                  ...event,
+                  type: "NoteBodyEditedByPolicy"
+                }
+              : event
+          )
+      }
+    });
+
+    const timeline = await history.getTimeline(owner, "Note", "Custom Type Note");
+
+    expect(timeline.entries[1]).toMatchObject({
+      sequence: 2,
+      type: "NoteBodyEditedByPolicy",
+      kind: "DocumentUpdated",
+      summary: "Updated body"
+    });
+  });
+
   it("returns bounded timeline pages with an older-event cursor", async () => {
     const { documents, history } = createServices(["create-1", "update-1", "update-2", "update-3"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Paged Note" }) });

@@ -10,6 +10,7 @@ import type {
   JsonValue,
   TenantId
 } from "../core/types.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import {
   foldDocument,
   foldDocumentAssignments,
@@ -234,7 +235,7 @@ function toTimelineEntries(
       eventId: event.id,
       sequence: event.sequence,
       type: event.type,
-      kind: event.payload.kind,
+      kind: domainEventPayloadKind(event),
       actorId: event.actorId,
       occurredAt: event.occurredAt,
       summary: summarize(event.payload),
