@@ -1,5 +1,11 @@
 import { DataPatchRunner, type DataPatchRollbackRunResult, type DataPatchRunResult } from "./data-patch-runner.js";
 import { assertDataPatchChecksumMatches } from "./data-patch-journal-policy.js";
+import {
+  assertDataPatchRollbackRetryable,
+  assertDataPatchRollbackSuccessorSafe,
+  assertSelectedDataPatchRollbackable,
+  dataPatchRollbackPlanDecision
+} from "./data-patch-rollback-policy.js";
 import { FrameworkError, badRequest, notFound, permissionDenied } from "../core/errors.js";
 import { assertDataPatchId, defineDataPatch, type DataPatchDefinition } from "../core/data-patch.js";
 import { SYSTEM_MANAGER_ROLE, type Actor, type JsonValue } from "../core/types.js";
@@ -209,36 +215,11 @@ export class DataPatchService<TResources = unknown> {
     const rollback: DataPatchDefinition<TResources>[] = [];
     for (const patch of [...this.patches].reverse()) {
       const recorded = recordedById.get(patch.id);
-      if (recorded === undefined) {
+      const decision = dataPatchRollbackPlanDecision(patch, recorded);
+      if (decision.action === "skip") {
         continue;
       }
-      assertChecksumMatches(patch, recorded);
-      if (recorded.status === "pending") {
-        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
-      }
-      if (recorded.status === "failed") {
-        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
-          status: 409
-        });
-      }
-      if (recorded.status === "rollback_pending") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_PENDING",
-          `Data patch '${patch.id}' rollback is pending`,
-          { status: 409 }
-        );
-      }
-      if (recorded.status === "rollback_failed") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_FAILED",
-          `Data patch '${patch.id}' rollback failed and must be investigated first`,
-          { status: 409 }
-        );
-      }
-      if (recorded.status === "rolled_back") {
-        continue;
-      }
-      if (patch.rollback === undefined) {
+      if (decision.action === "stop") {
         break;
       }
       rollback.push(patch);
@@ -306,50 +287,7 @@ export class DataPatchService<TResources = unknown> {
   ): void {
     for (const patch of selected) {
       const recorded = recordedById.get(patch.id);
-      if (recorded === undefined) {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-          `Data patch '${patch.id}' cannot be rolled back because it has not been applied`,
-          { status: 409 }
-        );
-      }
-      assertChecksumMatches(patch, recorded);
-      if (recorded.status === "pending") {
-        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
-      }
-      if (recorded.status === "failed") {
-        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
-          status: 409
-        });
-      }
-      if (recorded.status === "rollback_pending") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_PENDING",
-          `Data patch '${patch.id}' rollback is pending`,
-          { status: 409 }
-        );
-      }
-      if (recorded.status === "rollback_failed") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_FAILED",
-          `Data patch '${patch.id}' rollback failed and must be investigated first`,
-          { status: 409 }
-        );
-      }
-      if (recorded.status === "rolled_back") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-          `Data patch '${patch.id}' has already been rolled back`,
-          { status: 409 }
-        );
-      }
-      if (patch.rollback === undefined) {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-          `Data patch '${patch.id}' does not declare a rollback`,
-          { status: 409 }
-        );
-      }
+      assertSelectedDataPatchRollbackable(patch, recorded);
     }
   }
 
@@ -358,44 +296,7 @@ export class DataPatchService<TResources = unknown> {
     recordedById: ReadonlyMap<string, RecordedDataPatch>
   ): void {
     const recorded = recordedById.get(patch.id);
-    if (recorded === undefined) {
-      throw new FrameworkError(
-        "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
-        `Data patch '${patch.id}' rollback cannot be retried because no failed rollback journal entry exists`,
-        { status: 409 }
-      );
-    }
-    assertChecksumMatches(patch, recorded);
-    if (recorded.status === "rollback_failed") {
-      if (patch.rollback !== undefined) {
-        return;
-      }
-      throw new FrameworkError(
-        "DATA_PATCH_ROLLBACK_UNAVAILABLE",
-        `Data patch '${patch.id}' does not declare a rollback`,
-        { status: 409 }
-      );
-    }
-    if (recorded.status === "pending") {
-      throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
-    }
-    if (recorded.status === "failed") {
-      throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
-        status: 409
-      });
-    }
-    if (recorded.status === "rollback_pending") {
-      throw new FrameworkError(
-        "DATA_PATCH_ROLLBACK_PENDING",
-        `Data patch '${patch.id}' rollback is pending`,
-        { status: 409 }
-      );
-    }
-    throw new FrameworkError(
-      "DATA_PATCH_ROLLBACK_RETRY_UNAVAILABLE",
-      `Data patch '${patch.id}' rollback cannot be retried because journal status is '${recorded.status}'`,
-      { status: 409 }
-    );
+    assertDataPatchRollbackRetryable(patch, recorded);
   }
 
   private assertNoUnsafeSuccessorsOutsideSelection(
@@ -413,28 +314,7 @@ export class DataPatchService<TResources = unknown> {
         continue;
       }
       assertChecksumMatches(patch, recorded);
-      if (recorded.status === "pending") {
-        throw new FrameworkError("DATA_PATCH_PENDING", `Data patch '${patch.id}' is pending`, { status: 409 });
-      }
-      if (recorded.status === "failed") {
-        throw new FrameworkError("DATA_PATCH_FAILED", `Data patch '${patch.id}' failed and must be retried first`, {
-          status: 409
-        });
-      }
-      if (recorded.status === "rollback_pending") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_PENDING",
-          `Data patch '${patch.id}' rollback is pending`,
-          { status: 409 }
-        );
-      }
-      if (recorded.status === "rollback_failed") {
-        throw new FrameworkError(
-          "DATA_PATCH_ROLLBACK_FAILED",
-          `Data patch '${patch.id}' rollback failed and must be investigated first`,
-          { status: 409 }
-        );
-      }
+      assertDataPatchRollbackSuccessorSafe(patch.id, recorded);
       if (recorded.status === "rolled_back") {
         continue;
       }
