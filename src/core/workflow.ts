@@ -1,6 +1,8 @@
 import { FrameworkError } from "./errors.js";
+import { domainEventPayloadKind } from "./domain-events.js";
 import type {
   Actor,
+  DocTypeName,
   DocTypeDefinition,
   DocumentSnapshot,
   DomainEvent,
@@ -9,6 +11,28 @@ import type {
   WorkflowDefinition,
   WorkflowTransition
 } from "./types.js";
+
+export type WorkflowDefinitionStatePayloadKind =
+  | "WorkflowDefinitionSaved"
+  | "WorkflowDefinitionCleared";
+
+export type WorkflowDefinitionStateEventPayload =
+  | {
+      readonly kind: "WorkflowDefinitionSaved";
+      readonly doctypeName: DocTypeName;
+      readonly workflow: WorkflowDefinition;
+    }
+  | {
+      readonly kind: "WorkflowDefinitionCleared";
+      readonly doctypeName: DocTypeName;
+    };
+
+export const WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS = Object.freeze([
+  "WorkflowDefinitionSaved",
+  "WorkflowDefinitionCleared"
+] as const satisfies readonly WorkflowDefinitionStatePayloadKind[]);
+
+const WORKFLOW_DEFINITION_STATE_PAYLOAD_KIND_SET = new Set<string>(WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS);
 
 export interface WorkflowTransitionContext {
   readonly actor: Actor;
@@ -51,10 +75,14 @@ export function foldWorkflowDefinition(
   let version = 0;
   for (const event of events) {
     version = Math.max(version, event.sequence);
-    if (event.payload.kind === "WorkflowDefinitionSaved" && event.payload.doctypeName === doctypeName) {
-      workflow = event.payload.workflow;
+    if (!isWorkflowDefinitionStateEvent(event) || event.payload.doctypeName !== doctypeName) {
+      continue;
     }
-    if (event.payload.kind === "WorkflowDefinitionCleared" && event.payload.doctypeName === doctypeName) {
+    if (event.payload.kind === "WorkflowDefinitionSaved") {
+      workflow = event.payload.workflow;
+      continue;
+    }
+    if (event.payload.kind === "WorkflowDefinitionCleared") {
       workflow = undefined;
     }
   }
@@ -64,6 +92,22 @@ export function foldWorkflowDefinition(
     version,
     ...(workflow === undefined ? {} : { workflow })
   });
+}
+
+export function workflowDefinitionStateEventType(
+  payload: WorkflowDefinitionStateEventPayload
+): WorkflowDefinitionStatePayloadKind {
+  return payload.kind;
+}
+
+export function isWorkflowDefinitionStatePayloadKind(kind: string): kind is WorkflowDefinitionStatePayloadKind {
+  return WORKFLOW_DEFINITION_STATE_PAYLOAD_KIND_SET.has(kind);
+}
+
+function isWorkflowDefinitionStateEvent(
+  event: DomainEvent
+): event is DomainEvent & { readonly payload: WorkflowDefinitionStateEventPayload } {
+  return isWorkflowDefinitionStatePayloadKind(domainEventPayloadKind(event));
 }
 
 export function applyWorkflowDefinitionToDocType(

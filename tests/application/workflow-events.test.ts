@@ -88,6 +88,19 @@ describe("workflow events", () => {
     expect(replayed.workflow).toBeUndefined();
   });
 
+  it("folds workflow definition state by payload kind when event type names are custom", () => {
+    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "WorkflowDefinitionSaved");
+    const customTypedSaved = {
+      ...savedEvent(2, workflow),
+      type: "NoteWorkflowConfigured"
+    };
+
+    const state = foldWorkflowDefinition("acme", "Note", [misleadingUnrelated, customTypedSaved]);
+
+    expect(state.version).toBe(2);
+    expect(state.workflow).toEqual(workflow);
+  });
+
   it("filters workflow events by occurrence time for temporal reads", () => {
     const events = [
       savedEvent(1, workflow, "2026-01-01T00:00:00.000Z"),

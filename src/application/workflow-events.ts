@@ -1,5 +1,13 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldWorkflowDefinition, type WorkflowDefinitionState } from "../core/workflow.js";
+import {
+  WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS,
+  foldWorkflowDefinition,
+  isWorkflowDefinitionStatePayloadKind,
+  workflowDefinitionStateEventType,
+  type WorkflowDefinitionState,
+  type WorkflowDefinitionStateEventPayload,
+  type WorkflowDefinitionStatePayloadKind
+} from "../core/workflow.js";
 import type {
   Actor,
   DocTypeName,
@@ -11,25 +19,11 @@ import type {
   WorkflowDefinition
 } from "../core/types.js";
 
-export type WorkflowEventPayload =
-  | {
-      readonly kind: "WorkflowDefinitionSaved";
-      readonly doctypeName: DocTypeName;
-      readonly workflow: WorkflowDefinition;
-    }
-  | {
-      readonly kind: "WorkflowDefinitionCleared";
-      readonly doctypeName: DocTypeName;
-    };
+export type WorkflowEventPayload = WorkflowDefinitionStateEventPayload;
 
-export type WorkflowPayloadKind = WorkflowEventPayload["kind"];
+export type WorkflowPayloadKind = WorkflowDefinitionStatePayloadKind;
 
-export const WORKFLOW_DEFINITION_PAYLOAD_KINDS = Object.freeze([
-  "WorkflowDefinitionSaved",
-  "WorkflowDefinitionCleared"
-] as const satisfies readonly WorkflowPayloadKind[]);
-
-const WORKFLOW_DEFINITION_PAYLOAD_KIND_SET = new Set<string>(WORKFLOW_DEFINITION_PAYLOAD_KINDS);
+export const WORKFLOW_DEFINITION_PAYLOAD_KINDS = WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS;
 
 export interface WorkflowDefinitionSavedPayloadInput {
   readonly doctypeName: DocTypeName;
@@ -87,11 +81,11 @@ export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
 }
 
 export function workflowDefinitionEventType(payload: WorkflowEventPayload): WorkflowPayloadKind {
-  return payload.kind;
+  return workflowDefinitionStateEventType(payload);
 }
 
 export function isWorkflowPayloadKind(kind: string): kind is WorkflowPayloadKind {
-  return WORKFLOW_DEFINITION_PAYLOAD_KIND_SET.has(kind);
+  return isWorkflowDefinitionStatePayloadKind(kind);
 }
 
 export function isWorkflowEvent(event: DomainEvent): event is DomainEvent<WorkflowEventPayload> {

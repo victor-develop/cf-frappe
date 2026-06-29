@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Centralized workflow-definition state event payload-kind matching through core workflow helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized print-settings state event payload-kind matching through core print-settings helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized custom-field state event payload-kind matching through core custom-field helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
 - Centralized field-property override state event payload-kind matching through core field-property override helpers so state folds and application event helpers share bounded payload-kind knowledge without a core-to-application dependency.
