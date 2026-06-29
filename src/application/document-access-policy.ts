@@ -38,6 +38,10 @@ export type DocumentActionAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
 
+export type DocumentUserPermissionAccessDecision =
+  | { readonly status: "allow" }
+  | { readonly status: "deny"; readonly message: string };
+
 export type DocumentSharedPermissionLookup =
   | { readonly status: "skip"; readonly sharedPermissions: readonly [] }
   | { readonly status: "read-shares" };
@@ -99,6 +103,21 @@ export function documentSatisfiesUserPermissions(options: {
   readonly userPermissionGrants?: readonly UserPermissionGrant[];
 }): boolean {
   return documentMatchesUserPermissions(options.doctype, options.document, options.userPermissionGrants ?? []);
+}
+
+export function planDocumentUserPermissionAccess(options: {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly document: DocumentSnapshot;
+  readonly userPermissionGrants?: readonly UserPermissionGrant[];
+}): DocumentUserPermissionAccessDecision {
+  if (documentSatisfiesUserPermissions(options)) {
+    return { status: "allow" };
+  }
+  return {
+    status: "deny",
+    message: `Actor '${options.actor.id}' cannot access ${options.doctype.name}/${options.document.name}`
+  };
 }
 
 export function canUseVisibleDocument(options: DocumentVisibleAccessOptions): boolean {

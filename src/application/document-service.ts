@@ -36,7 +36,8 @@ import {
   documentSatisfiesUserPermissions,
   planDocTypeActionAccess,
   planDocumentActionAccess,
-  planDocumentSharedPermissionLookup
+  planDocumentSharedPermissionLookup,
+  planDocumentUserPermissionAccess
 } from "./document-access-policy.js";
 import {
   ensureDocumentStatus,
@@ -1562,22 +1563,16 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     document: DocumentSnapshot
   ): Promise<void> {
-    if (!(await this.matchesUserPermissions(actor, doctype, document))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot access ${doctype.name}/${document.name}`);
-    }
-  }
-
-  private async matchesUserPermissions(
-    actor: Actor,
-    doctype: DocTypeDefinition,
-    document: DocumentSnapshot
-  ): Promise<boolean> {
     const grants = await this.userPermissions?.permissionsFor(actor, document.tenantId);
-    return documentSatisfiesUserPermissions({
+    const decision = planDocumentUserPermissionAccess({
+      actor,
       doctype,
       document,
       userPermissionGrants: grants ?? []
     });
+    if (decision.status === "deny") {
+      throw permissionDenied(decision.message);
+    }
   }
 
   private async canReadLinkedDocument(

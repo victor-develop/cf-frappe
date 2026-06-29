@@ -10,6 +10,7 @@ import {
   planDocTypeActionAccess,
   planDocumentActionAccess,
   planDocumentSharedPermissionLookup,
+  planDocumentUserPermissionAccess,
   type Actor,
   type DocumentSnapshot
 } from "../../src";
@@ -165,6 +166,24 @@ describe("document access policy", () => {
       document: task,
       userPermissionGrants: [{ targetDoctype: "Project", targetName: "PROJ-2" }]
     })).toBe(false);
+  });
+
+  it("plans user-permission access decisions for existing document commands", () => {
+    expect(planDocumentUserPermissionAccess({
+      actor: reader,
+      doctype: Task,
+      document: task,
+      userPermissionGrants: [{ targetDoctype: "Project", targetName: "PROJ-1" }]
+    })).toEqual({ status: "allow" });
+    expect(planDocumentUserPermissionAccess({
+      actor: reader,
+      doctype: Task,
+      document: task,
+      userPermissionGrants: [{ targetDoctype: "Project", targetName: "PROJ-2" }]
+    })).toEqual({
+      status: "deny",
+      message: "Actor 'reader@example.com' cannot access Task/TASK-1"
+    });
   });
 
   it("allows linked targets when read access and link grants both match", () => {
