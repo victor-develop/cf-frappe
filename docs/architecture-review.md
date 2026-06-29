@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted data-patch job payload parsing and run-result JSON shaping from data-patch job factories into data-patch job policy and covered actor parsing, patch payload parsing, apply result JSON, and rollback result JSON directly.
 - Extracted data-patch job dispatch command shaping from DataPatchQueueService into data-patch job policy and covered apply, rollback, rollback-retry, actor snapshotting, tenant/delay/idempotency propagation, and operator metadata precedence directly.
 - Extracted data-patch apply run and plan selection policy from DataPatchService and covered unbounded run selections, bounded pending run selections, and bounded/unbounded plan selections directly.
 - Extracted selected and automatic data-patch rollback planning plus rollback-retry successor guards from DataPatchService into data-patch rollback policy and covered reverse ordering, limits, irreversible stop points, rolled-back skips, and successor blocking directly.

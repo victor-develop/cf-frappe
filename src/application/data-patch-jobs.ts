@@ -8,18 +8,22 @@ import type {
 } from "./data-patch-service.js";
 import {
   dataPatchApplyDispatchCommand,
+  dataPatchRollbackResultJson,
   dataPatchRollbackDispatchCommand,
   dataPatchRollbackRetryDispatchCommand,
+  dataPatchRunResultJson,
+  parseDataPatchJobActor,
+  parseDataPatchJobPatchIds,
+  parseDataPatchRollbackRetryJobPatchId,
   type DataPatchApplyJobPayload,
   type DataPatchJobActor,
   type DataPatchQueueDeliveryOptions,
   type DataPatchRollbackJobPayload,
   type DataPatchRollbackRetryJobPayload
 } from "./data-patch-job-policy.js";
-import type { DataPatchRollbackRunResult, DataPatchRunResult } from "./data-patch-runner.js";
 import { badRequest, notFound } from "../core/errors.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
-import type { Actor, DocumentData } from "../core/types.js";
+import type { Actor } from "../core/types.js";
 import type { JobDispatcher } from "./job-dispatcher.js";
 import type { JobMessage } from "../ports/job-queue.js";
 
@@ -170,11 +174,11 @@ export function createDataPatchApplyJob<TResources extends DataPatchApplyJobReso
       if (dataPatches === undefined) {
         throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
       }
-      const patchIds = parseJobPatchIds(payload.patchIds);
+      const patchIds = parseDataPatchJobPatchIds(payload.patchIds);
       if (patchIds.length === 0) {
         throw badRequest("Data patch apply job requires at least one patch id");
       }
-      return runResultJson(await dataPatches.apply(parseJobActor(payload.actor), { patchIds }));
+      return dataPatchRunResultJson(await dataPatches.apply(parseDataPatchJobActor(payload.actor), { patchIds }));
     }
   };
 }
@@ -191,11 +195,13 @@ export function createDataPatchRollbackJob<
       if (dataPatches === undefined) {
         throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
       }
-      const patchIds = parseJobPatchIds(payload.patchIds);
+      const patchIds = parseDataPatchJobPatchIds(payload.patchIds);
       if (patchIds.length === 0) {
         throw badRequest("Data patch rollback job requires at least one patch id");
       }
-      return rollbackResultJson(await dataPatches.rollback(parseJobActor(payload.actor), { patchIds }));
+      return dataPatchRollbackResultJson(
+        await dataPatches.rollback(parseDataPatchJobActor(payload.actor), { patchIds })
+      );
     }
   };
 }
@@ -212,81 +218,10 @@ export function createDataPatchRollbackRetryJob<
       if (dataPatches === undefined) {
         throw notFound("Data patch service is not available", "DATA_PATCH_NOT_FOUND");
       }
-      const patchId = parseJobPatchId(payload.patchId);
-      return rollbackResultJson(await dataPatches.retryRollbackFailed(parseJobActor(payload.actor), patchId));
+      const patchId = parseDataPatchRollbackRetryJobPatchId(payload.patchId);
+      return dataPatchRollbackResultJson(
+        await dataPatches.retryRollbackFailed(parseDataPatchJobActor(payload.actor), patchId)
+      );
     }
   };
-}
-
-function parseJobActor(value: unknown): Actor {
-  if (!isRecord(value) || typeof value.id !== "string" || !Array.isArray(value.roles)) {
-    throw badRequest("Data patch apply job actor is invalid");
-  }
-  if (!value.roles.every((role) => typeof role === "string")) {
-    throw badRequest("Data patch apply job actor roles are invalid");
-  }
-  if (value.tenantId !== undefined && typeof value.tenantId !== "string") {
-    throw badRequest("Data patch apply job actor tenantId is invalid");
-  }
-  if (value.email !== undefined && typeof value.email !== "string") {
-    throw badRequest("Data patch apply job actor email is invalid");
-  }
-  return {
-    id: value.id,
-    roles: [...value.roles],
-    ...(value.tenantId === undefined ? {} : { tenantId: value.tenantId }),
-    ...(value.email === undefined ? {} : { email: value.email })
-  };
-}
-
-function parseJobPatchIds(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.length > 0)) {
-    throw badRequest("Data patch apply job patchIds are invalid");
-  }
-  return [...value];
-}
-
-function parseJobPatchId(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw badRequest("Data patch rollback retry job patchId is invalid");
-  }
-  return value;
-}
-
-function runResultJson(result: DataPatchRunResult): DocumentData {
-  return {
-    applied: result.applied.map((record) => ({
-      id: record.id,
-      checksum: record.checksum,
-      appliedAt: record.appliedAt,
-      ...(record.result === undefined ? {} : { result: record.result })
-    })),
-    skipped: result.skipped.map((record) => ({
-      id: record.id,
-      checksum: record.checksum,
-      appliedAt: record.appliedAt,
-      ...(record.result === undefined ? {} : { result: record.result })
-    }))
-  };
-}
-
-function rollbackResultJson(result: DataPatchRollbackRunResult): DocumentData {
-  return {
-    rolledBack: result.rolledBack.map((record) => ({
-      id: record.id,
-      checksum: record.checksum,
-      rolledBackAt: record.rolledBackAt,
-      ...(record.result === undefined ? {} : { result: record.result })
-    })),
-    skipped: result.skipped.map((record) => ({
-      id: record.id,
-      checksum: record.checksum,
-      rolledBackAt: record.rolledBackAt,
-      ...(record.result === undefined ? {} : { result: record.result })
-    }))
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
