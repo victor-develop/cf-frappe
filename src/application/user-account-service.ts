@@ -1,4 +1,4 @@
-import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -45,6 +45,7 @@ import type { PasswordHasher } from "../ports/password-hasher.js";
 import {
   emailVerificationPatch,
   ensureUserAccountAdmin,
+  ensureUserAccountCreatable,
   ensureUserAccountExpectedVersion,
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
@@ -63,6 +64,7 @@ import {
   userAccountEmailVerificationDeliveryEmail,
   userAccountEmailVerificationChallengeForCompletion,
   ensureUserAccountPasswordResettable,
+  userAccountEnabledChangeRequired,
   userAccountPasswordResetDeliveryEmail,
   userAccountRolesEqual
 } from "./user-account-policy.js";
@@ -227,9 +229,7 @@ export class UserAccountService {
     const email = normalizeOptionalUserEmail(command.email);
     const state = await this.stateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
-    if (state.exists) {
-      throw conflict(`User account '${userId}' already exists`);
-    }
+    ensureUserAccountCreatable(state);
     await this.validateRoles(tenantId, roles);
     const passwordHash = await this.passwords.hash(password);
     const saved = await this.appendEvent({
@@ -574,7 +574,7 @@ export class UserAccountService {
     const userId = normalizeRequiredUserAccountText(command.userId, "User id");
     const state = await this.existingStateFor(tenantId, userId);
     ensureUserAccountExpectedVersion(state, command.expectedVersion);
-    if (state.enabled === enabled) {
+    if (!userAccountEnabledChangeRequired(state, enabled)) {
       return publicUserAccount(state);
     }
     const saved = await this.appendEvent({

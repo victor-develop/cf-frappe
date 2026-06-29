@@ -145,6 +145,16 @@ export function ensureUserAccountExpectedVersion(
   }
 }
 
+export function ensureUserAccountCreatable(state: UserAccountState): void {
+  if (state.exists) {
+    throw conflict(`User account '${state.userId}' already exists`);
+  }
+}
+
+export function userAccountEnabledChangeRequired(state: UserAccountState, enabled: boolean): boolean {
+  return state.enabled !== enabled;
+}
+
 export function normalizeRecoveryExpirySeconds(value: number | undefined, defaultSeconds: number): number {
   const seconds = value ?? defaultSeconds;
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS) {

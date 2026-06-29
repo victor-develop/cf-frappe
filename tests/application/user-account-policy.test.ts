@@ -1,5 +1,6 @@
 import {
   ensureUserAccountAdmin,
+  ensureUserAccountCreatable,
   ensureUserAccountExpectedVersion,
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
@@ -22,6 +23,7 @@ import {
   ensureUserAccountPasswordResettable,
   userAccountEmailVerificationChallengeForCompletion,
   userAccountEmailVerificationDeliveryEmail,
+  userAccountEnabledChangeRequired,
   userAccountPasswordHashForLogin,
   userAccountPasswordResetDeliveryEmail,
   userAccountRolesEqual
@@ -191,6 +193,19 @@ describe("user account policy", () => {
     expect(() => ensureUserAccountExpectedVersion(accountState({ version: 3 }), 3)).not.toThrow();
     expect(() => ensureUserAccountExpectedVersion(accountState({ version: 3 }), 2))
       .toThrow("Expected user account 'owner@example.com' at version 2, found 3");
+  });
+
+  it("guards account creation against existing accounts", () => {
+    expect(() => ensureUserAccountCreatable(accountState({ exists: false }))).not.toThrow();
+    expect(() => ensureUserAccountCreatable(accountState()))
+      .toThrow("User account 'owner@example.com' already exists");
+  });
+
+  it("detects enabled-state changes", () => {
+    expect(userAccountEnabledChangeRequired(accountState({ enabled: true }), true)).toBe(false);
+    expect(userAccountEnabledChangeRequired(accountState({ enabled: true }), false)).toBe(true);
+    expect(userAccountEnabledChangeRequired(accountState({ enabled: false }), false)).toBe(false);
+    expect(userAccountEnabledChangeRequired(accountState({ enabled: false }), true)).toBe(true);
   });
 
   it("normalizes recovery expiry seconds with configured defaults and bounds", () => {
