@@ -30,11 +30,13 @@ import {
   assertCustomTableFieldDoesNotSelfTarget,
   assertCustomTableGraphAcyclicFrom,
   authorizeCustomFieldAdministration,
-  customFieldsEqual,
   ensureCustomFieldExpectedVersion,
+  findCustomFieldEntry,
   normalizeCustomField,
   normalizeCustomFieldExpressions,
   normalizeRequiredCustomFieldText,
+  planCustomFieldDisable,
+  planCustomFieldSave,
   projectPendingCustomFieldState,
   resequenceCustomFieldEventsForFold,
   resolveCustomFieldTenant,
@@ -132,8 +134,7 @@ export class CustomFieldService {
       { doctype: doctype.name, field }
     );
     ensureCustomFieldExpectedVersion(state, command.expectedVersion);
-    const existing = state.fields.find((entry) => entry.field.name === field.name);
-    if (existing?.enabled && customFieldsEqual(existing.field, field)) {
+    if (planCustomFieldSave(findCustomFieldEntry(state, field.name), field).status === "noop") {
       return state;
     }
     const stream = customFieldsCatalogStream(tenantId);
@@ -160,11 +161,11 @@ export class CustomFieldService {
     const events = await this.tenantCustomFieldEvents(tenantId);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
     ensureCustomFieldExpectedVersion(state, command.expectedVersion);
-    const existing = state.fields.find((entry) => entry.field.name === fieldName);
-    if (!existing) {
+    const decision = planCustomFieldDisable(findCustomFieldEntry(state, fieldName));
+    if (decision.status === "missing") {
       throw notFound(`Custom field '${fieldName}' was not found`, "DOCUMENT_NOT_FOUND");
     }
-    if (!existing.enabled) {
+    if (decision.status === "noop") {
       return state;
     }
     const stream = customFieldsCatalogStream(tenantId);

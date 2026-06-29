@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted custom-field save and disable change decisions into custom-field policy so CustomFieldService keeps registry resolution, validation, event append, and replay orchestration.
 - Extracted field-property save and clear noop decisions into field-property policy so FieldPropertyService keeps metadata resolution, effective DocType projection, event append, and replay orchestration.
 - Extracted workflow save and clear noop decisions into workflow policy so WorkflowService keeps registry resolution, state loading, event append, and replay orchestration.
 - Extracted print-settings and user-profile empty-patch write decisions into pure policies so their services keep tenant/access checks, state loading, event append, and replay orchestration.

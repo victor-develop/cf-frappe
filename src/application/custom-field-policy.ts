@@ -10,7 +10,7 @@ import {
   type PersistedFieldDefinition,
   type TenantId
 } from "../core/types.js";
-import type { CustomFieldState } from "../core/custom-fields.js";
+import type { CustomFieldEntry, CustomFieldState } from "../core/custom-fields.js";
 
 export interface CustomFieldEventSet {
   readonly catalog: readonly DomainEvent[];
@@ -165,6 +165,36 @@ export function ensureCustomFieldExpectedVersion(
 
 export function customFieldsEqual(left: FieldDefinition, right: FieldDefinition): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function findCustomFieldEntry(
+  state: CustomFieldState,
+  fieldName: string
+): CustomFieldEntry | undefined {
+  return state.fields.find((entry) => entry.field.name === fieldName);
+}
+
+export type CustomFieldChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "missing" }
+  | { readonly status: "noop" };
+
+export function planCustomFieldSave(
+  existing: CustomFieldEntry | undefined,
+  field: PersistedFieldDefinition
+): CustomFieldChangeDecision {
+  return existing?.enabled === true && customFieldsEqual(existing.field, field)
+    ? { status: "noop" }
+    : { status: "append" };
+}
+
+export function planCustomFieldDisable(
+  existing: CustomFieldEntry | undefined
+): CustomFieldChangeDecision {
+  if (existing === undefined) {
+    return { status: "missing" };
+  }
+  return existing.enabled ? { status: "append" } : { status: "noop" };
 }
 
 export function projectPendingCustomFieldState(

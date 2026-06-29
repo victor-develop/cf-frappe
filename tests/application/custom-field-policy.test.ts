@@ -7,9 +7,12 @@ import {
   authorizeCustomFieldAdministration,
   customFieldsEqual,
   ensureCustomFieldExpectedVersion,
+  findCustomFieldEntry,
   normalizeCustomField,
   normalizeCustomFieldExpressions,
   normalizeRequiredCustomFieldText,
+  planCustomFieldDisable,
+  planCustomFieldSave,
   projectPendingCustomFieldState,
   resequenceCustomFieldEventsForFold,
   resolveCustomFieldTenant,
@@ -123,6 +126,29 @@ describe("custom field policy", () => {
     );
     expect(customFieldsEqual({ name: "priority", type: "text" }, { name: "priority", type: "text" })).toBe(true);
     expect(customFieldsEqual({ name: "priority", type: "text" }, { type: "text", name: "priority" })).toBe(false);
+  });
+
+  it("plans custom field saves without emitting redundant catalog events", () => {
+    const existing = findCustomFieldEntry(state(1), "priority");
+
+    expect(planCustomFieldSave(existing, normalizeCustomField({ name: "priority", type: "text" }))).toEqual({
+      status: "noop"
+    });
+    expect(planCustomFieldSave(existing, normalizeCustomField({ name: "priority", type: "number" }))).toEqual({
+      status: "append"
+    });
+    expect(planCustomFieldSave(undefined, normalizeCustomField({ name: "priority", type: "text" }))).toEqual({
+      status: "append"
+    });
+    expect(planCustomFieldSave(disabledFieldEntry(), normalizeCustomField({ name: "priority", type: "text" }))).toEqual({
+      status: "append"
+    });
+  });
+
+  it("plans custom field disables without emitting redundant or missing-field events", () => {
+    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "priority"))).toEqual({ status: "append" });
+    expect(planCustomFieldDisable(disabledFieldEntry())).toEqual({ status: "noop" });
+    expect(planCustomFieldDisable(findCustomFieldEntry(state(1), "missing"))).toEqual({ status: "missing" });
   });
 
   it("projects pending custom field state while preserving created timestamps", () => {
@@ -240,6 +266,13 @@ function state(version: number, doctype = "Note"): CustomFieldState {
         updatedAt: "2026-01-01T00:00:00.000Z"
       }
     ]
+  };
+}
+
+function disabledFieldEntry(): NonNullable<ReturnType<typeof findCustomFieldEntry>> {
+  return {
+    ...state(1).fields[0]!,
+    enabled: false
   };
 }
 
