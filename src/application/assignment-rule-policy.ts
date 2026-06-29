@@ -65,6 +65,32 @@ export function findAssignmentRuleEntry(
   return state.rules.find((entry) => entry.rule.name === ruleName);
 }
 
+export type AssignmentRuleChangeDecision =
+  | { readonly status: "append" }
+  | { readonly status: "noop" };
+
+export function planAssignmentRuleSave(
+  existing: AssignmentRuleEntry | undefined,
+  rule: AssignmentRuleDefinition
+): AssignmentRuleChangeDecision {
+  return existing !== undefined && assignmentRulesEqual(existing.rule, rule)
+    ? { status: "noop" }
+    : { status: "append" };
+}
+
+export function planAssignmentRuleClear(
+  existing: AssignmentRuleEntry | undefined
+): AssignmentRuleChangeDecision {
+  return existing === undefined ? { status: "noop" } : { status: "append" };
+}
+
+export function planAssignmentRuleStatusChange(
+  existing: AssignmentRuleEntry,
+  enabled: boolean
+): AssignmentRuleChangeDecision {
+  return existing.enabled === enabled ? { status: "noop" } : { status: "append" };
+}
+
 export function requireAssignmentRuleEntry(
   state: AssignmentRuleState,
   ruleName: string

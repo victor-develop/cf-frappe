@@ -7,6 +7,9 @@ import {
   ensureAssignmentRuleExpectedVersion,
   findAssignmentRuleEntry,
   normalizeRequiredAssignmentRuleText,
+  planAssignmentRuleClear,
+  planAssignmentRuleSave,
+  planAssignmentRuleStatusChange,
   requireAssignmentRuleEntry,
   resolveAssignmentRuleActor,
   resolveAssignmentRuleTenant
@@ -77,6 +80,32 @@ describe("assignment rule policy", () => {
       "Assignment rule 'Missing' was not found"
     );
     expect(enabledAssignmentRules(state(1))).toEqual([runtimeRule]);
+  });
+
+  it("plans assignment rule saves without emitting redundant catalog events", () => {
+    const existing = findAssignmentRuleEntry(state(1), "Runtime triage");
+
+    expect(planAssignmentRuleSave(existing, runtimeRule)).toEqual({ status: "noop" });
+    expect(planAssignmentRuleSave(existing, { ...runtimeRule, events: ["DocumentUpdated"] })).toEqual({
+      status: "append"
+    });
+    expect(planAssignmentRuleSave(undefined, runtimeRule)).toEqual({ status: "append" });
+  });
+
+  it("plans assignment rule clears without emitting missing-rule events", () => {
+    expect(planAssignmentRuleClear(findAssignmentRuleEntry(state(1), "Runtime triage"))).toEqual({
+      status: "append"
+    });
+    expect(planAssignmentRuleClear(findAssignmentRuleEntry(state(1), "Missing"))).toEqual({ status: "noop" });
+  });
+
+  it("plans assignment rule status changes without emitting redundant catalog events", () => {
+    expect(planAssignmentRuleStatusChange(requireAssignmentRuleEntry(state(1), "Runtime triage"), true)).toEqual({
+      status: "noop"
+    });
+    expect(planAssignmentRuleStatusChange(requireAssignmentRuleEntry(state(1), "Runtime triage"), false)).toEqual({
+      status: "append"
+    });
   });
 
   it("compares and composes assignment rules with runtime overrides", () => {

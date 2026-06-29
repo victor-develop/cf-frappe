@@ -28,13 +28,15 @@ import {
 } from "./assignment-rule-events.js";
 import {
   assignmentActorForTenant,
-  assignmentRulesEqual,
   authorizeAssignmentRuleAdministration,
   composeAssignmentRules,
   enabledAssignmentRules,
   ensureAssignmentRuleExpectedVersion,
   findAssignmentRuleEntry,
   normalizeRequiredAssignmentRuleText,
+  planAssignmentRuleClear,
+  planAssignmentRuleSave,
+  planAssignmentRuleStatusChange,
   requireAssignmentRuleEntry,
   resolveAssignmentRuleActor
 } from "./assignment-rule-policy.js";
@@ -202,7 +204,7 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     const state = await this.stateFor(tenantId, doctype.name);
     ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
     const existing = findAssignmentRuleEntry(state, rule.name);
-    if (existing && assignmentRulesEqual(existing.rule, rule)) {
+    if (planAssignmentRuleSave(existing, rule).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -221,7 +223,7 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     const ruleName = normalizeRequiredAssignmentRuleText(command.ruleName, "Assignment rule name");
     const state = await this.stateFor(tenantId, doctype.name);
     ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
-    if (findAssignmentRuleEntry(state, ruleName) === undefined) {
+    if (planAssignmentRuleClear(findAssignmentRuleEntry(state, ruleName)).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
@@ -241,7 +243,7 @@ export class AssignmentRuleService implements AssignmentRuleProvider {
     const state = await this.stateFor(tenantId, doctype.name);
     ensureAssignmentRuleExpectedVersion(state, command.expectedVersion);
     const existing = requireAssignmentRuleEntry(state, ruleName);
-    if (existing.enabled === command.enabled) {
+    if (planAssignmentRuleStatusChange(existing, command.enabled).status === "noop") {
       return state;
     }
     return this.appendAndFold(state, {
