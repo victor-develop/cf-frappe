@@ -1,4 +1,3 @@
-import { conflict, permissionDenied } from "../core/errors.js";
 import { workflowDefinitionsStream } from "../core/streams.js";
 import {
   applyWorkflowDefinitionToDocType,
@@ -23,6 +22,11 @@ import {
   workflowDefinitionSavedPayload,
   type WorkflowEventPayload
 } from "./workflow-events.js";
+import {
+  authorizeWorkflowAdministration,
+  ensureWorkflowExpectedVersion,
+  workflowDefinitionsEqual
+} from "./workflow-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -79,9 +83,9 @@ export class WorkflowService {
   }
 
   async list(actor: Actor, doctypeName: string, tenantId?: TenantId): Promise<WorkflowDefinitionState> {
-    this.authorizeAdministration(actor, tenantId);
+    const resolvedTenantId = this.authorizeAdministration(actor, tenantId);
     const doctype = this.registry.get(doctypeName);
-    return this.stateFor(resolveActorTenant(actor, tenantId), doctype.name);
+    return this.stateFor(resolvedTenantId, doctype.name);
   }
 
   async effectiveDocType(
@@ -93,19 +97,17 @@ export class WorkflowService {
     return applyWorkflowDefinitionToDocType(doctype, await this.stateFor(tenantId, doctype.name));
   }
 
-  authorizeAdministration(actor: Actor, tenantId?: TenantId): void {
-    this.ensureAdmin(actor);
-    resolveActorTenant(actor, tenantId);
+  authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
+    return authorizeWorkflowAdministration({ actor, tenantId, adminRoles: this.adminRoles });
   }
 
   async save(command: SaveWorkflowDefinitionCommand): Promise<WorkflowDefinitionState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = await this.preWorkflowDocTypeFor(command.doctype, tenantId);
     const workflow = normalizeWorkflowDefinition(doctype, command.workflow);
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
-    if (workflowEqual(state.workflow, workflow)) {
+    ensureWorkflowExpectedVersion(state, command.expectedVersion);
+    if (workflowDefinitionsEqual(state.workflow, workflow)) {
       return state;
     }
     return this.appendAndFold(state, {
@@ -119,11 +121,10 @@ export class WorkflowService {
   }
 
   async clear(command: ClearWorkflowDefinitionCommand): Promise<WorkflowDefinitionState> {
-    this.authorizeAdministration(command.actor, command.tenantId);
-    const tenantId = resolveActorTenant(command.actor, command.tenantId);
+    const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const state = await this.stateFor(tenantId, doctype.name);
-    ensureExpectedVersion(state, command.expectedVersion);
+    ensureWorkflowExpectedVersion(state, command.expectedVersion);
     if (state.workflow === undefined) {
       return state;
     }
@@ -176,29 +177,4 @@ export class WorkflowService {
       saved
     );
   }
-
-  private ensureAdmin(actor: Actor): void {
-    if (!this.adminRoles.some((role) => actor.roles.includes(role))) {
-      throw permissionDenied(`Actor '${actor.id}' cannot manage workflows`);
-    }
-  }
-}
-
-function resolveActorTenant(actor: Actor, explicitTenantId: TenantId | undefined): TenantId {
-  const actorTenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
-  const tenantId = explicitTenantId ?? actorTenantId;
-  if (tenantId !== actorTenantId) {
-    throw permissionDenied(`Actor '${actor.id}' cannot manage workflows for tenant '${tenantId}'`);
-  }
-  return tenantId;
-}
-
-function ensureExpectedVersion(state: WorkflowDefinitionState, expectedVersion: number | undefined): void {
-  if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected workflow definitions at version ${expectedVersion}, found ${state.version}`);
-  }
-}
-
-function workflowEqual(left: WorkflowDefinition | undefined, right: WorkflowDefinition): boolean {
-  return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
