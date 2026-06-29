@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the field-property override normalization policy slice:
+As of the custom-field table/reference guard policy slice:
 
 - Vitest files: `229`
-- Vitest cases: `2607`
-- Remaining gap to Frappe static markers: `177`
+- Vitest cases: `2611`
+- Remaining gap to Frappe static markers: `173`
 
 ## Implication
 

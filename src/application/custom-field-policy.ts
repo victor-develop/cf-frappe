@@ -1,5 +1,5 @@
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { defineDocType, validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
@@ -16,6 +16,18 @@ export interface CustomFieldEventSet {
   readonly catalog: readonly DomainEvent[];
   readonly legacy: readonly DomainEvent[];
   readonly catalogVersion: number;
+}
+
+export interface CustomFieldTableGraphBlame {
+  readonly doctype: string;
+  readonly field: FieldDefinition;
+}
+
+interface CustomFieldTableGraphEdge {
+  readonly source: string;
+  readonly target: string;
+  readonly fieldName: string;
+  readonly custom: boolean;
 }
 
 export function resolveCustomFieldTenant(command: {
@@ -200,6 +212,112 @@ export function resequenceCustomFieldEventsForFold(events: readonly DomainEvent[
     ...event,
     sequence: index + 1
   }));
+}
+
+export function assertCustomFieldReferencesResolve(
+  field: FieldDefinition,
+  hasDocType: (name: string) => boolean
+): void {
+  if (field.type === "link" && field.linkTo !== undefined && !hasDocType(field.linkTo)) {
+    throw badRequest(`Custom field '${field.name}' links to unknown DocType '${field.linkTo}'`);
+  }
+  if (field.type === "table" && field.tableOf !== undefined && !hasDocType(field.tableOf)) {
+    throw badRequest(`Custom field '${field.name}' targets unknown child DocType '${field.tableOf}'`);
+  }
+}
+
+export function assertCustomFieldRuntimeSupported(field: FieldDefinition): void {
+  if (field.type !== "table") {
+    return;
+  }
+  if (field.inListFilter) {
+    throw new FrameworkError("CUSTOM_FIELD_INVALID", `Custom table field '${field.name}' cannot be a list filter`, {
+      status: 400
+    });
+  }
+}
+
+export function assertCustomTableFieldDoesNotSelfTarget(
+  doctype: { readonly name: string },
+  field: FieldDefinition
+): void {
+  if (field.type !== "table" || field.tableOf !== doctype.name) {
+    return;
+  }
+  throw new FrameworkError(
+    "CUSTOM_FIELD_INVALID",
+    `Custom table field '${field.name}' cannot target its own DocType '${doctype.name}' until recursive table overlays are supported`,
+    { status: 400 }
+  );
+}
+
+export function assertCustomTableGraphAcyclicFrom(
+  root: string,
+  doctypes: readonly DocTypeDefinition[],
+  states: readonly CustomFieldState[],
+  blame?: CustomFieldTableGraphBlame
+): void {
+  const graph = customFieldTableGraph(doctypes, states);
+  const visited = new Set<string>();
+  const visit = (doctype: string, path: readonly string[]): void => {
+    visited.add(doctype);
+    for (const edge of graph.get(doctype) ?? []) {
+      const cycleStart = path.indexOf(edge.target);
+      if (cycleStart >= 0) {
+        throwRecursiveCustomTableField(edge, [...path.slice(cycleStart), edge.target], blame);
+      }
+      if (!visited.has(edge.target)) {
+        visit(edge.target, [...path, edge.target]);
+      }
+    }
+  };
+  visit(root, [root]);
+}
+
+function customFieldTableGraph(
+  doctypes: readonly DocTypeDefinition[],
+  states: readonly CustomFieldState[]
+): ReadonlyMap<string, readonly CustomFieldTableGraphEdge[]> {
+  const graph = new Map<string, CustomFieldTableGraphEdge[]>();
+  const add = (edge: CustomFieldTableGraphEdge) => {
+    graph.set(edge.source, [...(graph.get(edge.source) ?? []), edge]);
+  };
+  for (const doctype of doctypes) {
+    for (const field of doctype.fields) {
+      if (field.type === "table" && field.tableOf) {
+        add({ source: doctype.name, target: field.tableOf, fieldName: field.name, custom: false });
+      }
+    }
+  }
+  for (const state of states) {
+    for (const entry of state.fields) {
+      if (entry.enabled && entry.field.type === "table" && entry.field.tableOf) {
+        add({
+          source: state.doctype,
+          target: entry.field.tableOf,
+          fieldName: entry.field.name,
+          custom: true
+        });
+      }
+    }
+  }
+  return graph;
+}
+
+function throwRecursiveCustomTableField(
+  edge: CustomFieldTableGraphEdge,
+  path: readonly string[],
+  blame: CustomFieldTableGraphBlame | undefined
+): never {
+  const field = blame?.field ?? { name: edge.fieldName };
+  const prefix = blame || edge.custom
+    ? `Custom table field '${field.name}'`
+    : `Table field '${edge.fieldName}' on DocType '${edge.source}'`;
+  throw new FrameworkError(
+    "CUSTOM_FIELD_INVALID",
+    `${prefix} creates recursive table path ${path.join(" -> ")}, which is not supported until recursive table controls are supported`,
+    { status: 400 }
+  );
 }
 
 function trimmedOptional(value: string | undefined): string | undefined {

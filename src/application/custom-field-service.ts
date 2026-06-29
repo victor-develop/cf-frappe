@@ -1,4 +1,4 @@
-import { badRequest, FrameworkError, notFound } from "../core/errors.js";
+import { notFound } from "../core/errors.js";
 import { customFieldsCatalogStream, customFieldsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -25,6 +25,10 @@ import {
 } from "../core/custom-fields.js";
 import {
   assertCustomFieldDefaultValueValid,
+  assertCustomFieldReferencesResolve,
+  assertCustomFieldRuntimeSupported,
+  assertCustomTableFieldDoesNotSelfTarget,
+  assertCustomTableGraphAcyclicFrom,
   authorizeCustomFieldAdministration,
   customFieldsEqual,
   ensureCustomFieldExpectedVersion,
@@ -70,13 +74,6 @@ export interface DisableCustomFieldCommand {
   readonly metadata?: DocumentData;
 }
 
-interface TableGraphEdge {
-  readonly source: string;
-  readonly target: string;
-  readonly fieldName: string;
-  readonly custom: boolean;
-}
-
 export class CustomFieldService {
   private readonly registry: ModelRegistry;
   private readonly events: EventStore;
@@ -105,12 +102,12 @@ export class CustomFieldService {
     const states = this.statesFromEvents(tenantId, events);
     for (const entry of state.fields) {
       if (entry.enabled) {
-        this.assertCustomFieldRuntimeSupported(entry.field);
-        this.assertReferencesResolve(entry.field);
-        this.assertTableFieldDoesNotSelfTarget(doctype, entry.field);
+        assertCustomFieldRuntimeSupported(entry.field);
+        assertCustomFieldReferencesResolve(entry.field, (name) => this.registry.has(name));
+        assertCustomTableFieldDoesNotSelfTarget(doctype, entry.field);
       }
     }
-    this.assertTableGraphAcyclicFrom(doctype.name, states);
+    assertCustomTableGraphAcyclicFrom(doctype.name, this.registry.list(), states);
     return applyCustomFieldsToDocType(doctype, state);
   }
 
@@ -122,14 +119,15 @@ export class CustomFieldService {
     const events = await this.tenantCustomFieldEvents(tenantId);
     const states = this.statesFromEvents(tenantId, events);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
-    this.assertCustomFieldRuntimeSupported(field);
+    assertCustomFieldRuntimeSupported(field);
     assertCustomFieldCanExtend(doctype, field);
     field = normalizeCustomFieldExpressions(doctype, field);
     assertCustomFieldDefaultValueValid(doctype, field);
-    this.assertReferencesResolve(field);
-    this.assertTableFieldDoesNotSelfTarget(doctype, field);
-    this.assertTableGraphAcyclicFrom(
+    assertCustomFieldReferencesResolve(field, (name) => this.registry.has(name));
+    assertCustomTableFieldDoesNotSelfTarget(doctype, field);
+    assertCustomTableGraphAcyclicFrom(
       doctype.name,
+      this.registry.list(),
       projectPendingCustomFieldState(tenantId, states, doctype.name, field, this.clock.now()),
       { doctype: doctype.name, field }
     );
@@ -227,107 +225,6 @@ export class CustomFieldService {
 
   private statesFromEvents(tenantId: TenantId, events: CustomFieldEventSet): readonly CustomFieldState[] {
     return this.registry.list().map((doctype) => this.stateFromEvents(tenantId, doctype.name, events));
-  }
-
-  private assertReferencesResolve(field: FieldDefinition): void {
-    if (field.type === "link" && field.linkTo !== undefined && !this.registry.has(field.linkTo)) {
-      throw badRequest(`Custom field '${field.name}' links to unknown DocType '${field.linkTo}'`);
-    }
-    if (field.type === "table" && field.tableOf !== undefined && !this.registry.has(field.tableOf)) {
-      throw badRequest(`Custom field '${field.name}' targets unknown child DocType '${field.tableOf}'`);
-    }
-  }
-
-  private assertCustomFieldRuntimeSupported(field: FieldDefinition): void {
-    if (field.type !== "table") {
-      return;
-    }
-    if (field.inListFilter) {
-      throw new FrameworkError(
-        "CUSTOM_FIELD_INVALID",
-        `Custom table field '${field.name}' cannot be a list filter`,
-        { status: 400 }
-      );
-    }
-  }
-
-  private assertTableFieldDoesNotSelfTarget(
-    doctype: { readonly name: string },
-    field: FieldDefinition
-  ): void {
-    if (field.type !== "table" || field.tableOf !== doctype.name) {
-      return;
-    }
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `Custom table field '${field.name}' cannot target its own DocType '${doctype.name}' until recursive table overlays are supported`,
-      { status: 400 }
-    );
-  }
-
-  private assertTableGraphAcyclicFrom(
-    root: string,
-    states: readonly CustomFieldState[],
-    blame?: { readonly doctype: string; readonly field: FieldDefinition }
-  ): void {
-    const graph = this.tableGraph(states);
-    const visited = new Set<string>();
-    const visit = (doctype: string, path: readonly string[]): void => {
-      visited.add(doctype);
-      for (const edge of graph.get(doctype) ?? []) {
-        const cycleStart = path.indexOf(edge.target);
-        if (cycleStart >= 0) {
-          this.throwRecursiveTableField(edge, [...path.slice(cycleStart), edge.target], blame);
-        }
-        if (!visited.has(edge.target)) {
-          visit(edge.target, [...path, edge.target]);
-        }
-      }
-    };
-    visit(root, [root]);
-  }
-
-  private tableGraph(states: readonly CustomFieldState[]): ReadonlyMap<string, readonly TableGraphEdge[]> {
-    const graph = new Map<string, TableGraphEdge[]>();
-    const add = (edge: TableGraphEdge) => {
-      graph.set(edge.source, [...(graph.get(edge.source) ?? []), edge]);
-    };
-    for (const doctype of this.registry.list()) {
-      for (const field of doctype.fields) {
-        if (field.type === "table" && field.tableOf) {
-          add({ source: doctype.name, target: field.tableOf, fieldName: field.name, custom: false });
-        }
-      }
-    }
-    for (const state of states) {
-      for (const entry of state.fields) {
-        if (entry.enabled && entry.field.type === "table" && entry.field.tableOf) {
-          add({
-            source: state.doctype,
-            target: entry.field.tableOf,
-            fieldName: entry.field.name,
-            custom: true
-          });
-        }
-      }
-    }
-    return graph;
-  }
-
-  private throwRecursiveTableField(
-    edge: TableGraphEdge,
-    path: readonly string[],
-    blame: { readonly doctype: string; readonly field: FieldDefinition } | undefined
-  ): never {
-    const field = blame?.field ?? { name: edge.fieldName };
-    const prefix = blame || edge.custom
-      ? `Custom table field '${field.name}'`
-      : `Table field '${edge.fieldName}' on DocType '${edge.source}'`;
-    throw new FrameworkError(
-      "CUSTOM_FIELD_INVALID",
-      `${prefix} creates recursive table path ${path.join(" -> ")}, which is not supported until recursive table controls are supported`,
-      { status: 400 }
-    );
   }
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): void {

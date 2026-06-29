@@ -1,5 +1,9 @@
 import {
   assertCustomFieldDefaultValueValid,
+  assertCustomFieldReferencesResolve,
+  assertCustomFieldRuntimeSupported,
+  assertCustomTableFieldDoesNotSelfTarget,
+  assertCustomTableGraphAcyclicFrom,
   authorizeCustomFieldAdministration,
   customFieldsEqual,
   ensureCustomFieldExpectedVersion,
@@ -14,7 +18,8 @@ import {
 } from "../../src/application/custom-field-policy.js";
 import { customFieldSavedPayload } from "../../src/application/custom-field-events.js";
 import { customFieldsCatalogStream } from "../../src/core/streams.js";
-import { SYSTEM_MANAGER_ROLE, type DomainEvent } from "../../src/core/types.js";
+import { defineDocType } from "../../src/core/schema.js";
+import { SYSTEM_MANAGER_ROLE, type DocTypeDefinition, type DomainEvent, type FieldDefinition } from "../../src/core/types.js";
 import type { CustomFieldState } from "../../src/core/custom-fields.js";
 import { noteDocType } from "../helpers";
 
@@ -159,7 +164,66 @@ describe("custom field policy", () => {
       catalogVersion: 7
     });
   });
+
+  it("validates custom-field link and table targets through an injected DocType lookup", () => {
+    const hasDocType = (name: string) => name === "Project";
+
+    expect(() => assertCustomFieldReferencesResolve({ name: "project", type: "link", linkTo: "Project" }, hasDocType))
+      .not.toThrow();
+    expect(() => assertCustomFieldReferencesResolve({ name: "project", type: "link", linkTo: "Missing" }, hasDocType))
+      .toThrow("Custom field 'project' links to unknown DocType 'Missing'");
+    expect(() => assertCustomFieldReferencesResolve({ name: "items", type: "table", tableOf: "Missing" }, hasDocType))
+      .toThrow("Custom field 'items' targets unknown child DocType 'Missing'");
+  });
+
+  it("guards unsupported custom table-field runtime shapes", () => {
+    expect(() => assertCustomFieldRuntimeSupported({ name: "project", type: "link", linkTo: "Project" })).not.toThrow();
+    expect(() => assertCustomFieldRuntimeSupported({ name: "items", type: "table", inListFilter: true })).toThrow(
+      "Custom table field 'items' cannot be a list filter"
+    );
+    expect(() =>
+      assertCustomTableFieldDoesNotSelfTarget({ name: "Note" }, { name: "children", type: "table", tableOf: "Note" })
+    ).toThrow("Custom table field 'children' cannot target its own DocType 'Note'");
+  });
+
+  it("detects recursive base table graphs without service state", () => {
+    const Invoice = doctype("Invoice", [{ name: "items", type: "table", tableOf: "Invoice Item" }]);
+    const InvoiceItem = doctype("Invoice Item", [{ name: "parents", type: "table", tableOf: "Invoice" }]);
+
+    expect(() => assertCustomTableGraphAcyclicFrom("Invoice", [Invoice, InvoiceItem], [])).toThrow(
+      "Table field 'parents' on DocType 'Invoice Item' creates recursive table path Invoice -> Invoice Item -> Invoice"
+    );
+  });
+
+  it("detects recursive enabled custom table graphs and ignores disabled entries", () => {
+    const Note = doctype("Note", []);
+    const Project = doctype("Project", []);
+    const cyclicStates = [
+      stateWithFields("Note", [{ name: "projects", type: "table", tableOf: "Project" }]),
+      stateWithFields("Project", [{ name: "notes", type: "table", tableOf: "Note" }])
+    ];
+
+    expect(() =>
+      assertCustomTableGraphAcyclicFrom("Note", [Note, Project], cyclicStates, {
+        doctype: "Project",
+        field: { name: "notes", type: "table", tableOf: "Note" }
+      })
+    ).toThrow("Custom table field 'notes' creates recursive table path Note -> Project -> Note");
+    expect(() =>
+      assertCustomTableGraphAcyclicFrom("Note", [Note, Project], [
+        stateWithFields("Note", [{ name: "projects", type: "table", tableOf: "Project" }]),
+        stateWithFields("Project", [{ name: "notes", type: "table", tableOf: "Note" }], false)
+      ])
+    ).not.toThrow();
+  });
 });
+
+function doctype(name: string, fields: readonly FieldDefinition[]): DocTypeDefinition {
+  return defineDocType({
+    name,
+    fields
+  });
+}
 
 function state(version: number, doctype = "Note"): CustomFieldState {
   return {
@@ -176,6 +240,26 @@ function state(version: number, doctype = "Note"): CustomFieldState {
         updatedAt: "2026-01-01T00:00:00.000Z"
       }
     ]
+  };
+}
+
+function stateWithFields(
+  doctype: string,
+  fields: readonly FieldDefinition[],
+  enabled = true
+): CustomFieldState {
+  return {
+    tenantId: "acme",
+    doctype,
+    version: fields.length,
+    fields: fields.map((field, index) => ({
+      tenantId: "acme",
+      doctype,
+      field: normalizeCustomField(field),
+      enabled,
+      createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      updatedAt: `2026-01-01T00:00:0${index}.000Z`
+    }))
   };
 }
 
