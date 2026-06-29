@@ -90,6 +90,35 @@ describe("DocumentDeliveryOutboxService", () => {
     ]);
   });
 
+  it("keeps source event type metadata separate from source payload kind", async () => {
+    const events = new InMemoryDocumentStore();
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1"])
+    });
+
+    await outbox.enqueueFromDomainEvent({
+      event: {
+        ...domainEvent(),
+        type: "NoteDeleted",
+        payload: { kind: "DocumentAssigned", assigneeId: "support@example.com" }
+      },
+      snapshot: snapshot(),
+      targets: ["email"]
+    });
+
+    await expect(events.readStream(documentDeliveryOutboxStream("acme"))).resolves.toMatchObject([
+      {
+        payload: {
+          kind: "DocumentDeliveryOutboxEnqueued",
+          sourceEventType: "NoteDeleted",
+          payloadKind: "DocumentAssigned"
+        }
+      }
+    ]);
+  });
+
   it("reads delivery outbox state through the bounded outbox payload kinds", async () => {
     const events = new RecordingReadOptionsDocumentDeliveryStore();
     const outbox = new DocumentDeliveryOutboxService({
