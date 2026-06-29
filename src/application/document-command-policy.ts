@@ -211,6 +211,19 @@ export function canExecuteDomainCommandForRoles(
   return definition.roles === undefined || definition.roles.some((role) => actor.roles.includes(role));
 }
 
+export function requireDomainCommandDefinition(
+  doctype: Pick<DocTypeDefinition, "name" | "commands">,
+  command: string
+): DomainCommandDefinition {
+  const definition = doctype.commands?.find((item) => item.name === command);
+  if (!definition) {
+    throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no command '${command}'`, {
+      status: 400
+    });
+  }
+  return definition;
+}
+
 export function planDomainCommandPolicy(input: {
   readonly actor: Actor;
   readonly definition: DomainCommandDefinition;

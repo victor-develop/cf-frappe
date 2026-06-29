@@ -58,7 +58,8 @@ import {
   planDocumentStatusChangePolicy,
   planDocumentUpdatePolicy,
   planDomainCommandPolicy,
-  planWorkflowTransitionPolicy
+  planWorkflowTransitionPolicy,
+  requireDomainCommandDefinition
 } from "./document-command-policy.js";
 import {
   domainCommandAppliedPayload,
@@ -945,12 +946,7 @@ export class DocumentService implements DocumentCommandExecutor {
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
-    const commandDefinition = doctype.commands?.find((item) => item.name === command.command);
-    if (!commandDefinition) {
-      throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no command '${command.command}'`, {
-        status: 400
-      });
-    }
+    const commandDefinition = requireDomainCommandDefinition(doctype, command.command);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     const now = this.clock.now();

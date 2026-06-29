@@ -21,6 +21,7 @@ import {
   planDomainCommandPolicy,
   planWorkflowTransitionPolicy,
   pickCommandFields,
+  requireDomainCommandDefinition,
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot
@@ -300,6 +301,21 @@ describe("document command policy", () => {
     expect(canExecuteDomainCommandForRoles(actor, {})).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager", "User"] })).toBe(true);
     expect(canExecuteDomainCommandForRoles(actor, { roles: ["System Manager"] })).toBe(false);
+  });
+
+  it("resolves domain command definitions by command name", () => {
+    const close = { name: "close", eventType: "NoteClosed" };
+    const reopen = { name: "reopen", eventType: "NoteReopened" };
+    expect(requireDomainCommandDefinition({ name: "Note", commands: [close, reopen] }, "reopen")).toBe(reopen);
+  });
+
+  it("rejects missing domain command definitions", () => {
+    expect(() =>
+      requireDomainCommandDefinition({ name: "Note", commands: [{ name: "close", eventType: "NoteClosed" }] }, "archive")
+    ).toThrow("Note has no command 'archive'");
+    expect(() => requireDomainCommandDefinition({ name: "Note" }, "archive")).toThrow(
+      "Note has no command 'archive'"
+    );
   });
 
   it("plans workflow transition patches and default event types", () => {
