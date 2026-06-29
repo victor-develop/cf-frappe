@@ -3,6 +3,8 @@ import {
   buildReportCharts,
   buildReportGroups,
   buildReportOrderOptions,
+  coerceReportFilterValue,
+  isEmptyReportFilterValue,
   limitReportGroups,
   primitiveReportRowValue,
   projectReportDocumentRow,
@@ -277,6 +279,49 @@ describe("report policy", () => {
     });
     expect(() => resolveReportOrder(report, doctype, { order: "sideways" as "asc" }))
       .toThrow("Report order must be asc or desc");
+  });
+
+  it("coerces scalar report filter values by field type", () => {
+    expect(coerceReportFilterValue("42", "integer", "minimum", "eq")).toBe(42);
+    expect(coerceReportFilterValue("4.5", "number", "score", "eq")).toBe(4.5);
+    expect(coerceReportFilterValue("on", "boolean", "enabled", "eq")).toBe(true);
+    expect(coerceReportFilterValue(false, "boolean", "enabled", "eq")).toBe(false);
+    expect(coerceReportFilterValue(123, "text", "title", "eq")).toBe("123");
+    expect(() => coerceReportFilterValue("4.5", "integer", "minimum", "eq"))
+      .toThrow("Report filter 'minimum' must be an integer");
+    expect(() => coerceReportFilterValue("maybe", "boolean", "enabled", "eq"))
+      .toThrow("Report filter 'enabled' must be a boolean");
+    expect(() => coerceReportFilterValue([1, 2], "integer", "minimum", "eq"))
+      .toThrow("Report filter 'minimum' must be scalar");
+  });
+
+  it("coerces between and not-between report filter endpoints", () => {
+    expect(coerceReportFilterValue(["2", "8"], "integer", "count_range", "between")).toEqual([2, 8]);
+    expect(coerceReportFilterValue(["2026-01-01", "2026-01-31"], "date", "created", "not_between"))
+      .toEqual(["2026-01-01", "2026-01-31"]);
+  });
+
+  it("rejects malformed report range filters before matching", () => {
+    expect(() => coerceReportFilterValue(["2"], "integer", "count_range", "between"))
+      .toThrow("Report filter 'count_range' must include exactly two values for between");
+    expect(() => coerceReportFilterValue([null, "8"], "integer", "count_range", "between"))
+      .toThrow("Report filter 'count_range' range values cannot be null");
+    expect(() => coerceReportFilterValue(["", "8"], "integer", "count_range", "between"))
+      .toThrow("Report filter 'count_range' range values cannot be empty");
+    expect(() => coerceReportFilterValue([true, false], "integer", "count_range", "between"))
+      .toThrow("Report filter 'count_range' range values cannot be boolean");
+    expect(() => coerceReportFilterValue([1, 2], "date", "created", "between"))
+      .toThrow("Report filter 'created' range values must be strings");
+  });
+
+  it("recognizes empty report filter values without coercing them", () => {
+    expect(coerceReportFilterValue(undefined, "integer", "minimum", "eq")).toBeUndefined();
+    expect(coerceReportFilterValue(null, "integer", "minimum", "eq")).toBeNull();
+    expect(coerceReportFilterValue("", "integer", "minimum", "eq")).toBe("");
+    expect(isEmptyReportFilterValue(undefined)).toBe(true);
+    expect(isEmptyReportFilterValue(null)).toBe(true);
+    expect(isEmptyReportFilterValue("")).toBe(true);
+    expect(isEmptyReportFilterValue(0)).toBe(false);
   });
 
   it("builds chart drilldown queries from exact report filters", () => {

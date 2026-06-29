@@ -10,20 +10,21 @@ import {
   type ReportDefinition,
   type ReportFilterDefinition,
   type ReportFilterExpression,
-  type ReportFilterOperator,
   type ReportFilterValue,
   type ReportOrder,
   type ReportSummaryDefinition,
   isReportFilterGroup
 } from "../core/reports.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, FieldType, JsonPrimitive, JsonValue } from "../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, JsonPrimitive, JsonValue } from "../core/types.js";
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
   buildReportFilterControls,
   buildReportCharts,
   buildReportGroups,
+  coerceReportFilterValue,
+  isEmptyReportFilterValue,
   limitReportGroups,
   projectReportDocumentRow,
   projectReportRow,
@@ -410,7 +411,7 @@ export class ReportService {
     for (const filter of report.filters ?? []) {
       const type = resolvedReportFilterType(filter, fields.get(filter.field));
       const raw = input[filter.name] ?? filter.defaultValue;
-      const value = coerceFilterValue(raw, type, filter.name, filter.operator ?? "eq");
+      const value = coerceReportFilterValue(raw, type, filter.name, filter.operator ?? "eq");
       if (filter.required && (value === undefined || value === "") && !reportFilterExpressionHasValue(filterExpression, filter.name)) {
         throw badRequest(`Report filter '${filter.name}' is required`);
       }
@@ -639,7 +640,7 @@ function materializeReportFilterExpressionNode(
     throw badRequest(`Report filter expression references unknown filter '${expression.filter}'`);
   }
   const type = resolvedReportFilterType(filter, fields.get(filter.field));
-  const value = coerceFilterValue(expression.value, type, filter.name, filter.operator ?? "eq");
+  const value = coerceReportFilterValue(expression.value, type, filter.name, filter.operator ?? "eq");
   if (isEmptyReportFilterValue(value)) {
     throw badRequest(`Report filter expression filter '${filter.name}' is missing a value`);
   }
@@ -763,93 +764,6 @@ function buildReportSummary(
   summaries: readonly ReportSummaryDefinition[]
 ): readonly ReportSummaryValue[] {
   return summaries.map((summary) => reportSummaryValue(summary, rows));
-}
-
-function coerceFilterValue(
-  value: ReportFilterValue | undefined,
-  type: FieldType | undefined,
-  filterName: string,
-  operator: ReportFilterOperator
-): ReportFilterValue | undefined {
-  if (value === undefined || value === null || value === "") {
-    return value;
-  }
-  if (operator === "between" || operator === "not_between") {
-    if (!isReportFilterArray(value) || value.length !== 2) {
-      throw badRequest(`Report filter '${filterName}' must include exactly two values for ${operator}`);
-    }
-    const minimum = value[0];
-    const maximum = value[1];
-    if (minimum === undefined || maximum === undefined) {
-      throw badRequest(`Report filter '${filterName}' must include exactly two values for ${operator}`);
-    }
-    return [
-      coerceRangeFilterEndpoint(minimum, type, filterName),
-      coerceRangeFilterEndpoint(maximum, type, filterName)
-    ];
-  }
-  if (Array.isArray(value)) {
-    throw badRequest(`Report filter '${filterName}' must be scalar`);
-  }
-  const scalar = scalarReportFilterValue(value);
-  if (type === "integer") {
-    const parsed = numericFilterValue(scalar, filterName, "an integer");
-    if (!Number.isInteger(parsed)) {
-      throw badRequest(`Report filter '${filterName}' must be an integer`);
-    }
-    return parsed;
-  }
-  if (type === "number") {
-    return numericFilterValue(scalar, filterName, "a number");
-  }
-  if (type === "boolean") {
-    if (typeof scalar === "boolean") {
-      return scalar;
-    }
-    if (scalar === "true" || scalar === "1" || scalar === "on") {
-      return true;
-    }
-    if (scalar === "false" || scalar === "0" || scalar === "off") {
-      return false;
-    }
-    throw badRequest(`Report filter '${filterName}' must be a boolean`);
-  }
-  return typeof scalar === "string" ? scalar : String(scalar);
-}
-
-function coerceRangeFilterEndpoint(
-  value: JsonPrimitive,
-  type: FieldType | undefined,
-  filterName: string
-): JsonPrimitive {
-  if (value === null) {
-    throw badRequest(`Report filter '${filterName}' range values cannot be null`);
-  }
-  if (typeof value === "string" && value.trim() === "") {
-    throw badRequest(`Report filter '${filterName}' range values cannot be empty`);
-  }
-  if (type === "date" || type === "datetime") {
-    if (typeof value !== "string") {
-      throw badRequest(`Report filter '${filterName}' range values must be strings`);
-    }
-    return value;
-  }
-  if (typeof value === "boolean") {
-    throw badRequest(`Report filter '${filterName}' range values cannot be boolean`);
-  }
-  return coerceFilterValue(value, type, filterName, "eq") as JsonPrimitive;
-}
-
-function numericFilterValue(value: JsonPrimitive, filterName: string, expectedType: "an integer" | "a number"): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (!Number.isFinite(parsed)) {
-    throw badRequest(`Report filter '${filterName}' must be ${expectedType}`);
-  }
-  return parsed;
-}
-
-function isEmptyReportFilterValue(value: ReportFilterValue | undefined): value is undefined | null | "" {
-  return value === undefined || value === null || value === "";
 }
 
 function rangeFilterValues(value: ReportFilterValue): readonly [JsonPrimitive, JsonPrimitive] {

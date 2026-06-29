@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the report controls policy slice:
+As of the report filter coercion policy slice:
 
 - Vitest files: `196`
-- Vitest cases: `2239`
-- Remaining gap to Frappe static markers: `545`
+- Vitest cases: `2243`
+- Remaining gap to Frappe static markers: `541`
 
 ## Implication
 
