@@ -2,6 +2,7 @@ import {
   defineWebsiteSettings,
   isExpectedWebsiteSettingsAccessMiss,
   isPublishedWebsiteSettingsForActor,
+  planWebsiteHomePageResolution,
   planWebsiteSettingsReadAccess,
   shouldResolveWebsiteNavigationItem,
   SYSTEM_MANAGER_ROLE,
@@ -61,6 +62,18 @@ describe("website settings policy", () => {
     expect(websitePageHomeHref(settings, () => true)).toBe("/page/docs/start");
     expect(websitePageHomeHref(settings, () => false)).toBeUndefined();
     expect(websiteStaticHomeHref(staticSettings)).toBe("https://example.com/docs");
+  });
+
+  it("plans home page resolution with stable not-found errors", () => {
+    expect(planWebsiteHomePageResolution("/page/docs/start")).toEqual({
+      status: "found",
+      value: "/page/docs/start"
+    });
+    expect(planWebsiteHomePageResolution(undefined)).toEqual({
+      status: "not-found",
+      message: "Website home page was not found",
+      code: "WEBSITE_SETTINGS_NOT_FOUND"
+    });
   });
 
   it("gates navigation item resolution by item role and readable page route", () => {

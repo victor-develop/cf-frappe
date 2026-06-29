@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Website Settings home-page resolution not-found decisions into website-settings policy so WebsiteSettingsService keeps homepage target probing and linked Web Page/Web Form/Web View orchestration.
 - Extracted projected-document read-access denial decisions into document query policy so QueryService keeps projection, user-permission, and document-share access orchestration.
 - Extracted Website Settings read-access decisions into website-settings policy so WebsiteSettingsService keeps registry, homepage, navigation, theme, and linked website surface orchestration.
 - Extracted report read-access decisions into report policy so ReportService keeps registry lookup, metadata assertions, provider I/O, and report execution/export orchestration.

@@ -8,6 +8,7 @@ import type { WebViewService } from "./web-view-service.js";
 import type { WebsiteThemeService } from "./website-theme-service.js";
 import {
   isExpectedWebsiteSettingsAccessMiss,
+  planWebsiteHomePageResolution,
   planWebsiteSettingsReadAccess,
   shouldResolveWebsiteNavigationItem,
   visibleWebsiteHomePageRoute,
@@ -66,19 +67,21 @@ export class WebsiteSettingsService {
   async getHomePageHref(actor: Actor): Promise<string> {
     const settings = this.readSettings(actor);
     const href = await this.homePageHref(actor, settings);
-    if (href === undefined) {
-      throw notFound("Website home page was not found", "WEBSITE_SETTINGS_NOT_FOUND");
+    const decision = planWebsiteHomePageResolution(href);
+    if (decision.status === "not-found") {
+      throw notFound(decision.message, decision.code);
     }
-    return href;
+    return decision.value;
   }
 
   getHomePageRoute(actor: Actor): string {
     const settings = this.readSettings(actor);
     const route = visibleWebsiteHomePageRoute(settings, (candidate) => this.canReadPageRoute(actor, candidate));
-    if (route === undefined) {
-      throw notFound("Website home page was not found", "WEBSITE_SETTINGS_NOT_FOUND");
+    const decision = planWebsiteHomePageResolution(route);
+    if (decision.status === "not-found") {
+      throw notFound(decision.message, decision.code);
     }
-    return route;
+    return decision.value;
   }
 
   private async homePageHref(actor: Actor, settings: WebsiteSettingsDefinition): Promise<string | undefined> {

@@ -29,6 +29,10 @@ export type WebsiteSettingsReadAccessDecision =
   | { readonly status: "allow" }
   | { readonly status: "deny"; readonly message: string };
 
+export type WebsiteHomePageResolutionDecision<T> =
+  | { readonly status: "found"; readonly value: T }
+  | { readonly status: "not-found"; readonly message: string; readonly code: "WEBSITE_SETTINGS_NOT_FOUND" };
+
 export function isPublishedWebsiteSettingsForActor(
   actor: Actor,
   settings: WebsiteSettingsDefinition
@@ -45,7 +49,19 @@ export function planWebsiteSettingsReadAccess(command: {
     : {
         status: "deny",
         message: `Actor '${command.actor.id}' cannot read website settings`
-      };
+    };
+}
+
+export function planWebsiteHomePageResolution<T>(
+  value: T | undefined
+): WebsiteHomePageResolutionDecision<T> {
+  return value === undefined
+    ? {
+        status: "not-found",
+        message: "Website home page was not found",
+        code: "WEBSITE_SETTINGS_NOT_FOUND"
+      }
+    : { status: "found", value };
 }
 
 export function visibleWebsiteHomePageRoute(
