@@ -23,8 +23,8 @@ Observed counts:
 As of the document-history policy slice:
 
 - Vitest files: `223`
-- Vitest cases: `2551`
-- Remaining gap to Frappe static markers: `233`
+- Vitest cases: `2554`
+- Remaining gap to Frappe static markers: `230`
 
 ## Implication
 

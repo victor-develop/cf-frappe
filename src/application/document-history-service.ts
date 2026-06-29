@@ -6,27 +6,34 @@ import type {
   DocumentSnapshot,
   TenantId
 } from "../core/types.js";
-import {
-  foldDocument,
-  foldDocumentAssignments,
-  foldDocumentFollowers,
-  foldDocumentTags
-} from "../core/events.js";
+import { foldDocument } from "../core/events.js";
 import { documentStream } from "../core/streams.js";
 import type { EventStore } from "../ports/event-store.js";
 import {
+  documentHistoryAssignmentsResult,
+  documentHistoryFollowersResult,
+  documentHistoryTagsResult,
   documentTimelineEntries,
   documentTimelineBaselineEventCount,
   normalizeDocumentTimelineBaselineLimit,
   normalizeDocumentTimelineBeforeSequence,
   normalizeDocumentTimelineLimit,
   selectDocumentTimelinePage,
+  type DocumentAssignments,
+  type DocumentFollowers,
+  type DocumentTags,
   type DocumentTimelineChange,
   type DocumentTimelineEntry
 } from "./document-history-policy.js";
 import type { QueryService } from "./query-service.js";
 
-export type { DocumentTimelineChange, DocumentTimelineEntry } from "./document-history-policy.js";
+export type {
+  DocumentAssignments,
+  DocumentFollowers,
+  DocumentTags,
+  DocumentTimelineChange,
+  DocumentTimelineEntry
+} from "./document-history-policy.js";
 
 export interface DocumentHistoryServiceOptions {
   readonly events: Pick<EventStore, "readStream">;
@@ -50,33 +57,6 @@ export interface DocumentTimeline {
   readonly beforeSequence: number;
   readonly nextBeforeSequence?: number;
   readonly entries: readonly DocumentTimelineEntry[];
-}
-
-export interface DocumentAssignments {
-  readonly tenantId: TenantId;
-  readonly doctype: DocTypeName;
-  readonly name: DocumentName;
-  readonly version: number;
-  readonly docstatus: DocStatus;
-  readonly assignees: readonly string[];
-}
-
-export interface DocumentTags {
-  readonly tenantId: TenantId;
-  readonly doctype: DocTypeName;
-  readonly name: DocumentName;
-  readonly version: number;
-  readonly docstatus: DocStatus;
-  readonly tags: readonly string[];
-}
-
-export interface DocumentFollowers {
-  readonly tenantId: TenantId;
-  readonly doctype: DocTypeName;
-  readonly name: DocumentName;
-  readonly version: number;
-  readonly docstatus: DocStatus;
-  readonly followers: readonly string[];
 }
 
 export class DocumentHistoryService {
@@ -131,14 +111,7 @@ export class DocumentHistoryService {
       maxSequence: document.version,
       payloadKinds: ["DocumentAssigned", "DocumentUnassigned"]
     });
-    return {
-      tenantId: document.tenantId,
-      doctype: document.doctype,
-      name: document.name,
-      version: document.version,
-      docstatus: document.docstatus,
-      assignees: foldDocumentAssignments(events.filter((event) => event.sequence <= document.version))
-    };
+    return documentHistoryAssignmentsResult(document, events);
   }
 
   async getTags(
@@ -153,14 +126,7 @@ export class DocumentHistoryService {
       maxSequence: document.version,
       payloadKinds: ["DocumentTagged", "DocumentUntagged"]
     });
-    return {
-      tenantId: document.tenantId,
-      doctype: document.doctype,
-      name: document.name,
-      version: document.version,
-      docstatus: document.docstatus,
-      tags: foldDocumentTags(events.filter((event) => event.sequence <= document.version))
-    };
+    return documentHistoryTagsResult(document, events);
   }
 
   async getFollowers(
@@ -175,14 +141,7 @@ export class DocumentHistoryService {
       maxSequence: document.version,
       payloadKinds: ["DocumentFollowed", "DocumentUnfollowed"]
     });
-    return {
-      tenantId: document.tenantId,
-      doctype: document.doctype,
-      name: document.name,
-      version: document.version,
-      docstatus: document.docstatus,
-      followers: foldDocumentFollowers(events.filter((event) => event.sequence <= document.version))
-    };
+    return documentHistoryFollowersResult(document, events);
   }
 
   private async baselineBefore(stream: string, firstVisibleSequence: number | undefined): Promise<DocumentSnapshot | null> {

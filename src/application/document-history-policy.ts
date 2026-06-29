@@ -1,12 +1,21 @@
 import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { foldDocumentFrom } from "../core/events.js";
+import {
+  foldDocumentAssignments,
+  foldDocumentFollowers,
+  foldDocumentFrom,
+  foldDocumentTags
+} from "../core/events.js";
 import type {
+  DocStatus,
+  DocTypeName,
   DocumentData,
   DocumentEventPayload,
+  DocumentName,
   DocumentSnapshot,
   DomainEvent,
-  JsonValue
+  JsonValue,
+  TenantId
 } from "../core/types.js";
 
 export const DEFAULT_TIMELINE_LIMIT = 50;
@@ -30,6 +39,33 @@ export interface DocumentTimelineChange {
   readonly field: string;
   readonly oldValue?: JsonValue;
   readonly newValue?: JsonValue;
+}
+
+export interface DocumentAssignments {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly assignees: readonly string[];
+}
+
+export interface DocumentTags {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly tags: readonly string[];
+}
+
+export interface DocumentFollowers {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly version: number;
+  readonly docstatus: DocStatus;
+  readonly followers: readonly string[];
 }
 
 export interface DocumentTimelinePage {
@@ -298,6 +334,55 @@ export function documentTimelineSummary(payload: DocumentEventPayload): string {
     case "DomainCommandApplied":
       return `Applied ${payload.command}`;
   }
+}
+
+export function documentHistoryAssignmentsResult(
+  document: DocumentSnapshot,
+  events: readonly DomainEvent[]
+): DocumentAssignments {
+  return {
+    tenantId: document.tenantId,
+    doctype: document.doctype,
+    name: document.name,
+    version: document.version,
+    docstatus: document.docstatus,
+    assignees: foldDocumentAssignments(documentHistoryEventsAtVersion(events, document.version))
+  };
+}
+
+export function documentHistoryTagsResult(
+  document: DocumentSnapshot,
+  events: readonly DomainEvent[]
+): DocumentTags {
+  return {
+    tenantId: document.tenantId,
+    doctype: document.doctype,
+    name: document.name,
+    version: document.version,
+    docstatus: document.docstatus,
+    tags: foldDocumentTags(documentHistoryEventsAtVersion(events, document.version))
+  };
+}
+
+export function documentHistoryFollowersResult(
+  document: DocumentSnapshot,
+  events: readonly DomainEvent[]
+): DocumentFollowers {
+  return {
+    tenantId: document.tenantId,
+    doctype: document.doctype,
+    name: document.name,
+    version: document.version,
+    docstatus: document.docstatus,
+    followers: foldDocumentFollowers(documentHistoryEventsAtVersion(events, document.version))
+  };
+}
+
+export function documentHistoryEventsAtVersion(
+  events: readonly DomainEvent[],
+  version: number
+): readonly DomainEvent[] {
+  return events.filter((event) => event.sequence <= version);
 }
 
 export function selectDocumentTimelinePage(options: {

@@ -1,4 +1,8 @@
 import {
+  documentHistoryAssignmentsResult,
+  documentHistoryEventsAtVersion,
+  documentHistoryFollowersResult,
+  documentHistoryTagsResult,
   documentTimelineEntries,
   documentTimelineEventChanges,
   documentTimelineBaselineEventCount,
@@ -146,6 +150,64 @@ describe("document history policy", () => {
     })).toBe("Closed workflow_state from Open to Closed");
     expect(documentTimelineSummary({ kind: "DocumentCommentAdded", text: "x".repeat(90) }))
       .toBe(`Commented: ${"x".repeat(77)}...`);
+  });
+
+  it("projects current assignments from events at the authorized document version", () => {
+    const document = snapshot({ title: "Assigned" }, "draft", 3);
+    const events = [
+      event(1, "assign-1", { kind: "DocumentAssigned", assigneeId: "zoe@example.com" }),
+      event(2, "assign-2", { kind: "DocumentAssigned", assigneeId: "amy@example.com" }),
+      event(3, "unassign-1", { kind: "DocumentUnassigned", assigneeId: "zoe@example.com" }),
+      event(4, "assign-racing", { kind: "DocumentAssigned", assigneeId: "late@example.com" })
+    ];
+
+    expect(documentHistoryEventsAtVersion(events, 3).map((item) => item.sequence)).toEqual([1, 2, 3]);
+    expect(documentHistoryAssignmentsResult(document, events)).toEqual({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Timeline",
+      version: 3,
+      docstatus: "draft",
+      assignees: ["amy@example.com"]
+    });
+  });
+
+  it("projects current tags from events at the authorized document version", () => {
+    const document = snapshot({ title: "Tagged" }, "draft", 3);
+    const events = [
+      event(1, "tag-1", { kind: "DocumentTagged", tag: "Urgent" }),
+      event(2, "tag-2", { kind: "DocumentTagged", tag: "Customer" }),
+      event(3, "untag-1", { kind: "DocumentUntagged", tag: "Urgent" }),
+      event(4, "tag-racing", { kind: "DocumentTagged", tag: "Later" })
+    ];
+
+    expect(documentHistoryTagsResult(document, events)).toEqual({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Timeline",
+      version: 3,
+      docstatus: "draft",
+      tags: ["Customer"]
+    });
+  });
+
+  it("projects current followers from events at the authorized document version", () => {
+    const document = snapshot({ title: "Followed" }, "submitted", 3);
+    const events = [
+      event(1, "follow-1", { kind: "DocumentFollowed", followerId: "owner@example.com" }),
+      event(2, "follow-2", { kind: "DocumentFollowed", followerId: "amy@example.com" }),
+      event(3, "unfollow-1", { kind: "DocumentUnfollowed", followerId: "owner@example.com" }),
+      event(4, "follow-racing", { kind: "DocumentFollowed", followerId: "late@example.com" })
+    ];
+
+    expect(documentHistoryFollowersResult(document, events)).toEqual({
+      tenantId: "acme",
+      doctype: "Note",
+      name: "Timeline",
+      version: 3,
+      docstatus: "submitted",
+      followers: ["amy@example.com"]
+    });
   });
 });
 
