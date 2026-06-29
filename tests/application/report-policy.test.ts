@@ -1,4 +1,5 @@
 import {
+  buildReportCharts,
   buildReportGroups,
   limitReportGroups,
   primitiveReportRowValue,
@@ -120,6 +121,129 @@ describe("report policy", () => {
       { key: "a", label: "Same", value: 2 },
       { key: "c", label: "After", value: 2 }
     ], "value", "asc").map((point) => point.key)).toEqual(["c", "a", "b"]);
+  });
+
+  it("builds report charts with default result metadata and numeric points", () => {
+    const groups = buildReportGroups(rows, [{
+      name: "by_priority",
+      field: "priority",
+      summaries: [{ name: "row_count", aggregate: "count" }]
+    }]);
+
+    expect(buildReportCharts(groups, [{
+      name: "priority_chart",
+      type: "bar",
+      group: "by_priority",
+      summary: "row_count"
+    }])).toEqual([{
+      name: "priority_chart",
+      label: "priority_chart",
+      type: "bar",
+      group: "by_priority",
+      summary: "row_count",
+      orderBy: "key",
+      order: "asc",
+      colors: [],
+      showValues: true,
+      points: [
+        { key: "High", label: "High", value: 1 },
+        { key: "Low", label: "Low", value: 1 },
+        { key: null, label: "(empty)", value: 2 }
+      ]
+    }]);
+  });
+
+  it("builds report charts with configured labels, colors, axes, value ordering, and point caps", () => {
+    const groups = buildReportGroups(rows, [{
+      name: "by_priority",
+      field: "priority",
+      summaries: [{ name: "total_count", aggregate: "sum", field: "count" }]
+    }]);
+
+    expect(buildReportCharts(groups, [{
+      name: "priority_chart",
+      label: "Priority Chart",
+      type: "line",
+      group: "by_priority",
+      summary: "total_count",
+      orderBy: "value",
+      order: "desc",
+      maxPoints: 2,
+      colors: ["#2563eb"],
+      showValues: false,
+      xAxisLabel: "Priority",
+      yAxisLabel: "Total Count"
+    }])).toEqual([{
+      name: "priority_chart",
+      label: "Priority Chart",
+      type: "line",
+      group: "by_priority",
+      summary: "total_count",
+      orderBy: "value",
+      order: "desc",
+      colors: ["#2563eb"],
+      showValues: false,
+      xAxisLabel: "Priority",
+      yAxisLabel: "Total Count",
+      points: [
+        { key: "High", label: "High", value: 7 },
+        { key: "Low", label: "Low", value: 3 }
+      ]
+    }]);
+  });
+
+  it("adds chart drilldowns only for matching exact group filters", () => {
+    const groups = buildReportGroups(rows, [{
+      name: "by_priority",
+      field: "priority",
+      summaries: [{ name: "row_count", aggregate: "count" }]
+    }]);
+
+    expect(buildReportCharts(groups, [{
+      name: "priority_chart",
+      type: "pie",
+      group: "by_priority",
+      summary: "row_count"
+    }], [
+      { name: "priority_search", field: "priority", operator: "contains" },
+      { name: "active", field: "active" },
+      { name: "priority", field: "priority" }
+    ])[0]?.points).toEqual([
+      {
+        key: "High",
+        label: "High",
+        value: 1,
+        drilldown: { filter: "priority", value: "High", query: "filter_priority=High" }
+      },
+      {
+        key: "Low",
+        label: "Low",
+        value: 1,
+        drilldown: { filter: "priority", value: "Low", query: "filter_priority=Low" }
+      },
+      { key: null, label: "(empty)", value: 2 }
+    ]);
+  });
+
+  it("builds empty chart points for missing groups and non-numeric summaries", () => {
+    const groups = buildReportGroups(rows, [{
+      name: "by_priority",
+      field: "priority",
+      summaries: [{ name: "first_title", aggregate: "min", field: "title" }]
+    }]);
+
+    expect(buildReportCharts(groups, [{
+      name: "missing_group",
+      type: "bar",
+      group: "missing",
+      summary: "first_title"
+    }])[0]?.points).toEqual([]);
+    expect(buildReportCharts(groups, [{
+      name: "text_summary",
+      type: "bar",
+      group: "by_priority",
+      summary: "first_title"
+    }])[0]?.points.map((point) => point.value)).toEqual([null, null, null]);
   });
 
   it("builds report groups sorted by primitive group keys", () => {

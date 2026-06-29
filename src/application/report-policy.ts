@@ -1,7 +1,9 @@
 import { badRequest } from "../core/errors.js";
 import type {
+  ReportChartDefinition,
   ReportChartOrder,
   ReportChartOrderBy,
+  ReportChartType,
   ReportFilterDefinition,
   ReportGroupDefinition,
   ReportSummaryDefinition
@@ -33,6 +35,21 @@ export interface ReportChartPoint {
   readonly drilldown?: ReportChartDrilldown;
 }
 
+export interface ReportChartResult {
+  readonly name: string;
+  readonly label: string;
+  readonly type: ReportChartType;
+  readonly group: string;
+  readonly summary: string;
+  readonly orderBy: ReportChartOrderBy;
+  readonly order: ReportChartOrder;
+  readonly colors: readonly string[];
+  readonly showValues: boolean;
+  readonly xAxisLabel?: string;
+  readonly yAxisLabel?: string;
+  readonly points: readonly ReportChartPoint[];
+}
+
 export interface ReportGroupRow {
   readonly key: JsonPrimitive;
   readonly label: string;
@@ -45,6 +62,8 @@ export interface ReportGroupResult {
   readonly field: string;
   readonly rows: readonly ReportGroupRow[];
 }
+
+const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
 
 export function reportSummaryValue(
   summary: ReportSummaryDefinition,
@@ -119,6 +138,38 @@ export function sortReportChartPoints(
   });
 }
 
+export function buildReportCharts(
+  groups: readonly ReportGroupResult[],
+  charts: readonly ReportChartDefinition[],
+  filters: readonly ReportFilterDefinition[] = []
+): readonly ReportChartResult[] {
+  return charts.map((chart) => {
+    const group = groups.find((item) => item.name === chart.group);
+    const drilldownFilter = group === undefined ? undefined : exactDrilldownFilterForGroup(filters, group);
+    const orderBy = chart.orderBy ?? "key";
+    const order = chart.order ?? "asc";
+    const points = sortReportChartPoints(
+      (group?.rows ?? []).map((row) => reportChartPoint(row, chart.summary, drilldownFilter)),
+      orderBy,
+      order
+    ).slice(0, chart.maxPoints ?? Number.POSITIVE_INFINITY);
+    return {
+      name: chart.name,
+      label: chart.label ?? chart.name,
+      type: chart.type,
+      group: chart.group,
+      summary: chart.summary,
+      orderBy,
+      order,
+      colors: chart.colors ?? EMPTY_CHART_COLORS,
+      showValues: chart.showValues ?? true,
+      ...(chart.xAxisLabel === undefined ? {} : { xAxisLabel: chart.xAxisLabel }),
+      ...(chart.yAxisLabel === undefined ? {} : { yAxisLabel: chart.yAxisLabel }),
+      points
+    };
+  });
+}
+
 export function buildReportGroups(
   rows: readonly ReportRow[],
   groups: readonly ReportGroupDefinition[]
@@ -162,6 +213,30 @@ export function limitReportGroups(
       ? group
       : { ...group, rows: group.rows.slice(0, maxRows) };
   });
+}
+
+function reportChartPoint(
+  row: ReportGroupRow,
+  summaryName: string,
+  drilldownFilter: ReportFilterDefinition | undefined
+): ReportChartPoint {
+  const summary = row.summaries.find((item) => item.name === summaryName);
+  const drilldown = drilldownFilter === undefined ? undefined : reportChartDrilldown(drilldownFilter, row.key);
+  return {
+    key: row.key,
+    label: row.label,
+    value: typeof summary?.value === "number" ? summary.value : null,
+    ...(drilldown === undefined ? {} : { drilldown })
+  };
+}
+
+function exactDrilldownFilterForGroup(
+  filters: readonly ReportFilterDefinition[],
+  group: ReportGroupResult
+): ReportFilterDefinition | undefined {
+  return filters.find((filter) =>
+    filter.field === group.field && (filter.operator ?? "eq") === "eq"
+  );
 }
 
 function requiredSummaryField(summary: ReportSummaryDefinition): string {

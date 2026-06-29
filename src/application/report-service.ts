@@ -7,10 +7,6 @@ import {
   canReadReport,
   isCustomReport,
   type ReportColumnDefinition,
-  type ReportChartDefinition,
-  type ReportChartOrder,
-  type ReportChartOrderBy,
-  type ReportChartType,
   type ReportDefinition,
   type ReportFilterDefinition,
   type ReportFilterExpression,
@@ -26,20 +22,19 @@ import type { Actor, DocTypeDefinition, DocumentSnapshot, FieldDefinition, Field
 import { QueryService } from "./query-service.js";
 import { CSV_CONTENT_TYPE, csvLine, filenamePart } from "./csv.js";
 import {
+  buildReportCharts,
   buildReportGroups,
   limitReportGroups,
-  reportChartDrilldown,
   reportSummaryValue,
-  sortReportChartPoints,
+  type ReportChartResult,
   type ReportGroupResult,
-  type ReportGroupRow,
-  type ReportChartPoint,
   type ReportRow,
   type ReportSummaryValue
 } from "./report-policy.js";
 
 export type ReportFilters = Readonly<Record<string, ReportFilterValue | undefined>>;
 export type {
+  ReportChartResult,
   ReportChartDrilldown,
   ReportChartPoint,
   ReportGroupResult,
@@ -49,22 +44,6 @@ export type {
 } from "./report-policy.js";
 
 const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
-const EMPTY_CHART_COLORS: readonly string[] = Object.freeze([]);
-
-export interface ReportChartResult {
-  readonly name: string;
-  readonly label: string;
-  readonly type: ReportChartType;
-  readonly group: string;
-  readonly summary: string;
-  readonly orderBy: ReportChartOrderBy;
-  readonly order: ReportChartOrder;
-  readonly colors: readonly string[];
-  readonly showValues: boolean;
-  readonly xAxisLabel?: string;
-  readonly yAxisLabel?: string;
-  readonly points: readonly ReportChartPoint[];
-}
 
 export interface ReportFilterControlResult {
   readonly name: string;
@@ -201,7 +180,7 @@ export class ReportService {
       order,
       summary: buildReportSummary(aggregateRows, report.summaries ?? []),
       groups: limitedGroups,
-      charts: buildReportCharts(groups, report),
+      charts: buildReportCharts(groups, report.charts ?? [], report.filters ?? []),
       rows,
       limit,
       offset,
@@ -323,7 +302,7 @@ export class ReportService {
       order,
       summary: buildReportSummary(filtered, report.summaries ?? []),
       groups: limitedGroups,
-      charts: buildReportCharts(groups, report),
+      charts: buildReportCharts(groups, report.charts ?? [], report.filters ?? []),
       rows: sorted.slice(offset, offset + limit),
       limit,
       offset,
@@ -966,56 +945,6 @@ function buildReportSummary(
   summaries: readonly ReportSummaryDefinition[]
 ): readonly ReportSummaryValue[] {
   return summaries.map((summary) => reportSummaryValue(summary, rows));
-}
-
-function buildReportCharts(
-  groups: readonly ReportGroupResult[],
-  report: ReportDefinition
-): readonly ReportChartResult[] {
-  return (report.charts ?? []).map((chart) => {
-    const group = groups.find((item) => item.name === chart.group);
-    const drilldownFilter = group === undefined ? undefined : exactDrilldownFilterForGroup(report, group);
-    const orderBy = chart.orderBy ?? "key";
-    const order = chart.order ?? "asc";
-    const points = sortReportChartPoints(
-      (group?.rows ?? []).map((row) => {
-        const summary = row.summaries.find((item) => item.name === chart.summary);
-        const drilldown = drilldownFilter === undefined ? undefined : reportChartDrilldown(drilldownFilter, row.key);
-        return {
-          key: row.key,
-          label: row.label,
-          value: typeof summary?.value === "number" ? summary.value : null,
-          ...(drilldown === undefined ? {} : { drilldown })
-        };
-      }),
-      orderBy,
-      order
-    )
-      .slice(0, chart.maxPoints ?? Number.POSITIVE_INFINITY);
-    return {
-      name: chart.name,
-      label: chart.label ?? chart.name,
-      type: chart.type,
-      group: chart.group,
-      summary: chart.summary,
-      orderBy,
-      order,
-      colors: chart.colors ?? EMPTY_CHART_COLORS,
-      showValues: chart.showValues ?? true,
-      ...(chart.xAxisLabel === undefined ? {} : { xAxisLabel: chart.xAxisLabel }),
-      ...(chart.yAxisLabel === undefined ? {} : { yAxisLabel: chart.yAxisLabel }),
-      points
-    };
-  });
-}
-
-function exactDrilldownFilterForGroup(
-  report: ReportDefinition,
-  group: ReportGroupResult
-): ReportFilterDefinition | undefined {
-  return (report.filters ?? []).find((filter) =>
-    filter.field === group.field && (filter.operator ?? "eq") === "eq"
-  );
 }
 
 function coerceFilterValue(
