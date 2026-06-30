@@ -1,7 +1,9 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
   normalizeOidcTokenSource,
+  resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
+  resolveOidcSyncActorFromClaims,
   normalizeOidcAudiences,
   normalizeOidcIssuer,
   normalizeOidcJwksUrl,
@@ -9,11 +11,8 @@ import {
   type OidcTokenSource
 } from "../../application/access-policy.js";
 import {
-  DEFAULT_TENANT_ID,
-  SYSTEM_MANAGER_ROLE,
   type Actor,
-  type DocumentData,
-  type TenantId
+  type DocumentData
 } from "../../core/types.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
 import type { ActorResolver } from "./actor.js";
@@ -128,36 +127,23 @@ export function oidcAccountSyncActorResolver<TClaims extends OidcJwtClaims = Oid
       if (booleanOptionFromClaims(claims, options.allowed) === false) {
         throw permissionDenied("OIDC token is not allowed");
       }
-      const provider = firstNonBlank(options.provider) ?? "oidc";
-      const email = emailFromClaims(claims);
-      const subject = firstNonBlank(options.subject?.(claims), claims.sub);
-      if (subject === undefined) {
-        throw permissionDenied("OIDC token subject is missing");
-      }
-      const tenantId = tenantIdFromClaims(claims, options.tenantId);
-      const roles = rolesFromClaims(claims, options.roles);
-      const enabled = booleanOptionFromClaims(claims, options.enabled);
-      const emailVerified = booleanOptionFromClaims(claims, options.emailVerified) ??
-        (typeof claims.email_verified === "boolean" ? claims.email_verified : undefined);
-      const metadata = metadataFromClaims(claims, options.metadata);
-      const userId = firstNonBlank(options.actorId?.(claims), email, claims.preferred_username, claims.sub) ??
-        `${provider}:${subject}`;
+      const projection = resolveOidcAccountSyncProjection(claims, options);
       const account = await options.userAccounts.syncProvider({
-        actor: syncActorForClaims(claims, {
-          tenantId,
-          provider,
+        actor: resolveOidcSyncActorFromClaims(claims, {
+          tenantId: projection.tenantId,
+          provider: projection.provider,
           ...(options.syncActorId === undefined ? {} : { syncActorId: options.syncActorId }),
           ...(options.syncActorRoles === undefined ? {} : { syncActorRoles: options.syncActorRoles })
         }),
-        provider,
-        subject,
-        userId,
-        ...(email === undefined ? {} : { email }),
-        ...(roles === undefined ? {} : { roles }),
-        ...(enabled === undefined ? {} : { enabled }),
-        ...(emailVerified === undefined ? {} : { emailVerified }),
-        tenantId,
-        ...(metadata === undefined ? {} : { metadata })
+        provider: projection.provider,
+        subject: projection.subject,
+        userId: projection.userId,
+        ...(projection.email === undefined ? {} : { email: projection.email }),
+        ...(projection.roles === undefined ? {} : { roles: projection.roles }),
+        ...(projection.enabled === undefined ? {} : { enabled: projection.enabled }),
+        ...(projection.emailVerified === undefined ? {} : { emailVerified: projection.emailVerified }),
+        tenantId: projection.tenantId,
+        ...(projection.metadata === undefined ? {} : { metadata: projection.metadata })
       });
       if (!account.enabled) {
         throw permissionDenied("OIDC account is disabled");
@@ -210,64 +196,11 @@ async function fetchOidcJwks(
   return assertJwks<OidcJwks>(await response.json(), "OIDC signing keys");
 }
 
-function tenantIdFromClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  tenant: OidcActorResolverOptions<TClaims>["tenantId"]
-): TenantId {
-  const value = typeof tenant === "function" ? tenant(claims) : tenant ?? DEFAULT_TENANT_ID;
-  return value && value.trim().length > 0 ? value : DEFAULT_TENANT_ID;
-}
-
-function rolesFromClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  roles: OidcActorResolverOptions<TClaims>["roles"]
-): readonly string[] | undefined {
-  return typeof roles === "function" ? roles(claims) : roles;
-}
-
-function emailFromClaims(claims: OidcJwtClaims): string | undefined {
-  return firstNonBlank(claims.email)?.trim().toLowerCase();
-}
-
 function booleanOptionFromClaims<TClaims extends OidcJwtClaims>(
   claims: TClaims,
   value: boolean | ((claims: TClaims) => boolean | undefined) | undefined
 ): boolean | undefined {
   return typeof value === "function" ? value(claims) : value;
-}
-
-function metadataFromClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  value: DocumentData | ((claims: TClaims) => DocumentData | undefined) | undefined
-): DocumentData | undefined {
-  return typeof value === "function" ? value(claims) : value;
-}
-
-function syncActorForClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  options: {
-    readonly tenantId: TenantId;
-    readonly provider: string;
-    readonly syncActorId?: string | ((claims: TClaims) => string | undefined);
-    readonly syncActorRoles?: readonly string[];
-  }
-): Actor {
-  return {
-    id: syncActorIdForClaims(claims, options.provider, options.syncActorId),
-    roles: options.syncActorRoles ?? [SYSTEM_MANAGER_ROLE],
-    tenantId: options.tenantId
-  };
-}
-
-function syncActorIdForClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  provider: string,
-  syncActorId: string | ((claims: TClaims) => string | undefined) | undefined
-): string {
-  return firstNonBlank(
-    typeof syncActorId === "function" ? syncActorId(claims) : syncActorId,
-    `${provider}:sync`
-  ) ?? `${provider}:sync`;
 }
 
 function oidcTokenFromRequest(

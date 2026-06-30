@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC actor-claims policy slice:
+As of the OIDC account-sync projection policy slice:
 
 - Vitest files: `235`
-- Vitest cases: `2758`
-- Remaining gap to Frappe static markers: `26`
+- Vitest cases: `2763`
+- Remaining gap to Frappe static markers: `21`
 
 ## Implication
 

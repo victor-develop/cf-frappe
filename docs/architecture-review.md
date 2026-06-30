@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted OIDC account-sync claim projection and sync-actor shaping into access policy so the HTTP OIDC account-sync resolver keeps allowed gating and user-account service orchestration while the auth capability owns provider, subject, user id, email, roles, enabled/email-verification, metadata, tenant, and sync actor decisions.
 - Extracted OIDC claims-to-actor mapping into access policy so the HTTP OIDC resolver keeps JWT verification and optional custom mapping while the auth capability owns default actor id, role, tenant, email, and invalid-claims decisions.
 - Extracted OIDC token-source configuration normalization into access policy so the HTTP OIDC resolver keeps request token extraction and custom request resolvers while the auth capability owns default Bearer, header, cookie, and scheme invariants.
 - Extracted OIDC provider role-list, claim-name, and hosted-domain normalization into access policy so Okta/Auth0/Google Workspace presets keep provider-specific claim mapping while the auth capability owns shared provider normalization invariants.

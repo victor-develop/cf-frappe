@@ -10,7 +10,9 @@ import {
   normalizeOidcJwksUrl,
   normalizeOidcRoleList,
   normalizeOidcTokenSource,
-  resolveOidcActorFromClaims
+  resolveOidcAccountSyncProjection,
+  resolveOidcActorFromClaims,
+  resolveOidcSyncActorFromClaims
 } from "../../src";
 
 describe("access policy", () => {
@@ -184,6 +186,84 @@ describe("access policy", () => {
     expect(() =>
       resolveOidcActorFromClaims({ sub: "subject-1" }, { roles: ["User", " "] })
     ).toThrow("OIDC actor roles are invalid");
+  });
+
+  it("resolves default OIDC account-sync projections from claims", () => {
+    expect(resolveOidcAccountSyncProjection({
+      sub: "subject-1",
+      email: " OWNER@EXAMPLE.COM ",
+      preferred_username: "owner",
+      email_verified: true
+    })).toEqual({
+      provider: "oidc",
+      subject: "subject-1",
+      userId: "owner@example.com",
+      tenantId: "default",
+      email: "owner@example.com",
+      emailVerified: true
+    });
+  });
+
+  it("resolves configured OIDC account-sync projections from claims", () => {
+    expect(resolveOidcAccountSyncProjection(
+      {
+        sub: "subject-1",
+        email: "owner@example.com",
+        preferred_username: "owner",
+        groups: ["Support"],
+        enabledByProvider: false
+      },
+      {
+        provider: "okta",
+        subject: (claims) => `okta:${claims.sub}`,
+        actorId: (claims) => claims.preferred_username,
+        tenantId: () => "acme",
+        roles: (claims) => claims.groups,
+        enabled: (claims) => claims.enabledByProvider,
+        emailVerified: true,
+        metadata: (claims) => ({ source: claims.sub })
+      }
+    )).toEqual({
+      provider: "okta",
+      subject: "okta:subject-1",
+      userId: "owner",
+      tenantId: "acme",
+      email: "owner@example.com",
+      roles: ["Support"],
+      enabled: false,
+      emailVerified: true,
+      metadata: { source: "subject-1" }
+    });
+  });
+
+  it("rejects OIDC account-sync projections without a subject", () => {
+    expect(() => resolveOidcAccountSyncProjection({ email: "owner@example.com" })).toThrow(
+      "OIDC token subject is missing"
+    );
+  });
+
+  it("resolves default OIDC sync actors", () => {
+    expect(resolveOidcSyncActorFromClaims({ sub: "subject-1" }, { provider: "okta", tenantId: "acme" })).toEqual({
+      id: "okta:sync",
+      roles: ["System Manager"],
+      tenantId: "acme"
+    });
+  });
+
+  it("resolves configured OIDC sync actors", () => {
+    expect(resolveOidcSyncActorFromClaims(
+      { sub: "subject-1", preferred_username: "owner" },
+      {
+        provider: "okta",
+        tenantId: "acme",
+        syncActorId: (claims) => `${claims.preferred_username}:sync`,
+        syncActorRoles: ["Integration Manager"]
+      }
+    )).toEqual({
+      id: "owner:sync",
+      roles: ["Integration Manager"],
+      tenantId: "acme"
+    });
   });
 
   it("normalizes OIDC provider role lists", () => {
