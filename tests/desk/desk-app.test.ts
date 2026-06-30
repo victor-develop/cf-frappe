@@ -6817,6 +6817,22 @@ describe("Desk app", () => {
     await expect(denied.text()).resolves.toContain("cannot manage print settings");
   });
 
+  it("renders disabled job schedule routes from the Desk admin surface", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs/schedules");
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Job schedules are not enabled");
+  });
+
   it("renders and dispatches job schedules from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();

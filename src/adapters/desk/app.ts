@@ -40,6 +40,7 @@ import { ensureJobHistoryServiceAvailable } from "../../application/job-history-
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import { ensureJobRetryAvailable } from "../../application/job-retry-policy.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
+import { ensureJobScheduleServiceAvailable } from "../../application/job-schedule-policy.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import { ensureKanbanServiceAvailable } from "../../application/kanban-policy.js";
 import type { KanbanService } from "../../application/kanban-service.js";
@@ -3177,9 +3178,7 @@ function requireJobRetry(options: DeskAppOptions): JobRetryPort {
 }
 
 function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
-  if (!options.jobSchedules) {
-    throw new FrameworkError("JOB_SCHEDULE_NOT_FOUND", "Job schedules are not enabled", { status: 404 });
-  }
+  ensureJobScheduleServiceAvailable(options.jobSchedules);
   return options.jobSchedules;
 }
 

@@ -217,6 +217,12 @@ export function ensureJobScheduleCapabilityResourceAvailable<T>(
   }
 }
 
+export function ensureJobScheduleServiceAvailable<T>(schedules: T | undefined): asserts schedules is T {
+  if (schedules === undefined) {
+    throw notFound("Job schedules are not enabled", "JOB_SCHEDULE_NOT_FOUND");
+  }
+}
+
 export function ensureJobScheduleRuntimeCronTriggerConfigured(
   cron: string,
   runtimeCronTriggers: ReadonlySet<string> | undefined

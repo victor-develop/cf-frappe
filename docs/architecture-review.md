@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Desk job schedule service availability decisions into job-schedule policy so Desk schedule routes keep service lookup, actor resolution, filter parsing, schedule orchestration, redirects, and page rendering.
 - Extracted Desk job retry availability decisions into job-retry policy so Desk retry routes keep retry-port lookup, actor resolution, retry orchestration, and redirects.
 - Extracted Desk job history service availability decisions into job-history policy so Desk job routes keep actor resolution, filter parsing, dashboard orchestration, navigation context loading, and page rendering.
 - Extracted Desk file service availability decisions into file policy so Desk file routes keep actor resolution, dashboard query parsing, upload/download/delete orchestration, and failure rendering.

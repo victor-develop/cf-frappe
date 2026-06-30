@@ -5,6 +5,7 @@ import {
   effectiveJobSchedule,
   ensureJobScheduleCapabilityResourceAvailable,
   ensureJobScheduleRuntimeCronTriggerConfigured,
+  ensureJobScheduleServiceAvailable,
   ensureUniqueJobScheduleIds,
   isDynamicJobScheduleValue,
   jobScheduleIdentity,
@@ -99,6 +100,22 @@ describe("job schedule policy", () => {
         status: 404
       });
     }
+  });
+
+  it("guards job schedule service availability before Desk schedule routes", () => {
+    expect(() => ensureJobScheduleServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureJobScheduleServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "JOB_SCHEDULE_NOT_FOUND",
+      message: "Job schedules are not enabled",
+      status: 404
+    });
   });
 
   it("guards runtime schedule cron triggers against Worker configuration", () => {
