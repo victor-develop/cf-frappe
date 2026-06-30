@@ -1,6 +1,7 @@
 import {
   applyDocumentToKanbanColumns,
   defineKanban,
+  ensureKanbanServiceAvailable,
   initialKanbanColumnStates,
   kanbanCard,
   kanbanCardLimit,
@@ -22,6 +23,22 @@ const board = defineKanban({
 });
 
 describe("kanban policy", () => {
+  it("guards kanban service availability before Desk kanban routes", () => {
+    expect(() => ensureKanbanServiceAvailable({ runKanban: async () => ({}) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureKanbanServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Kanbans are not enabled",
+      status: 404
+    });
+  });
+
   it("uses configured card limits or the default limit", () => {
     expect(kanbanCardLimit(undefined)).toBe(50);
     expect(kanbanCardLimit(1)).toBe(1);

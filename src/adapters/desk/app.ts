@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AssignmentRuleService } from "../../application/assignment-rule-service.js";
+import { ensureCalendarServiceAvailable } from "../../application/calendar-policy.js";
 import type { CalendarService } from "../../application/calendar-service.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DashboardService } from "../../application/dashboard-service.js";
@@ -38,6 +39,7 @@ import { isPreviewableFileContentType } from "../../application/file-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
+import { ensureKanbanServiceAvailable } from "../../application/kanban-policy.js";
 import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "../../application/print-policy.js";
@@ -2911,16 +2913,12 @@ function listWorkspaces(options: DeskAppOptions, actor: Actor): readonly Workspa
 }
 
 function requireKanbans(options: DeskAppOptions): KanbanService {
-  if (!options.kanbans) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Kanbans are not enabled", { status: 404 });
-  }
+  ensureKanbanServiceAvailable(options.kanbans);
   return options.kanbans;
 }
 
 function requireCalendars(options: DeskAppOptions): CalendarService {
-  if (!options.calendars) {
-    throw new FrameworkError("CALENDAR_NOT_FOUND", "Calendars are not enabled", { status: 404 });
-  }
+  ensureCalendarServiceAvailable(options.calendars);
   return options.calendars;
 }
 

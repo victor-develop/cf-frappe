@@ -1,6 +1,7 @@
 import { andListFilterExpressions } from "../core/list-view.js";
 import { canReadCalendar } from "../core/calendar.js";
 import type { CalendarDefinition } from "../core/calendar.js";
+import { notFound } from "../core/errors.js";
 import type { Actor, DocumentSnapshot, JsonValue, ListFilterExpression } from "../core/types.js";
 
 export const DEFAULT_CALENDAR_MAX_EVENTS = 100;
@@ -36,6 +37,12 @@ export interface CalendarRunResult {
   readonly total: number;
   readonly hasMore: boolean;
   readonly events: readonly CalendarEventResult[];
+}
+
+export function ensureCalendarServiceAvailable<T>(calendars: T | undefined): asserts calendars is T {
+  if (calendars === undefined) {
+    throw notFound("Calendars are not enabled", "CALENDAR_NOT_FOUND");
+  }
 }
 
 export function planCalendarReadAccess(options: {

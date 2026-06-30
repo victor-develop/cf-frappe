@@ -920,6 +920,15 @@ describe("Desk app", () => {
     expect(html).toContain("Kanban Closed");
   });
 
+  it("uses the kanban policy error for Desk kanban routes when kanbans are disabled", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/kanbans/Notes%20Board");
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Kanbans are not enabled");
+  });
+
   it("renders metadata-defined calendars in Desk", async () => {
     const Event = defineDocType({
       name: "Event",
@@ -1007,6 +1016,15 @@ describe("Desk app", () => {
     expect(html).toContain("calendar-event");
     expect(html).toContain("Calendar Event");
     expect(html).toContain('href="/desk/Event/Calendar%20Event"');
+  });
+
+  it("uses the calendar policy error for Desk calendar routes when calendars are disabled", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/calendars/Events%20Calendar");
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Calendars are not enabled");
   });
 
   it("renders and updates a durable notification inbox in Desk", async () => {

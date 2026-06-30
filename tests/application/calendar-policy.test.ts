@@ -4,6 +4,7 @@ import {
   calendarFilterExpression,
   calendarRunResult,
   defineCalendar,
+  ensureCalendarServiceAvailable,
   planCalendarReadAccess,
   type DocumentSnapshot
 } from "../../src";
@@ -16,6 +17,22 @@ const baseCalendar = defineCalendar({
 });
 
 describe("calendar policy", () => {
+  it("guards calendar service availability before Desk calendar routes", () => {
+    expect(() => ensureCalendarServiceAvailable({ runCalendar: async () => ({}) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureCalendarServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "CALENDAR_NOT_FOUND",
+      message: "Calendars are not enabled",
+      status: 404
+    });
+  });
+
   it("bounds calendar event limits by the configured maximum", () => {
     expect(calendarEventLimit(undefined, 100)).toBe(100);
     expect(calendarEventLimit(0, 100)).toBe(100);

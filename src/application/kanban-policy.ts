@@ -1,5 +1,6 @@
 import { canReadKanban } from "../core/kanban.js";
 import type { KanbanColumnDefinition, KanbanDefinition } from "../core/kanban.js";
+import { notFound } from "../core/errors.js";
 import type { Actor, DocumentSnapshot, JsonValue } from "../core/types.js";
 
 export const DEFAULT_KANBAN_MAX_CARDS_PER_COLUMN = 50;
@@ -36,6 +37,12 @@ export interface KanbanColumnState {
   readonly column: KanbanColumnDefinition;
   readonly total: number;
   readonly cards: readonly KanbanCardResult[];
+}
+
+export function ensureKanbanServiceAvailable<T>(kanbans: T | undefined): asserts kanbans is T {
+  if (kanbans === undefined) {
+    throw notFound("Kanbans are not enabled");
+  }
 }
 
 export function planKanbanReadAccess(options: {
