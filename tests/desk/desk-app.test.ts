@@ -112,7 +112,7 @@ describe("Desk app", () => {
   function makeDesk(
     actor = owner,
     options: {
-      readonly realtime?: boolean;
+      readonly realtime?: boolean | { readonly route?: string };
       readonly documentShares?: boolean;
       readonly printPdfRenderer?: PrintPdfRenderer;
       readonly prints?: boolean;
@@ -3504,6 +3504,22 @@ describe("Desk app", () => {
 
     const create = await app.request("/desk/Note/new");
     await expect(create.text()).resolves.not.toContain('data-cf-frappe-presence="document"');
+  });
+
+  it("renders configured realtime routes on generated update forms", async () => {
+    const { app, services } = makeDesk(owner, { realtime: { route: "/live/realtime" } });
+    const document = await services.documents.create({
+      actor: owner,
+      doctype: "Note",
+      data: data({ title: "Custom Realtime Route" })
+    });
+
+    const response = await app.request(`/desk/Note/${encodeURIComponent(document.name)}`);
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-cf-frappe-presence="document"');
+    expect(html).toContain('data-realtime-route="/live/realtime"');
   });
 
   it("serves a built-in Desk client API for model client scripts", async () => {

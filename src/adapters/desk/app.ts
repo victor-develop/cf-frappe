@@ -60,6 +60,7 @@ import type { PrintService } from "../../application/print-service.js";
 import { ensurePrintSettingsServiceAvailable } from "../../application/print-settings-policy.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
+import { resolveDeskRealtimeRoute, type DeskRealtimeRouteConfig } from "../../application/realtime-policy.js";
 import { ensureReportServiceAvailable } from "../../application/report-policy.js";
 import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
@@ -313,7 +314,7 @@ export interface DeskAppOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
-  readonly realtime?: boolean | { readonly route?: string };
+  readonly realtime?: DeskRealtimeRouteConfig;
   readonly actor: ActorResolver;
 }
 
@@ -2878,10 +2879,7 @@ function listDeskDoctypes(options: DeskAppOptions, actor: Actor): Promise<readon
 }
 
 function deskRealtimeRoute(options: DeskAppOptions): string | undefined {
-  if (!options.realtime) {
-    return undefined;
-  }
-  return typeof options.realtime === "object" ? options.realtime.route ?? "/api/realtime" : "/api/realtime";
+  return resolveDeskRealtimeRoute(options.realtime);
 }
 
 function deskRealtimeRouteOption(options: DeskAppOptions): { readonly realtimeRoute: string } | Record<string, never> {
