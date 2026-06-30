@@ -35,7 +35,7 @@ import type {
   FileService,
   UpdateFileMetadataCommand
 } from "../../application/file-service.js";
-import { isPreviewableFileContentType } from "../../application/file-policy.js";
+import { ensureFileServiceAvailable, isPreviewableFileContentType } from "../../application/file-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -3209,9 +3209,7 @@ function requireDashboards(options: DeskAppOptions): DashboardService {
 }
 
 function requireFiles(options: DeskAppOptions): FileService {
-  if (!options.files) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Files are not enabled", { status: 404 });
-  }
+  ensureFileServiceAvailable(options.files);
   return options.files;
 }
 

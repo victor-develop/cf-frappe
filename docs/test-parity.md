@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk notification service availability policy slice:
+As of the Desk file service availability policy slice:
 
 - Vitest files: `233`
-- Vitest cases: `2709`
-- Remaining gap to Frappe static markers: `75`
+- Vitest cases: `2711`
+- Remaining gap to Frappe static markers: `73`
 
 ## Implication
 

@@ -21,6 +21,7 @@ import {
   ensureFilePendingMultipartUpload,
   ensureFileMetadataPatchProvided,
   ensureFileRenditionGenerationAllowed,
+  ensureFileServiceAvailable,
   ensureDirectUploadMatches,
   ensureMultipartCompletionMatchesManifest,
   ensureMultipartPartFitsReservation,
@@ -239,6 +240,22 @@ import type {
 } from "../../src";
 
 describe("file policy", () => {
+  it("guards file service availability", () => {
+    const service = { dashboard: async () => ({}) };
+    expect(() => ensureFileServiceAvailable(service)).not.toThrow();
+    try {
+      ensureFileServiceAvailable(undefined);
+      throw new Error("expected file service availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "DOCUMENT_NOT_FOUND",
+        message: "Files are not enabled",
+        status: 404
+      });
+    }
+  });
+
   it("normalizes content types for comparison", () => {
     expect(normalizeContentType(" Application/PDF ; charset=utf-8 ")).toBe("application/pdf ; charset=utf-8");
     expect(normalizeContentType(undefined)).toBe("");

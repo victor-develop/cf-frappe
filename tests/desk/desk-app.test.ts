@@ -2745,6 +2745,32 @@ describe("Desk app", () => {
     expect(storage.has("acme/files/file_object-hello.txt")).toBe(false);
   });
 
+  it("uses the file policy error for Desk file routes when files are disabled", async () => {
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => owner
+    });
+
+    const manager = await app.request("/desk/files");
+    expect(manager.status).toBe(404);
+    await expect(manager.text()).resolves.toContain("Files are not enabled");
+
+    const upload = await app.request("/desk/files", {
+      method: "POST",
+      headers: { "content-length": "0" },
+      body: new FormData()
+    });
+    expect(upload.status).toBe(404);
+    await expect(upload.text()).resolves.toContain("Files are not enabled");
+
+    const content = await app.request("/desk/files/file_object/content");
+    expect(content.status).toBe(404);
+    await expect(content.text()).resolves.toContain("Files are not enabled");
+  });
+
   it("renders buffered Desk file forms when storage cannot create direct upload targets", async () => {
     const { app, documents } = makeFileDesk(owner, {
       directUploads: false,

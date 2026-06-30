@@ -156,6 +156,12 @@ export function ensureFileContentTypeTransformable(contentType: string, fileLabe
   }
 }
 
+export function ensureFileServiceAvailable<T>(files: T | undefined): asserts files is T {
+  if (files === undefined) {
+    throw notFound("Files are not enabled");
+  }
+}
+
 export function requireFileTransformer(transformer: FileTransformer | undefined): FileTransformer {
   if (!transformer) {
     throw badRequest("File transforms are not configured");
