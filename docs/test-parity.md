@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the HTTP print-settings availability policy slice:
+As of the HTTP saved-filter query availability policy slice:
 
 - Vitest files: `234`
-- Vitest cases: `2734`
-- Remaining gap to Frappe static markers: `50`
+- Vitest cases: `2736`
+- Remaining gap to Frappe static markers: `48`
 
 ## Implication
 

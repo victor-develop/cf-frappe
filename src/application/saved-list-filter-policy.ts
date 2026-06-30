@@ -1,5 +1,5 @@
 import type { SavedListFilter } from "./saved-list-filter-events.js";
-import { notFound } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import { can } from "../core/permissions.js";
 import type {
   Actor,
@@ -31,6 +31,12 @@ export function findSavedListFilter(
 export function ensureSavedListFilterServiceAvailable<T>(savedFilters: T | undefined): asserts savedFilters is T {
   if (savedFilters === undefined) {
     throw notFound("Saved filters are not enabled");
+  }
+}
+
+export function ensureSavedListFilterApiAvailable<T>(savedFilters: T | undefined): asserts savedFilters is T {
+  if (savedFilters === undefined) {
+    throw badRequest("Saved filters are not enabled");
   }
 }
 

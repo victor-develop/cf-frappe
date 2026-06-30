@@ -1832,6 +1832,26 @@ describe("resource api", () => {
     expect(deleted.status).toBe(204);
   });
 
+  it("maps disabled resource saved-filter queries to bad requests", async () => {
+    const services = createServices(["e1"]);
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const response = await app.request("/api/resource/Note?saved_filter=missing", { headers: userHeaders });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "Saved filters are not enabled"
+      }
+    });
+  });
+
   it("maps invalid resource list filters to JSON bad requests", async () => {
     const app = makeApp();
 

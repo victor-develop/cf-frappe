@@ -1,4 +1,5 @@
 import {
+  ensureSavedListFilterApiAvailable,
   ensureSavedListFilterServiceAvailable,
   findSavedListFilter,
   planSavedListFilterLookup,
@@ -12,6 +13,22 @@ import { defineDocType } from "../../src";
 import { guest, owner } from "../helpers";
 
 describe("saved list filter policy", () => {
+  it("guards HTTP saved-filter query availability", () => {
+    expect(() => ensureSavedListFilterApiAvailable({ get: async () => undefined })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureSavedListFilterApiAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Saved filters are not enabled",
+      status: 400
+    });
+  });
+
   it("guards saved-filter service availability before Desk saved-filter routes", () => {
     expect(() => ensureSavedListFilterServiceAvailable({ list: async () => [] })).not.toThrow();
 

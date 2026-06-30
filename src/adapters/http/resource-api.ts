@@ -29,6 +29,7 @@ import type { PrintService } from "../../application/print-service.js";
 import { QueryService } from "../../application/query-service.js";
 import type { ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
+import { ensureSavedListFilterApiAvailable } from "../../application/saved-list-filter-policy.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import type { SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
@@ -1240,9 +1241,7 @@ async function savedFilterFromUrl(
   if (!id) {
     return undefined;
   }
-  if (!options.savedFilters) {
-    throw badRequest("Saved filters are not enabled");
-  }
+  ensureSavedListFilterApiAvailable(options.savedFilters);
   return options.savedFilters.get(actor, doctype, id);
 }
 
