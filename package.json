@@ -33,9 +33,10 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
+    "lint": "npm run typecheck",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test && npm run build",
+    "check": "npm run lint && npm run test && npm run build",
     "dev": "wrangler dev --persist-to=.wrangler/state",
     "deploy": "wrangler deploy",
     "d1:migrate:local": "wrangler d1 migrations apply cf-frappe-dev --local",
