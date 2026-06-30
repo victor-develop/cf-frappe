@@ -6715,6 +6715,13 @@ describe("Desk app", () => {
     expect(missing.status).toBe(404);
     await expect(missing.text()).resolves.toContain("Print settings are not enabled");
 
+    const missingPost = await disabled.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "0", pageSize: "A4" })
+    });
+    expect(missingPost.status).toBe(404);
+    await expect(missingPost.text()).resolves.toContain("Print settings are not enabled");
+
     const userApp = createDeskApp({
       registry: services.registry,
       documents: services.documents,

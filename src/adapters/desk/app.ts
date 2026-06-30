@@ -44,6 +44,7 @@ import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
+import { ensurePrintSettingsServiceAvailable } from "../../application/print-settings-policy.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { QueryService } from "../../application/query-service.js";
 import { ensureReportServiceAvailable } from "../../application/report-policy.js";
@@ -3128,9 +3129,7 @@ function requireAssignmentRules(options: DeskAppOptions): AssignmentRuleService 
 }
 
 function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
-  if (!options.printSettings) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Print settings are not enabled", { status: 404 });
-  }
+  ensurePrintSettingsServiceAvailable(options.printSettings);
   return options.printSettings;
 }
 

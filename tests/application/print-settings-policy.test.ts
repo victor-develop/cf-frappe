@@ -1,10 +1,12 @@
 import {
   authorizePrintSettingsAdministration,
+  ensurePrintSettingsServiceAvailable,
   ensurePrintSettingsExpectedVersion,
   normalizePrintSettingsPatchInput,
   planPrintSettingsPatchChange,
   resolvePrintSettingsTenant
 } from "../../src/application/print-settings-policy.js";
+import { FrameworkError } from "../../src/core/errors.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src/core/types.js";
 import type { PrintSettingsState } from "../../src/core/print-settings.js";
 
@@ -12,6 +14,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("print settings policy", () => {
+  it("guards print settings service availability", () => {
+    const service = { get: () => undefined };
+    expect(() => ensurePrintSettingsServiceAvailable(service)).not.toThrow();
+    try {
+      ensurePrintSettingsServiceAvailable(undefined);
+      throw new Error("expected print settings availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "DOCUMENT_NOT_FOUND",
+        message: "Print settings are not enabled",
+        status: 404
+      });
+    }
+  });
+
   it("resolves print settings tenants within the actor tenant boundary", () => {
     expect(resolvePrintSettingsTenant({ actor: admin })).toBe("acme");
     expect(resolvePrintSettingsTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

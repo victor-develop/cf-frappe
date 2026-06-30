@@ -1,4 +1,4 @@
-import { FrameworkError, badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { FrameworkError, badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   normalizePrintSettingsPatch,
   type PrintSettingsInput,
@@ -32,6 +32,12 @@ export function authorizePrintSettingsAdministration(command: {
     throw permissionDenied(`Actor '${command.actor.id}' cannot manage print settings`);
   }
   return resolvePrintSettingsTenant(command);
+}
+
+export function ensurePrintSettingsServiceAvailable<T>(printSettings: T | undefined): asserts printSettings is T {
+  if (printSettings === undefined) {
+    throw notFound("Print settings are not enabled");
+  }
 }
 
 export function normalizePrintSettingsPatchInput(

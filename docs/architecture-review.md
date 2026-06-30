@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Desk print settings service availability decisions into print-settings policy so Desk admin routes keep actor resolution, form parsing, event append orchestration, redirects, and error-boundary rendering.
 - Extracted Desk Kanban and Calendar service availability decisions into their policies so Desk routes keep actor resolution, run orchestration, navigation context loading, and page rendering.
 - Extracted Desk dashboard service availability decisions into dashboard policy so Desk routes keep actor resolution, dashboard execution orchestration, navigation context loading, and page rendering.
 - Extracted Desk report-builder saved-report service availability decisions into saved-report policy so Desk routes keep actor resolution, DocType lookup, report execution/export orchestration, PDF rendering, redirects, and error-boundary rendering.
