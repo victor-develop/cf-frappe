@@ -1,4 +1,5 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, permissionDenied } from "../core/errors.js";
+import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 
 export function isPermissionDeniedError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
@@ -72,6 +73,18 @@ export interface NormalizedOidcTokenSource {
   readonly cookie?: string;
 }
 
+export interface OidcActorClaims {
+  readonly sub?: string;
+  readonly email?: string;
+  readonly preferred_username?: string;
+}
+
+export interface OidcActorMappingOptions<TClaims extends OidcActorClaims = OidcActorClaims> {
+  readonly roles?: readonly string[] | ((claims: TClaims) => readonly string[]);
+  readonly tenantId?: string | ((claims: TClaims) => string | undefined);
+  readonly actorId?: (claims: TClaims) => string | undefined;
+}
+
 const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
   header: "authorization",
   scheme: "bearer"
@@ -82,9 +95,9 @@ export function normalizeOidcTokenSource(tokenSource: OidcTokenSource | undefine
   if (tokenSource === undefined) {
     return DEFAULT_OIDC_TOKEN_SOURCE;
   }
-  const header = firstNonBlank(tokenSource.header);
-  const cookie = firstNonBlank(tokenSource.cookie);
-  const scheme = firstNonBlank(tokenSource.scheme)?.toLowerCase();
+  const header = firstNonBlankTrimmed(tokenSource.header);
+  const cookie = firstNonBlankTrimmed(tokenSource.cookie);
+  const scheme = firstNonBlankTrimmed(tokenSource.scheme)?.toLowerCase();
   if (header !== undefined && !isHttpTokenName(header)) {
     throw badRequest("OIDC token source header is invalid");
   }
@@ -104,6 +117,31 @@ export function normalizeOidcTokenSource(tokenSource: OidcTokenSource | undefine
     ...(header === undefined ? {} : { header: header.toLowerCase() }),
     ...(scheme === undefined ? {} : { scheme }),
     ...(cookie === undefined ? {} : { cookie })
+  };
+}
+
+export function resolveOidcActorFromClaims<TClaims extends OidcActorClaims>(
+  claims: TClaims,
+  options: OidcActorMappingOptions<TClaims> = {}
+): Actor {
+  const id = firstNonBlankValue(options.actorId?.(claims), claims.email, claims.preferred_username, claims.sub);
+  if (id === undefined || id.trim().length === 0) {
+    throw permissionDenied("OIDC token subject is missing");
+  }
+  const roles = typeof options.roles === "function" ? options.roles(claims) : options.roles ?? ["User"];
+  const normalizedRoles = roles.filter(
+    (role): role is string => typeof role === "string" && role.trim().length > 0
+  );
+  if (normalizedRoles.length === 0 || normalizedRoles.length !== roles.length) {
+    throw permissionDenied("OIDC actor roles are invalid");
+  }
+  const tenantId = tenantIdFromOidcActorClaims(claims, options.tenantId);
+  const email = firstNonBlankValue(claims.email);
+  return {
+    id,
+    roles: normalizedRoles,
+    tenantId,
+    ...(email === undefined ? {} : { email })
   };
 }
 
@@ -144,7 +182,15 @@ function isHttpTokenName(value: string): boolean {
   return HTTP_TOKEN_NAME.test(value);
 }
 
-function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {
+function tenantIdFromOidcActorClaims<TClaims extends OidcActorClaims>(
+  claims: TClaims,
+  tenant: OidcActorMappingOptions<TClaims>["tenantId"]
+): TenantId {
+  const value = typeof tenant === "function" ? tenant(claims) : tenant ?? DEFAULT_TENANT_ID;
+  return value && value.trim().length > 0 ? value : DEFAULT_TENANT_ID;
+}
+
+function firstNonBlankTrimmed(...values: readonly (string | undefined)[]): string | undefined {
   for (const value of values) {
     const trimmed = value?.trim();
     if (trimmed !== undefined && trimmed.length > 0) {
@@ -152,4 +198,8 @@ function firstNonBlank(...values: readonly (string | undefined)[]): string | und
     }
   }
   return undefined;
+}
+
+function firstNonBlankValue(...values: readonly (string | undefined)[]): string | undefined {
+  return values.find((value) => value !== undefined && value.trim().length > 0);
 }

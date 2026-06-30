@@ -1,6 +1,7 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
   normalizeOidcTokenSource,
+  resolveOidcActorFromClaims,
   normalizeOidcAudiences,
   normalizeOidcIssuer,
   normalizeOidcJwksUrl,
@@ -114,7 +115,7 @@ export function oidcActorResolver<TClaims extends OidcJwtClaims = OidcJwtClaims>
     if (options.mapClaims) {
       return options.mapClaims(claims);
     }
-    return actorFromClaims(claims, options);
+    return resolveOidcActorFromClaims(claims, options);
   };
 }
 
@@ -207,33 +208,6 @@ async function fetchOidcJwks(
     throw permissionDenied("OIDC signing keys are unavailable");
   }
   return assertJwks<OidcJwks>(await response.json(), "OIDC signing keys");
-}
-
-function actorFromClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  options: OidcActorResolverOptions<TClaims>
-): Actor {
-  const id = firstNonBlank(options.actorId?.(claims), claims.email, claims.preferred_username, claims.sub);
-  if (id === undefined || id.trim().length === 0) {
-    throw permissionDenied("OIDC token subject is missing");
-  }
-  const roles = typeof options.roles === "function" ? options.roles(claims) : options.roles ?? ["User"];
-  const normalizedRoles = roles.filter(
-    (role): role is string => typeof role === "string" && role.trim().length > 0
-  );
-  if (normalizedRoles.length === 0 || normalizedRoles.length !== roles.length) {
-    throw permissionDenied("OIDC actor roles are invalid");
-  }
-  const tenantId = typeof options.tenantId === "function"
-    ? options.tenantId(claims)
-    : options.tenantId ?? DEFAULT_TENANT_ID;
-  const email = firstNonBlank(claims.email);
-  return {
-    id,
-    roles: normalizedRoles,
-    tenantId: tenantId && tenantId.trim().length > 0 ? tenantId : DEFAULT_TENANT_ID,
-    ...(email === undefined ? {} : { email })
-  };
 }
 
 function tenantIdFromClaims<TClaims extends OidcJwtClaims>(

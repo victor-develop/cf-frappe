@@ -9,7 +9,8 @@ import {
   normalizeOidcIssuer,
   normalizeOidcJwksUrl,
   normalizeOidcRoleList,
-  normalizeOidcTokenSource
+  normalizeOidcTokenSource,
+  resolveOidcActorFromClaims
 } from "../../src";
 
 describe("access policy", () => {
@@ -136,6 +137,53 @@ describe("access policy", () => {
         status: 400
       });
     }
+  });
+
+  it("resolves default OIDC actors from claims", () => {
+    expect(resolveOidcActorFromClaims({
+      sub: "subject-1",
+      email: "owner@example.com",
+      preferred_username: "owner"
+    })).toEqual({
+      id: "owner@example.com",
+      roles: ["User"],
+      tenantId: "default",
+      email: "owner@example.com"
+    });
+  });
+
+  it("resolves configured OIDC actors from claims", () => {
+    expect(resolveOidcActorFromClaims(
+      {
+        sub: "subject-1",
+        email: "owner@example.com",
+        preferred_username: "owner",
+        groups: ["Support", "Approvers"]
+      },
+      {
+        actorId: (claims) => claims.preferred_username,
+        tenantId: () => "acme",
+        roles: (claims) => claims.groups.map((group) => `OIDC:${group}`)
+      }
+    )).toEqual({
+      id: "owner",
+      roles: ["OIDC:Support", "OIDC:Approvers"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+  });
+
+  it("rejects OIDC actor claims without a subject identity", () => {
+    expect(() => resolveOidcActorFromClaims({ email: " " })).toThrow("OIDC token subject is missing");
+  });
+
+  it("rejects OIDC actor claims with invalid roles", () => {
+    expect(() => resolveOidcActorFromClaims({ sub: "subject-1" }, { roles: [] })).toThrow(
+      "OIDC actor roles are invalid"
+    );
+    expect(() =>
+      resolveOidcActorFromClaims({ sub: "subject-1" }, { roles: ["User", " "] })
+    ).toThrow("OIDC actor roles are invalid");
   });
 
   it("normalizes OIDC provider role lists", () => {
