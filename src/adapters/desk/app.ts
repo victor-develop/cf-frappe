@@ -36,6 +36,7 @@ import type {
   UpdateFileMetadataCommand
 } from "../../application/file-service.js";
 import { ensureFileServiceAvailable, isPreviewableFileContentType } from "../../application/file-policy.js";
+import { ensureJobHistoryServiceAvailable } from "../../application/job-history-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
@@ -3135,9 +3136,7 @@ function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
 }
 
 function requireJobs(options: DeskAppOptions): JobHistoryService {
-  if (!options.jobs) {
-    throw new FrameworkError("JOB_NOT_FOUND", "Jobs are not enabled", { status: 404 });
-  }
+  ensureJobHistoryServiceAvailable(options.jobs);
   return options.jobs;
 }
 

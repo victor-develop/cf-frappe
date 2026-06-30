@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Desk job history service availability decisions into job-history policy so Desk job routes keep actor resolution, filter parsing, dashboard orchestration, navigation context loading, and page rendering.
 - Extracted Desk file service availability decisions into file policy so Desk file routes keep actor resolution, dashboard query parsing, upload/download/delete orchestration, and failure rendering.
 - Extracted Desk notification service availability decisions into user-notification policy so Desk notification routes keep actor resolution, inbox query parsing, read/dismiss orchestration, redirects, and page rendering.
 - Extracted Desk print settings service availability decisions into print-settings policy so Desk admin routes keep actor resolution, form parsing, event append orchestration, redirects, and error-boundary rendering.

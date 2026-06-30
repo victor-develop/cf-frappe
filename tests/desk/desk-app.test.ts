@@ -5954,6 +5954,22 @@ describe("Desk app", () => {
     });
   });
 
+  it("uses the job history policy error for Desk job history routes when jobs are disabled", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs");
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Jobs are not enabled");
+  });
+
   it("renders and applies data patches from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();

@@ -1,4 +1,6 @@
 import {
+  ensureJobHistoryServiceAvailable,
+  FrameworkError,
   jobHistoryDefinitionSummary,
   normalizeJobHistoryQuery,
   planJobHistoryAccess,
@@ -10,6 +12,22 @@ import {
 import type { JobExecutionRecord } from "../../src";
 
 describe("job history policy", () => {
+  it("guards job history service availability", () => {
+    const service = { dashboard: async () => ({}) };
+    expect(() => ensureJobHistoryServiceAvailable(service)).not.toThrow();
+    try {
+      ensureJobHistoryServiceAvailable(undefined);
+      throw new Error("expected job history availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "JOB_NOT_FOUND",
+        message: "Jobs are not enabled",
+        status: 404
+      });
+    }
+  });
+
   it("plans tenant-scoped history access for configured admin roles", () => {
     expect(planJobHistoryAccess({
       actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },

@@ -1,4 +1,4 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import { DEFAULT_JOB_WORKER_POOL, type JobRetryPolicy } from "../core/jobs.js";
 import { DEFAULT_TENANT_ID, type Actor, type TenantId } from "../core/types.js";
 import type {
@@ -58,6 +58,12 @@ export type JobHistoryRecordLookupDecision =
       readonly message: string;
       readonly code: "JOB_EXECUTION_NOT_FOUND";
     };
+
+export function ensureJobHistoryServiceAvailable<T>(jobs: T | undefined): asserts jobs is T {
+  if (jobs === undefined) {
+    throw notFound("Jobs are not enabled", "JOB_NOT_FOUND");
+  }
+}
 
 export function planJobHistoryAccess(options: {
   readonly actor: Actor;
