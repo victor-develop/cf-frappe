@@ -1,7 +1,9 @@
 import { Hono } from "hono";
+import { ensureAssignmentRuleServiceAvailable } from "../../application/assignment-rule-policy.js";
 import type { AssignmentRuleService } from "../../application/assignment-rule-service.js";
 import { ensureCalendarServiceAvailable } from "../../application/calendar-policy.js";
 import type { CalendarService } from "../../application/calendar-service.js";
+import { ensureCustomFieldServiceAvailable } from "../../application/custom-field-policy.js";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import type { DashboardService } from "../../application/dashboard-service.js";
 import type {
@@ -35,6 +37,7 @@ import {
   ensureDataPatchRollbackRetryQueueAvailable
 } from "../../application/data-patch-availability-policy.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
+import { ensureFieldPropertyServiceAvailable } from "../../application/field-property-policy.js";
 import type {
   FileDashboard,
   FileDashboardQuery,
@@ -51,6 +54,7 @@ import type { JobScheduleService } from "../../application/job-schedule-service.
 import { ensureKanbanServiceAvailable } from "../../application/kanban-policy.js";
 import type { KanbanService } from "../../application/kanban-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
+import { ensureNotificationRuleServiceAvailable } from "../../application/notification-rule-policy.js";
 import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
 import { ensurePrintSettingsServiceAvailable } from "../../application/print-settings-policy.js";
@@ -59,16 +63,21 @@ import { QueryService } from "../../application/query-service.js";
 import { ensureReportServiceAvailable } from "../../application/report-policy.js";
 import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
+import { ensureRoleServiceAvailable } from "../../application/role-policy.js";
 import { ensureSavedListFilterServiceAvailable } from "../../application/saved-list-filter-policy.js";
 import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
 import { ensureSavedReportServiceAvailable } from "../../application/saved-report-policy.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
+import { ensureUserAccountServiceAvailable } from "../../application/user-account-policy.js";
 import { ensureUserNotificationServiceAvailable } from "../../application/user-notification-policy.js";
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
+import { ensureUserPermissionServiceAvailable } from "../../application/user-permission-policy.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
+import { ensureUserProfileServiceAvailable } from "../../application/user-profile-policy.js";
 import type { WorkflowService } from "../../application/workflow-service.js";
+import { ensureWorkflowServiceAvailable } from "../../application/workflow-policy.js";
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
 import { FrameworkError, badRequest, conflict } from "../../core/errors.js";
 import { can } from "../../core/permissions.js";
@@ -3076,65 +3085,47 @@ function listPrintFormats(options: DeskAppOptions, actor: Actor, doctype?: strin
 }
 
 function requireUserPermissions(options: DeskAppOptions): UserPermissionService {
-  if (!options.userPermissions) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User permissions are not enabled", { status: 404 });
-  }
+  ensureUserPermissionServiceAvailable(options.userPermissions);
   return options.userPermissions;
 }
 
 function requireUserAccounts(options: DeskAppOptions): UserAccountService {
-  if (!options.userAccounts) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User accounts are not enabled", { status: 404 });
-  }
+  ensureUserAccountServiceAvailable(options.userAccounts);
   return options.userAccounts;
 }
 
 function requireUserProfiles(options: DeskAppOptions): UserProfileService {
-  if (!options.userProfiles) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "User profiles are not enabled", { status: 404 });
-  }
+  ensureUserProfileServiceAvailable(options.userProfiles);
   return options.userProfiles;
 }
 
 function requireRoles(options: DeskAppOptions): RoleService {
-  if (!options.roles) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Roles are not enabled", { status: 404 });
-  }
+  ensureRoleServiceAvailable(options.roles);
   return options.roles;
 }
 
 function requireCustomFields(options: DeskAppOptions): CustomFieldService {
-  if (!options.customFields) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Custom fields are not enabled", { status: 404 });
-  }
+  ensureCustomFieldServiceAvailable(options.customFields);
   return options.customFields;
 }
 
 function requireFieldProperties(options: DeskAppOptions): FieldPropertyService {
-  if (!options.fieldProperties) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Field properties are not enabled", { status: 404 });
-  }
+  ensureFieldPropertyServiceAvailable(options.fieldProperties);
   return options.fieldProperties;
 }
 
 function requireWorkflows(options: DeskAppOptions): WorkflowService {
-  if (!options.workflows) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Workflows are not enabled", { status: 404 });
-  }
+  ensureWorkflowServiceAvailable(options.workflows);
   return options.workflows;
 }
 
 function requireNotificationRules(options: DeskAppOptions): NotificationRuleService {
-  if (!options.notificationRules) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Notification rules are not enabled", { status: 404 });
-  }
+  ensureNotificationRuleServiceAvailable(options.notificationRules);
   return options.notificationRules;
 }
 
 function requireAssignmentRules(options: DeskAppOptions): AssignmentRuleService {
-  if (!options.assignmentRules) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Assignment rules are not enabled", { status: 404 });
-  }
+  ensureAssignmentRuleServiceAvailable(options.assignmentRules);
   return options.assignmentRules;
 }
 

@@ -2,6 +2,7 @@ import {
   authorizeRoleAdministration,
   ensureRoleDoesNotExist,
   ensureRoleExpectedVersion,
+  ensureRoleServiceAvailable,
   existingRole,
   normalizeRequiredRoleName,
   planRoleDescriptionChange,
@@ -15,6 +16,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("role policy", () => {
+  it("guards Desk role service availability", () => {
+    expect(() => ensureRoleServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureRoleServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Roles are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves role tenants within the actor tenant boundary", () => {
     expect(resolveRoleTenant({ actor: admin })).toBe("acme");
     expect(resolveRoleTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

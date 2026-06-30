@@ -12,6 +12,12 @@ export const MAX_ACCOUNT_RECOVERY_EXPIRY_SECONDS = 604_800;
 export const MIN_USER_PASSWORD_LENGTH = 8;
 export const DEFAULT_PROVIDER_ROLE = "User";
 
+export function ensureUserAccountServiceAvailable<T>(userAccounts: T | undefined): asserts userAccounts is T {
+  if (userAccounts === undefined) {
+    throw notFound("User accounts are not enabled");
+  }
+}
+
 export function ensureUserAccountAdmin(actor: Actor, adminRoles: readonly string[]): void {
   if (!adminRoles.some((role) => actor.roles.includes(role))) {
     throw permissionDenied(`Actor '${actor.id}' cannot manage user accounts`);

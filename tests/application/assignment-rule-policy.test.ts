@@ -5,6 +5,7 @@ import {
   composeAssignmentRules,
   enabledAssignmentRules,
   ensureAssignmentRuleExpectedVersion,
+  ensureAssignmentRuleServiceAvailable,
   findAssignmentRuleEntry,
   normalizeRequiredAssignmentRuleText,
   planAssignmentRuleClear,
@@ -34,6 +35,22 @@ const metadataRule = {
 } satisfies AssignmentRuleDefinition;
 
 describe("assignment rule policy", () => {
+  it("guards Desk assignment-rule service availability", () => {
+    expect(() => ensureAssignmentRuleServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureAssignmentRuleServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Assignment rules are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves assignment rule tenants within the actor tenant boundary", () => {
     expect(resolveAssignmentRuleTenant({ actor: admin })).toBe("acme");
     expect(resolveAssignmentRuleTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

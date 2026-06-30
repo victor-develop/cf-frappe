@@ -10,6 +10,12 @@ import {
   type TenantId
 } from "../core/types.js";
 
+export function ensureRoleServiceAvailable<T>(roles: T | undefined): asserts roles is T {
+  if (roles === undefined) {
+    throw notFound("Roles are not enabled");
+  }
+}
+
 export function resolveRoleTenant(command: {
   readonly actor: Actor;
   readonly tenantId?: TenantId | undefined;

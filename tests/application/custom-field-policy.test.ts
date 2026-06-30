@@ -7,6 +7,7 @@ import {
   authorizeCustomFieldAdministration,
   customFieldsEqual,
   ensureCustomFieldExpectedVersion,
+  ensureCustomFieldServiceAvailable,
   findCustomFieldEntry,
   normalizeCustomField,
   normalizeCustomFieldExpressions,
@@ -30,6 +31,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("custom field policy", () => {
+  it("guards Desk custom-field service availability", () => {
+    expect(() => ensureCustomFieldServiceAvailable({ fieldsFor: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureCustomFieldServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Custom fields are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves custom-field tenants within the actor tenant boundary", () => {
     expect(resolveCustomFieldTenant({ actor: admin })).toBe("acme");
     expect(resolveCustomFieldTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

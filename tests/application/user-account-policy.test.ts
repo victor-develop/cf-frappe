@@ -3,6 +3,7 @@ import {
   ensureUserAccountCreatable,
   ensureUserAccountExists,
   ensureUserAccountExpectedVersion,
+  ensureUserAccountServiceAvailable,
   ensureUserAccountSessionCurrent,
   ensureUserRecoveryChallengeUsable,
   emailVerificationPatch,
@@ -41,6 +42,22 @@ import {
 import type { DomainEvent, UserAccountState } from "../../src";
 
 describe("user account policy", () => {
+  it("guards Desk user-account service availability", () => {
+    expect(() => ensureUserAccountServiceAvailable({ get: async () => undefined })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureUserAccountServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "User accounts are not enabled",
+      status: 404
+    });
+  });
+
   it("guards user account administration roles", () => {
     expect(() => ensureUserAccountAdmin(
       { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },

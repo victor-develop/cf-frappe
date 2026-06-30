@@ -1,6 +1,7 @@
 import {
   authorizeWorkflowAdministration,
   ensureWorkflowExpectedVersion,
+  ensureWorkflowServiceAvailable,
   planWorkflowDefinitionClear,
   planWorkflowDefinitionSave,
   resolveWorkflowTenant,
@@ -19,6 +20,22 @@ const workflow = {
 } satisfies WorkflowDefinition;
 
 describe("workflow policy", () => {
+  it("guards Desk workflow service availability", () => {
+    expect(() => ensureWorkflowServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureWorkflowServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Workflows are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves workflow tenants from actors and default actors", () => {
     expect(resolveWorkflowTenant({ actor: admin })).toBe("acme");
     expect(resolveWorkflowTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

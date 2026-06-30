@@ -2,7 +2,7 @@ import {
   type FieldPropertyOverrideEntry,
   type FieldPropertyOverrideState
 } from "../core/field-property-overrides.js";
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -14,6 +14,12 @@ import {
 } from "../core/types.js";
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
 import type { FieldPropertyEventPayload } from "./field-property-events.js";
+
+export function ensureFieldPropertyServiceAvailable<T>(fieldProperties: T | undefined): asserts fieldProperties is T {
+  if (fieldProperties === undefined) {
+    throw notFound("Field properties are not enabled");
+  }
+}
 
 export function resolveFieldPropertyTenant(command: {
   readonly actor: Actor;

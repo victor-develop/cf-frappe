@@ -2,6 +2,7 @@ import {
   authorizeNotificationRuleAdministration,
   enabledNotificationRules,
   ensureNotificationRuleExpectedVersion,
+  ensureNotificationRuleServiceAvailable,
   findNotificationRuleEntry,
   normalizeRequiredNotificationRuleText,
   notificationRulesEqual,
@@ -32,6 +33,22 @@ const disabledRule = {
 } satisfies NotificationRuleDefinition;
 
 describe("notification rule policy", () => {
+  it("guards Desk notification-rule service availability", () => {
+    expect(() => ensureNotificationRuleServiceAvailable({ list: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureNotificationRuleServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Notification rules are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves notification rule tenants within the actor tenant boundary", () => {
     expect(resolveNotificationRuleTenant({ actor: admin })).toBe("acme");
     expect(resolveNotificationRuleTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

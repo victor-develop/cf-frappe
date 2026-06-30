@@ -3,13 +3,19 @@ import {
   type AssignmentRuleState
 } from "../core/assignment-rules.js";
 import type { AfterCommitContext } from "../core/document-hooks.js";
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
   type AssignmentRuleDefinition,
   type TenantId
 } from "../core/types.js";
+
+export function ensureAssignmentRuleServiceAvailable<T>(assignmentRules: T | undefined): asserts assignmentRules is T {
+  if (assignmentRules === undefined) {
+    throw notFound("Assignment rules are not enabled");
+  }
+}
 
 export function resolveAssignmentRuleTenant(command: {
   readonly actor: Actor;

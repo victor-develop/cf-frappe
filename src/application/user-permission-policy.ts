@@ -1,4 +1,4 @@
-import { badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -16,6 +16,12 @@ export type UserPermissionGrantChangeKind = "UserPermissionAllowed" | "UserPermi
 export type UserPermissionGrantChangeDecision =
   | { readonly status: "append" }
   | { readonly status: "noop" };
+
+export function ensureUserPermissionServiceAvailable<T>(userPermissions: T | undefined): asserts userPermissions is T {
+  if (userPermissions === undefined) {
+    throw notFound("User permissions are not enabled");
+  }
+}
 
 export function resolveUserPermissionTenant(command: {
   readonly actor: Actor;

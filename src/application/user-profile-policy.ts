@@ -1,4 +1,4 @@
-import { badRequest, conflict, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -12,6 +12,12 @@ import {
   type UserProfileState
 } from "../core/user-profiles.js";
 import { ensureUserAccountExists } from "./user-account-policy.js";
+
+export function ensureUserProfileServiceAvailable<T>(userProfiles: T | undefined): asserts userProfiles is T {
+  if (userProfiles === undefined) {
+    throw notFound("User profiles are not enabled");
+  }
+}
 
 export function resolveUserProfileTenant(command: {
   readonly actor: Actor;

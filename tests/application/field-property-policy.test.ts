@@ -1,6 +1,7 @@
 import {
   authorizeFieldPropertyAdministration,
   ensureFieldPropertyExpectedVersion,
+  ensureFieldPropertyServiceAvailable,
   fieldPropertyEventDocumentName,
   fieldPropertyOverridesEqual,
   findFieldPropertyOverride,
@@ -25,6 +26,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("field property policy", () => {
+  it("guards Desk field-property service availability", () => {
+    expect(() => ensureFieldPropertyServiceAvailable({ overridesFor: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureFieldPropertyServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "Field properties are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves field-property tenants within the actor tenant boundary", () => {
     expect(resolveFieldPropertyTenant({ actor: admin })).toBe("acme");
     expect(resolveFieldPropertyTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");

@@ -1,5 +1,5 @@
 import { cloneJsonValue, isJsonValue } from "../core/json.js";
-import { badRequest, conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { badRequest, conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { defineDocType, validateDocumentData } from "../core/schema.js";
 import {
   DEFAULT_TENANT_ID,
@@ -28,6 +28,12 @@ interface CustomFieldTableGraphEdge {
   readonly target: string;
   readonly fieldName: string;
   readonly custom: boolean;
+}
+
+export function ensureCustomFieldServiceAvailable<T>(customFields: T | undefined): asserts customFields is T {
+  if (customFields === undefined) {
+    throw notFound("Custom fields are not enabled");
+  }
 }
 
 export function resolveCustomFieldTenant(command: {

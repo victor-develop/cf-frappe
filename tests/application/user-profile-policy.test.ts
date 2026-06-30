@@ -2,6 +2,7 @@ import {
   authorizeUserProfileAccess,
   ensureUserProfileAccountExists,
   ensureUserProfileExpectedVersion,
+  ensureUserProfileServiceAvailable,
   normalizeUserProfilePatchInput,
   normalizeUserProfileRequiredText,
   planUserProfilePatchChange,
@@ -15,6 +16,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("user profile policy", () => {
+  it("guards Desk user-profile service availability", () => {
+    expect(() => ensureUserProfileServiceAvailable({ get: async () => undefined })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureUserProfileServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "User profiles are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves profile tenants within the actor tenant boundary", () => {
     expect(resolveUserProfileTenant({ actor: owner, action: "access user profiles" })).toBe("acme");
     expect(resolveUserProfileTenant({ actor: { id: "guest@example.com", roles: [] }, action: "access user profiles" }))

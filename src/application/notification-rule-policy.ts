@@ -2,13 +2,21 @@ import {
   type NotificationRuleEntry,
   type NotificationRuleState
 } from "../core/notification-rules.js";
-import { conflict, FrameworkError, permissionDenied } from "../core/errors.js";
+import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
   type NotificationRuleDefinition,
   type TenantId
 } from "../core/types.js";
+
+export function ensureNotificationRuleServiceAvailable<T>(
+  notificationRules: T | undefined
+): asserts notificationRules is T {
+  if (notificationRules === undefined) {
+    throw notFound("Notification rules are not enabled");
+  }
+}
 
 export function resolveNotificationRuleTenant(command: {
   readonly actor: Actor;

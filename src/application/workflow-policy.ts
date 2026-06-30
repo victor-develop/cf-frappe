@@ -1,4 +1,4 @@
-import { conflict, permissionDenied } from "../core/errors.js";
+import { conflict, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -6,6 +6,12 @@ import {
   type WorkflowDefinition
 } from "../core/types.js";
 import type { WorkflowDefinitionState } from "../core/workflow.js";
+
+export function ensureWorkflowServiceAvailable<T>(workflows: T | undefined): asserts workflows is T {
+  if (workflows === undefined) {
+    throw notFound("Workflows are not enabled");
+  }
+}
 
 export function resolveWorkflowTenant(command: {
   readonly actor: Actor;

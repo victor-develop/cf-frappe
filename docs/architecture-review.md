@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted Desk admin service availability decisions for user permissions, user accounts, user profiles, roles, custom fields, field properties, workflows, notification rules, and assignment rules into application policies so Desk admin routes keep actor resolution, request parsing, service orchestration, redirects, and failure rendering.
 - Extracted Desk data patch admin and queue availability decisions into data-patch availability policy so Desk data-patch routes keep actor resolution, form parsing, dashboard rendering, queue orchestration, redirects, and failure rendering.
 - Extracted Desk job schedule service availability decisions into job-schedule policy so Desk schedule routes keep service lookup, actor resolution, filter parsing, schedule orchestration, redirects, and page rendering.
 - Extracted Desk job retry availability decisions into job-retry policy so Desk retry routes keep retry-port lookup, actor resolution, retry orchestration, and redirects.

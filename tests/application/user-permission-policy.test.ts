@@ -1,6 +1,7 @@
 import {
   authorizeUserPermissionAdministration,
   ensureUserPermissionExpectedVersion,
+  ensureUserPermissionServiceAvailable,
   normalizeUserPermissionRequiredText,
   normalizeValidUserPermissionGrant,
   planUserPermissionGrantChange,
@@ -13,6 +14,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("user permission policy", () => {
+  it("guards Desk user-permission service availability", () => {
+    expect(() => ensureUserPermissionServiceAvailable({ grantsForUser: async () => [] })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureUserPermissionServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DOCUMENT_NOT_FOUND",
+      message: "User permissions are not enabled",
+      status: 404
+    });
+  });
+
   it("resolves permission tenants within the actor tenant boundary", () => {
     expect(resolveUserPermissionTenant({ actor: admin })).toBe("acme");
     expect(resolveUserPermissionTenant({ actor: { id: "guest@example.com", roles: [] } })).toBe("default");
