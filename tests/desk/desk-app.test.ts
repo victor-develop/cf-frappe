@@ -5970,6 +5970,24 @@ describe("Desk app", () => {
     await expect(response.text()).resolves.toContain("Jobs are not enabled");
   });
 
+  it("uses the job retry policy error for Desk retry routes when retry is disabled", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/jobs/reports.daily%3Ajob_002/retry", {
+      method: "POST"
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Job retry is not enabled");
+  });
+
   it("renders and applies data patches from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
     const services = createServices();

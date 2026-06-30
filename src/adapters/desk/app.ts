@@ -38,6 +38,7 @@ import type {
 import { ensureFileServiceAvailable, isPreviewableFileContentType } from "../../application/file-policy.js";
 import { ensureJobHistoryServiceAvailable } from "../../application/job-history-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
+import { ensureJobRetryAvailable } from "../../application/job-retry-policy.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import { ensureKanbanServiceAvailable } from "../../application/kanban-policy.js";
@@ -3171,9 +3172,7 @@ function requireDataPatchRollbackRetryQueue(options: DeskAppOptions): DataPatchR
 }
 
 function requireJobRetry(options: DeskAppOptions): JobRetryPort {
-  if (!options.jobRetry) {
-    throw new FrameworkError("JOB_NOT_FOUND", "Job retry is not enabled", { status: 404 });
-  }
+  ensureJobRetryAvailable(options.jobRetry);
   return options.jobRetry;
 }
 

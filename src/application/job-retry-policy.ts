@@ -1,3 +1,4 @@
+import { notFound } from "../core/errors.js";
 import { DEFAULT_TENANT_ID, type Actor, type DocumentData, type TenantId } from "../core/types.js";
 import type { JobExecutionRecord } from "../ports/job-execution-log.js";
 import type { DispatchJobCommand } from "../ports/job-queue.js";
@@ -18,6 +19,12 @@ export type JobRetryExecutionLookupDecision =
       readonly message: string;
       readonly code: "JOB_EXECUTION_NOT_FOUND";
     };
+
+export function ensureJobRetryAvailable<T>(retry: T | undefined): asserts retry is T {
+  if (retry === undefined) {
+    throw notFound("Job retry is not enabled", "JOB_NOT_FOUND");
+  }
+}
 
 export function planJobRetryAccess(options: {
   readonly actor: Actor;

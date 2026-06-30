@@ -1,4 +1,6 @@
 import {
+  ensureJobRetryAvailable,
+  FrameworkError,
   planJobExecutionRetry,
   planJobRetryAccess,
   planJobRetryExecutionLookup,
@@ -9,6 +11,22 @@ import type { JobExecutionRecord } from "../../src";
 import { now } from "../helpers";
 
 describe("job retry policy", () => {
+  it("guards job retry port availability", () => {
+    const retry = { retry: async () => undefined };
+    expect(() => ensureJobRetryAvailable(retry)).not.toThrow();
+    try {
+      ensureJobRetryAvailable(undefined);
+      throw new Error("expected job retry availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "JOB_NOT_FOUND",
+        message: "Job retry is not enabled",
+        status: 404
+      });
+    }
+  });
+
   it("plans tenant-scoped retry access for configured admin roles", () => {
     expect(planJobRetryAccess({
       actor: { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" },
