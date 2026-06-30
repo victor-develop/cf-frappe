@@ -39,6 +39,8 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted OIDC and Cloudflare Access JWT optional claim-shape validation into access policy so HTTP auth adapters keep JWT verification and JWKS orchestration while the auth capability owns provider claim invariants.
+- Extracted Cloudflare Access synced-account actor resolution into access policy so the HTTP Access account-sync resolver keeps user-account service orchestration while the auth capability owns disabled-account decisions.
 - Extracted Cloudflare Access account-sync claim projection and sync-actor shaping into access policy so the HTTP Access account-sync resolver keeps user-account service orchestration while the auth capability owns provider, subject, user id, email, roles, enabled/email-verification, metadata, tenant, and sync actor decisions.
 - Extracted Cloudflare Access claims-to-actor mapping into access policy so the HTTP Access resolver keeps JWT verification and optional custom mapping while the auth capability owns default actor id, role, tenant, email, and invalid-claims decisions.
 - Extracted OIDC account-sync allow gating and synced-account actor resolution into access policy so the HTTP OIDC account-sync resolver keeps user-account service orchestration while the auth capability owns token-allowed and disabled-account decisions.

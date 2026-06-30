@@ -1,10 +1,12 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
+  isValidCloudflareAccessJwtClaimShape,
   normalizeCloudflareAccessAudiences,
   normalizeCloudflareAccessTeamDomain,
   resolveCloudflareAccessAccountSyncProjection,
   resolveCloudflareAccessActorFromClaims,
-  resolveCloudflareAccessSyncActorFromClaims
+  resolveCloudflareAccessSyncActorFromClaims,
+  resolveCloudflareAccessSyncedAccountActor
 } from "../../application/access-policy.js";
 import {
   type Actor,
@@ -134,15 +136,7 @@ export function cloudflareAccessAccountSyncActorResolver(
         tenantId: projection.tenantId,
         ...(projection.metadata === undefined ? {} : { metadata: projection.metadata })
       });
-      if (!account.enabled) {
-        throw permissionDenied("Cloudflare Access account is disabled");
-      }
-      return {
-        id: account.userId,
-        roles: account.roles,
-        tenantId: account.tenantId,
-        ...(account.email === undefined ? {} : { email: account.email })
-      };
+      return resolveCloudflareAccessSyncedAccountActor(account);
     }
   });
 }
@@ -195,11 +189,7 @@ function accessTokenFromRequest(request: Request): string | undefined {
 }
 
 function isCloudflareAccessClaims(claims: JwtClaims): boolean {
-  return claims.groups === undefined || isStringArray(claims.groups);
-}
-
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return isValidCloudflareAccessJwtClaimShape(claims);
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

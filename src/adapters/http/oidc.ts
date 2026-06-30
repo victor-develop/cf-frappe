@@ -1,6 +1,7 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
   ensureOidcClaimsAllowed,
+  isValidOidcJwtClaimShape,
   normalizeOidcTokenSource,
   resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
@@ -245,14 +246,7 @@ function normalizeTokenSource(
 }
 
 function isOidcClaims(claims: JwtClaims): boolean {
-  return (claims.email_verified === undefined || typeof claims.email_verified === "boolean") &&
-    (claims.preferred_username === undefined || typeof claims.preferred_username === "string") &&
-    (claims.groups === undefined || isStringArray(claims.groups)) &&
-    (claims.roles === undefined || isStringArray(claims.roles));
-}
-
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return isValidOidcJwtClaimShape(claims);
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

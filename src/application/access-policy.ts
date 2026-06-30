@@ -136,6 +136,14 @@ export interface OidcSyncedAccount {
   readonly email?: string;
 }
 
+export interface CloudflareAccessSyncedAccount {
+  readonly userId: string;
+  readonly roles: readonly string[];
+  readonly tenantId: TenantId;
+  readonly enabled: boolean;
+  readonly email?: string;
+}
+
 export interface CloudflareAccessActorClaims {
   readonly sub?: string;
   readonly email?: string;
@@ -369,6 +377,36 @@ export function resolveCloudflareAccessSyncActorFromClaims<TClaims extends Cloud
   };
 }
 
+export function resolveCloudflareAccessSyncedAccountActor(account: CloudflareAccessSyncedAccount): Actor {
+  if (!account.enabled) {
+    throw permissionDenied("Cloudflare Access account is disabled");
+  }
+  return {
+    id: account.userId,
+    roles: account.roles,
+    tenantId: account.tenantId,
+    ...(account.email === undefined ? {} : { email: account.email })
+  };
+}
+
+export function isValidOidcJwtClaimShape(claims: object): boolean {
+  const values = claims as {
+    readonly email_verified?: unknown;
+    readonly preferred_username?: unknown;
+    readonly groups?: unknown;
+    readonly roles?: unknown;
+  };
+  return (values.email_verified === undefined || typeof values.email_verified === "boolean") &&
+    (values.preferred_username === undefined || typeof values.preferred_username === "string") &&
+    (values.groups === undefined || isStringArray(values.groups)) &&
+    (values.roles === undefined || isStringArray(values.roles));
+}
+
+export function isValidCloudflareAccessJwtClaimShape(claims: object): boolean {
+  const values = claims as { readonly groups?: unknown };
+  return values.groups === undefined || isStringArray(values.groups);
+}
+
 export function normalizeOidcRoleList(values: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
@@ -492,6 +530,10 @@ function syncActorIdFromCloudflareAccessClaims<TClaims extends CloudflareAccessA
     typeof syncActorId === "function" ? syncActorId(claims) : syncActorId,
     `${provider}:sync`
   ) ?? `${provider}:sync`;
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function firstNonBlankTrimmed(...values: readonly (string | undefined)[]): string | undefined {

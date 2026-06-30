@@ -1,6 +1,8 @@
 import {
   FrameworkError,
   ensureOidcClaimsAllowed,
+  isValidCloudflareAccessJwtClaimShape,
+  isValidOidcJwtClaimShape,
   isPermissionDeniedError,
   normalizeCloudflareAccessAudiences,
   normalizeCloudflareAccessTeamDomain,
@@ -17,7 +19,8 @@ import {
   resolveOidcSyncActorFromClaims,
   resolveOidcSyncedAccountActor,
   resolveCloudflareAccessActorFromClaims,
-  resolveCloudflareAccessSyncActorFromClaims
+  resolveCloudflareAccessSyncActorFromClaims,
+  resolveCloudflareAccessSyncedAccountActor
 } from "../../src";
 
 describe("access policy", () => {
@@ -204,6 +207,63 @@ describe("access policy", () => {
       roles: ["Integration Manager"],
       tenantId: "acme"
     });
+  });
+
+  it("resolves synced Cloudflare Access account actors", () => {
+    expect(resolveCloudflareAccessSyncedAccountActor({
+      userId: "owner@example.com",
+      roles: ["User", "Support"],
+      tenantId: "acme",
+      enabled: true,
+      email: "owner@example.com"
+    })).toEqual({
+      id: "owner@example.com",
+      roles: ["User", "Support"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+  });
+
+  it("rejects disabled synced Cloudflare Access accounts", () => {
+    expect(() => resolveCloudflareAccessSyncedAccountActor({
+      userId: "owner@example.com",
+      roles: ["User"],
+      tenantId: "acme",
+      enabled: false
+    })).toThrow("Cloudflare Access account is disabled");
+  });
+
+  it("accepts valid OIDC JWT optional claim shapes", () => {
+    expect(isValidOidcJwtClaimShape({
+      email_verified: true,
+      preferred_username: "owner",
+      groups: ["Support"],
+      roles: ["User"]
+    })).toBe(true);
+    expect(isValidOidcJwtClaimShape({})).toBe(true);
+  });
+
+  it("rejects invalid OIDC JWT scalar claim shapes", () => {
+    expect(isValidOidcJwtClaimShape({ email_verified: "true" })).toBe(false);
+    expect(isValidOidcJwtClaimShape({ preferred_username: 1 })).toBe(false);
+  });
+
+  it("rejects invalid OIDC JWT collection claim shapes", () => {
+    expect(isValidOidcJwtClaimShape({ groups: ["Support", 1] })).toBe(false);
+    expect(isValidOidcJwtClaimShape({ roles: "User" })).toBe(false);
+  });
+
+  it("accepts valid Cloudflare Access JWT optional claim shapes", () => {
+    expect(isValidCloudflareAccessJwtClaimShape({ groups: ["Support", "Approvers"] })).toBe(true);
+    expect(isValidCloudflareAccessJwtClaimShape({})).toBe(true);
+  });
+
+  it("rejects non-array Cloudflare Access JWT groups", () => {
+    expect(isValidCloudflareAccessJwtClaimShape({ groups: "Support" })).toBe(false);
+  });
+
+  it("rejects non-string Cloudflare Access JWT groups", () => {
+    expect(isValidCloudflareAccessJwtClaimShape({ groups: ["Support", 1] })).toBe(false);
   });
 
   it("normalizes OIDC issuer and JWKS URLs before resolver setup", () => {
