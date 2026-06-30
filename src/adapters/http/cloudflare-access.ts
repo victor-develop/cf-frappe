@@ -1,7 +1,8 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
   normalizeCloudflareAccessAudiences,
-  normalizeCloudflareAccessTeamDomain
+  normalizeCloudflareAccessTeamDomain,
+  resolveCloudflareAccessActorFromClaims
 } from "../../application/access-policy.js";
 import {
   DEFAULT_TENANT_ID,
@@ -106,7 +107,7 @@ export function cloudflareAccessActorResolver(options: CloudflareAccessActorReso
     if (options.mapClaims) {
       return options.mapClaims(claims);
     }
-    return actorFromClaims(claims, options);
+    return resolveCloudflareAccessActorFromClaims(claims, options);
   };
 }
 
@@ -195,33 +196,6 @@ async function fetchCloudflareAccessJwks(
     throw permissionDenied("Cloudflare Access signing keys are unavailable");
   }
   return assertJwks(await response.json(), "Cloudflare Access signing keys");
-}
-
-function actorFromClaims(
-  claims: CloudflareAccessJwtClaims,
-  options: CloudflareAccessActorResolverOptions
-): Actor {
-  const id = firstNonBlank(options.actorId?.(claims), claims.email, claims.sub);
-  if (id === undefined || id.trim().length === 0) {
-    throw permissionDenied("Cloudflare Access JWT subject is missing");
-  }
-  const roles = typeof options.roles === "function" ? options.roles(claims) : options.roles ?? ["User"];
-  const normalizedRoles = roles.filter(
-    (role): role is string => typeof role === "string" && role.trim().length > 0
-  );
-  if (normalizedRoles.length === 0 || normalizedRoles.length !== roles.length) {
-    throw permissionDenied("Cloudflare Access actor roles are invalid");
-  }
-  const tenantId = typeof options.tenantId === "function"
-    ? options.tenantId(claims)
-    : options.tenantId ?? DEFAULT_TENANT_ID;
-  const email = firstNonBlank(claims.email);
-  return {
-    id,
-    roles: normalizedRoles,
-    tenantId: tenantId && tenantId.trim().length > 0 ? tenantId : DEFAULT_TENANT_ID,
-    ...(email === undefined ? {} : { email })
-  };
 }
 
 function tenantIdFromClaims(

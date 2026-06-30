@@ -136,6 +136,19 @@ export interface OidcSyncedAccount {
   readonly email?: string;
 }
 
+export interface CloudflareAccessActorClaims {
+  readonly sub?: string;
+  readonly email?: string;
+}
+
+export interface CloudflareAccessActorMappingOptions<
+  TClaims extends CloudflareAccessActorClaims = CloudflareAccessActorClaims
+> {
+  readonly roles?: readonly string[] | ((claims: TClaims) => readonly string[]);
+  readonly tenantId?: string | ((claims: TClaims) => string | undefined);
+  readonly actorId?: (claims: TClaims) => string | undefined;
+}
+
 const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
   header: "authorization",
   scheme: "bearer"
@@ -259,6 +272,31 @@ export function resolveOidcSyncedAccountActor(account: OidcSyncedAccount): Actor
   };
 }
 
+export function resolveCloudflareAccessActorFromClaims<TClaims extends CloudflareAccessActorClaims>(
+  claims: TClaims,
+  options: CloudflareAccessActorMappingOptions<TClaims> = {}
+): Actor {
+  const id = firstNonBlankValue(options.actorId?.(claims), claims.email, claims.sub);
+  if (id === undefined || id.trim().length === 0) {
+    throw permissionDenied("Cloudflare Access JWT subject is missing");
+  }
+  const roles = typeof options.roles === "function" ? options.roles(claims) : options.roles ?? ["User"];
+  const normalizedRoles = roles.filter(
+    (role): role is string => typeof role === "string" && role.trim().length > 0
+  );
+  if (normalizedRoles.length === 0 || normalizedRoles.length !== roles.length) {
+    throw permissionDenied("Cloudflare Access actor roles are invalid");
+  }
+  const tenantId = tenantIdFromCloudflareAccessActorClaims(claims, options.tenantId);
+  const email = firstNonBlankValue(claims.email);
+  return {
+    id,
+    roles: normalizedRoles,
+    tenantId,
+    ...(email === undefined ? {} : { email })
+  };
+}
+
 export function normalizeOidcRoleList(values: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
@@ -338,6 +376,14 @@ function syncActorIdFromOidcClaims<TClaims extends OidcActorClaims>(
     typeof syncActorId === "function" ? syncActorId(claims) : syncActorId,
     `${provider}:sync`
   ) ?? `${provider}:sync`;
+}
+
+function tenantIdFromCloudflareAccessActorClaims<TClaims extends CloudflareAccessActorClaims>(
+  claims: TClaims,
+  tenant: CloudflareAccessActorMappingOptions<TClaims>["tenantId"]
+): TenantId {
+  const value = typeof tenant === "function" ? tenant(claims) : tenant ?? DEFAULT_TENANT_ID;
+  return value && value.trim().length > 0 ? value : DEFAULT_TENANT_ID;
 }
 
 function firstNonBlankTrimmed(...values: readonly (string | undefined)[]): string | undefined {

@@ -14,7 +14,8 @@ import {
   resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
   resolveOidcSyncActorFromClaims,
-  resolveOidcSyncedAccountActor
+  resolveOidcSyncedAccountActor,
+  resolveCloudflareAccessActorFromClaims
 } from "../../src";
 
 describe("access policy", () => {
@@ -72,6 +73,53 @@ describe("access policy", () => {
         status: 400
       });
     }
+  });
+
+  it("resolves default Cloudflare Access actors from claims", () => {
+    expect(resolveCloudflareAccessActorFromClaims({
+      sub: "subject-1",
+      email: "owner@example.com"
+    })).toEqual({
+      id: "owner@example.com",
+      roles: ["User"],
+      tenantId: "default",
+      email: "owner@example.com"
+    });
+  });
+
+  it("resolves configured Cloudflare Access actors from claims", () => {
+    expect(resolveCloudflareAccessActorFromClaims(
+      {
+        sub: "subject-1",
+        email: "owner@example.com",
+        groups: ["Support", "Approvers"]
+      },
+      {
+        actorId: (claims) => claims.sub,
+        tenantId: () => "acme",
+        roles: (claims) => claims.groups.map((group) => `Access:${group}`)
+      }
+    )).toEqual({
+      id: "subject-1",
+      roles: ["Access:Support", "Access:Approvers"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+  });
+
+  it("rejects Cloudflare Access actor claims without a subject identity", () => {
+    expect(() => resolveCloudflareAccessActorFromClaims({ email: " " })).toThrow(
+      "Cloudflare Access JWT subject is missing"
+    );
+  });
+
+  it("rejects Cloudflare Access actor claims with invalid roles", () => {
+    expect(() => resolveCloudflareAccessActorFromClaims({ sub: "subject-1" }, { roles: [] })).toThrow(
+      "Cloudflare Access actor roles are invalid"
+    );
+    expect(() =>
+      resolveCloudflareAccessActorFromClaims({ sub: "subject-1" }, { roles: ["User", " "] })
+    ).toThrow("Cloudflare Access actor roles are invalid");
   });
 
   it("normalizes OIDC issuer and JWKS URLs before resolver setup", () => {
