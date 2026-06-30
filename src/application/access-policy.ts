@@ -117,11 +117,23 @@ export interface OidcAccountSyncProjection {
   readonly metadata?: DocumentData;
 }
 
+export interface OidcAccountSyncAccessOptions<TClaims extends OidcAccountSyncClaims = OidcAccountSyncClaims> {
+  readonly allowed?: boolean | ((claims: TClaims) => boolean | undefined);
+}
+
 export interface OidcSyncActorOptions<TClaims extends OidcActorClaims = OidcActorClaims> {
   readonly tenantId: TenantId;
   readonly provider: string;
   readonly syncActorId?: string | ((claims: TClaims) => string | undefined);
   readonly syncActorRoles?: readonly string[];
+}
+
+export interface OidcSyncedAccount {
+  readonly userId: string;
+  readonly roles: readonly string[];
+  readonly tenantId: TenantId;
+  readonly enabled: boolean;
+  readonly email?: string;
 }
 
 const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
@@ -223,6 +235,27 @@ export function resolveOidcSyncActorFromClaims<TClaims extends OidcActorClaims>(
     id: syncActorIdFromOidcClaims(claims, options.provider, options.syncActorId),
     roles: options.syncActorRoles ?? [SYSTEM_MANAGER_ROLE],
     tenantId: options.tenantId
+  };
+}
+
+export function ensureOidcClaimsAllowed<TClaims extends OidcAccountSyncClaims>(
+  claims: TClaims,
+  options: OidcAccountSyncAccessOptions<TClaims> = {}
+): void {
+  if (booleanOptionFromOidcClaims(claims, options.allowed) === false) {
+    throw permissionDenied("OIDC token is not allowed");
+  }
+}
+
+export function resolveOidcSyncedAccountActor(account: OidcSyncedAccount): Actor {
+  if (!account.enabled) {
+    throw permissionDenied("OIDC account is disabled");
+  }
+  return {
+    id: account.userId,
+    roles: account.roles,
+    tenantId: account.tenantId,
+    ...(account.email === undefined ? {} : { email: account.email })
   };
 }
 

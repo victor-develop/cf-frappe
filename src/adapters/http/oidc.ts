@@ -1,9 +1,11 @@
 import { permissionDenied } from "../../core/errors.js";
 import {
+  ensureOidcClaimsAllowed,
   normalizeOidcTokenSource,
   resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
   resolveOidcSyncActorFromClaims,
+  resolveOidcSyncedAccountActor,
   normalizeOidcAudiences,
   normalizeOidcIssuer,
   normalizeOidcJwksUrl,
@@ -124,9 +126,7 @@ export function oidcAccountSyncActorResolver<TClaims extends OidcJwtClaims = Oid
   return oidcActorResolver({
     ...options,
     mapClaims: async (claims) => {
-      if (booleanOptionFromClaims(claims, options.allowed) === false) {
-        throw permissionDenied("OIDC token is not allowed");
-      }
+      ensureOidcClaimsAllowed(claims, options);
       const projection = resolveOidcAccountSyncProjection(claims, options);
       const account = await options.userAccounts.syncProvider({
         actor: resolveOidcSyncActorFromClaims(claims, {
@@ -145,15 +145,7 @@ export function oidcAccountSyncActorResolver<TClaims extends OidcJwtClaims = Oid
         tenantId: projection.tenantId,
         ...(projection.metadata === undefined ? {} : { metadata: projection.metadata })
       });
-      if (!account.enabled) {
-        throw permissionDenied("OIDC account is disabled");
-      }
-      return {
-        id: account.userId,
-        roles: account.roles,
-        tenantId: account.tenantId,
-        ...(account.email === undefined ? {} : { email: account.email })
-      };
+      return resolveOidcSyncedAccountActor(account);
     }
   });
 }
@@ -194,13 +186,6 @@ async function fetchOidcJwks(
     throw permissionDenied("OIDC signing keys are unavailable");
   }
   return assertJwks<OidcJwks>(await response.json(), "OIDC signing keys");
-}
-
-function booleanOptionFromClaims<TClaims extends OidcJwtClaims>(
-  claims: TClaims,
-  value: boolean | ((claims: TClaims) => boolean | undefined) | undefined
-): boolean | undefined {
-  return typeof value === "function" ? value(claims) : value;
 }
 
 function oidcTokenFromRequest(

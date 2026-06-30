@@ -1,5 +1,6 @@
 import {
   FrameworkError,
+  ensureOidcClaimsAllowed,
   isPermissionDeniedError,
   normalizeCloudflareAccessAudiences,
   normalizeCloudflareAccessTeamDomain,
@@ -12,7 +13,8 @@ import {
   normalizeOidcTokenSource,
   resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
-  resolveOidcSyncActorFromClaims
+  resolveOidcSyncActorFromClaims,
+  resolveOidcSyncedAccountActor
 } from "../../src";
 
 describe("access policy", () => {
@@ -264,6 +266,49 @@ describe("access policy", () => {
       roles: ["Integration Manager"],
       tenantId: "acme"
     });
+  });
+
+  it("allows OIDC claims unless the allowed policy rejects them", () => {
+    expect(() => ensureOidcClaimsAllowed({ sub: "subject-1" })).not.toThrow();
+    expect(() => ensureOidcClaimsAllowed({ sub: "subject-1" }, { allowed: true })).not.toThrow();
+    expect(() => ensureOidcClaimsAllowed(
+      { sub: "subject-1", groups: ["Support"] },
+      { allowed: (claims) => claims.groups.includes("Support") }
+    )).not.toThrow();
+  });
+
+  it("rejects OIDC claims when the allowed policy returns false", () => {
+    expect(() => ensureOidcClaimsAllowed({ sub: "subject-1" }, { allowed: false })).toThrow(
+      "OIDC token is not allowed"
+    );
+    expect(() => ensureOidcClaimsAllowed(
+      { sub: "subject-1", groups: ["Guests"] },
+      { allowed: (claims) => claims.groups.includes("Support") }
+    )).toThrow("OIDC token is not allowed");
+  });
+
+  it("resolves synced OIDC account actors", () => {
+    expect(resolveOidcSyncedAccountActor({
+      userId: "owner@example.com",
+      roles: ["User", "Support"],
+      tenantId: "acme",
+      enabled: true,
+      email: "owner@example.com"
+    })).toEqual({
+      id: "owner@example.com",
+      roles: ["User", "Support"],
+      tenantId: "acme",
+      email: "owner@example.com"
+    });
+  });
+
+  it("rejects disabled synced OIDC accounts", () => {
+    expect(() => resolveOidcSyncedAccountActor({
+      userId: "owner@example.com",
+      roles: ["User"],
+      tenantId: "acme",
+      enabled: false
+    })).toThrow("OIDC account is disabled");
   });
 
   it("normalizes OIDC provider role lists", () => {
