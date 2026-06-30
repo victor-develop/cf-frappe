@@ -1,4 +1,5 @@
 import {
+  ensureJobHistoryApiAvailable,
   ensureJobHistoryServiceAvailable,
   FrameworkError,
   jobHistoryDefinitionSummary,
@@ -23,6 +24,22 @@ describe("job history policy", () => {
       expect(error).toMatchObject({
         code: "JOB_NOT_FOUND",
         message: "Jobs are not enabled",
+        status: 404
+      });
+    }
+  });
+
+  it("guards HTTP job history API availability", () => {
+    const service = { dashboard: async () => ({}) };
+    expect(() => ensureJobHistoryApiAvailable(service)).not.toThrow();
+    try {
+      ensureJobHistoryApiAvailable(undefined);
+      throw new Error("expected job history API availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "JOB_NOT_FOUND",
+        message: "Job history is not enabled",
         status: 404
       });
     }

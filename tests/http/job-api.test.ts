@@ -17,6 +17,48 @@ import {
 import { createServices, now } from "../helpers";
 
 describe("job api", () => {
+  it("maps disabled job capabilities through the HTTP error boundary", async () => {
+    const services = createServices();
+    const registry = createJobRegistry({
+      jobs: [{ name: "reports.daily", description: "Build reports", handler: () => undefined }]
+    });
+    const jobsOnly = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobs: new JobHistoryService({ registry, executionLog: new InMemoryJobExecutionLog() }),
+      actor: unsafeHeaderActorResolver
+    });
+    const schedulesOnly = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      jobSchedules: new JobScheduleService({ registry, schedules: [] }),
+      actor: unsafeHeaderActorResolver
+    });
+
+    const history = await schedulesOnly.request("/api/jobs", { headers: adminHeaders });
+    expect(history.status).toBe(404);
+    await expect(history.json()).resolves.toMatchObject({
+      error: { code: "JOB_NOT_FOUND", message: "Job history is not enabled" }
+    });
+
+    const schedule = await jobsOnly.request("/api/jobs/schedules", { headers: adminHeaders });
+    expect(schedule.status).toBe(404);
+    await expect(schedule.json()).resolves.toMatchObject({
+      error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" }
+    });
+
+    const retry = await jobsOnly.request("/api/jobs/executions/reports.daily%3Ajob_001/retry", {
+      method: "POST",
+      headers: adminHeaders
+    });
+    expect(retry.status).toBe(404);
+    await expect(retry.json()).resolves.toMatchObject({
+      error: { code: "JOB_NOT_FOUND", message: "Job retry is not enabled" }
+    });
+  });
+
   it("returns admin job definitions and execution history", async () => {
     const services = createServices();
     const executionLog = new InMemoryJobExecutionLog();

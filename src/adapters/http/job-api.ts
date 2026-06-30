@@ -1,6 +1,9 @@
 import { Hono } from "hono";
+import { ensureJobHistoryApiAvailable } from "../../application/job-history-policy.js";
 import type { JobHistoryService } from "../../application/job-history-service.js";
+import { ensureJobRetryAvailable } from "../../application/job-retry-policy.js";
 import type { JobRetryPort } from "../../application/job-retry-service.js";
+import { ensureJobScheduleServiceAvailable } from "../../application/job-schedule-policy.js";
 import type { JobScheduleService, SaveJobScheduleDefinitionCommand } from "../../application/job-schedule-service.js";
 import { badRequest } from "../../core/errors.js";
 import type { DocumentData, MutableDocumentData } from "../../core/types.js";
@@ -20,15 +23,13 @@ export function createJobApi(options: JobApiOptions): Hono {
   const maxJsonBytes = options.maxJsonBytes ?? 1_048_576;
 
   app.get("/api/jobs", async (c) => {
-    if (!options.jobs) {
-      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job history is not enabled" } }, 404);
-    }
+    const jobs = requireJobHistory(options);
     const actor = await options.actor(c.req.raw);
     const limit = parseOptionalInteger(c.req.query("limit"));
     const jobName = c.req.query("job");
     const runId = c.req.query("run_id");
     const status = c.req.query("status");
-    const data = await options.jobs.dashboard(actor, {
+    const data = await jobs.dashboard(actor, {
       ...(jobName === undefined ? {} : { jobName }),
       ...(runId === undefined ? {} : { runId }),
       ...(status === undefined ? {} : { status }),
@@ -38,22 +39,18 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.get("/api/jobs/executions/:idempotencyKey", async (c) => {
-    if (!options.jobs) {
-      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job history is not enabled" } }, 404);
-    }
+    const jobs = requireJobHistory(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.jobs.get(actor, c.req.param("idempotencyKey"));
+    const data = await jobs.get(actor, c.req.param("idempotencyKey"));
     return c.json({ data });
   });
 
   app.get("/api/jobs/schedules", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     const cron = c.req.query("cron");
     const jobName = c.req.query("job");
-    const data = await options.schedules.dashboard(actor, {
+    const data = await schedules.dashboard(actor, {
       ...(cron === undefined ? {} : { cron }),
       ...(jobName === undefined ? {} : { jobName })
     });
@@ -61,12 +58,10 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.post("/api/jobs/schedules", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
-    const data = await options.schedules.save(actor, {
+    const data = await schedules.save(actor, {
       ...scheduleDefinitionFromBody(body),
       eventMetadata: requestMetadata(c.req.raw)
     });
@@ -74,12 +69,10 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.put("/api/jobs/schedules/:scheduleId", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
-    const data = await options.schedules.save(actor, {
+    const data = await schedules.save(actor, {
       ...scheduleDefinitionFromBody(body, c.req.param("scheduleId")),
       eventMetadata: requestMetadata(c.req.raw)
     });
@@ -87,54 +80,44 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.delete("/api/jobs/schedules/:scheduleId", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.schedules.delete(actor, c.req.param("scheduleId"), {
+    const data = await schedules.delete(actor, c.req.param("scheduleId"), {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data });
   });
 
   app.post("/api/jobs/schedules/:scheduleId/run", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.schedules.dispatch(actor, c.req.param("scheduleId"));
+    const data = await schedules.dispatch(actor, c.req.param("scheduleId"));
     return c.json({ data }, 201);
   });
 
   app.post("/api/jobs/schedules/:scheduleId/enable", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.schedules.enable(actor, c.req.param("scheduleId"), {
+    const data = await schedules.enable(actor, c.req.param("scheduleId"), {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data });
   });
 
   app.post("/api/jobs/schedules/:scheduleId/disable", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.schedules.disable(actor, c.req.param("scheduleId"), {
+    const data = await schedules.disable(actor, c.req.param("scheduleId"), {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data });
   });
 
   app.post("/api/jobs/schedules/:scheduleId/pause", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
-    const data = await options.schedules.pause(actor, c.req.param("scheduleId"), {
+    const data = await schedules.pause(actor, c.req.param("scheduleId"), {
       pausedUntil: requiredString(body, "pauseUntil"),
       metadata: requestMetadata(c.req.raw)
     });
@@ -142,26 +125,37 @@ export function createJobApi(options: JobApiOptions): Hono {
   });
 
   app.post("/api/jobs/schedules/:scheduleId/reset", async (c) => {
-    if (!options.schedules) {
-      return c.json({ error: { code: "JOB_SCHEDULE_NOT_FOUND", message: "Job schedules are not enabled" } }, 404);
-    }
+    const schedules = requireJobSchedules(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.schedules.clearOverride(actor, c.req.param("scheduleId"), {
+    const data = await schedules.clearOverride(actor, c.req.param("scheduleId"), {
       metadata: requestMetadata(c.req.raw)
     });
     return c.json({ data });
   });
 
   app.post("/api/jobs/executions/:idempotencyKey/retry", async (c) => {
-    if (!options.retry) {
-      return c.json({ error: { code: "JOB_NOT_FOUND", message: "Job retry is not enabled" } }, 404);
-    }
+    const retry = requireJobRetry(options);
     const actor = await options.actor(c.req.raw);
-    const data = await options.retry.retry(actor, c.req.param("idempotencyKey"));
+    const data = await retry.retry(actor, c.req.param("idempotencyKey"));
     return c.json({ data }, 201);
   });
 
   return app;
+}
+
+function requireJobHistory(options: JobApiOptions): JobHistoryService {
+  ensureJobHistoryApiAvailable(options.jobs);
+  return options.jobs;
+}
+
+function requireJobSchedules(options: JobApiOptions): JobScheduleService {
+  ensureJobScheduleServiceAvailable(options.schedules);
+  return options.schedules;
+}
+
+function requireJobRetry(options: JobApiOptions): JobRetryPort {
+  ensureJobRetryAvailable(options.retry);
+  return options.retry;
 }
 
 function scheduleDefinitionFromBody(

@@ -65,6 +65,12 @@ export function ensureJobHistoryServiceAvailable<T>(jobs: T | undefined): assert
   }
 }
 
+export function ensureJobHistoryApiAvailable<T>(jobs: T | undefined): asserts jobs is T {
+  if (jobs === undefined) {
+    throw notFound("Job history is not enabled", "JOB_NOT_FOUND");
+  }
+}
+
 export function planJobHistoryAccess(options: {
   readonly actor: Actor;
   readonly adminRoles: readonly string[];
