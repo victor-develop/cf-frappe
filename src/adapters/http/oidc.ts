@@ -1,8 +1,11 @@
-import { badRequest, permissionDenied } from "../../core/errors.js";
+import { permissionDenied } from "../../core/errors.js";
 import {
+  normalizeOidcTokenSource,
   normalizeOidcAudiences,
   normalizeOidcIssuer,
-  normalizeOidcJwksUrl
+  normalizeOidcJwksUrl,
+  type NormalizedOidcTokenSource,
+  type OidcTokenSource
 } from "../../application/access-policy.js";
 import {
   DEFAULT_TENANT_ID,
@@ -65,26 +68,9 @@ export interface OidcJwks extends JsonWebKeySet<OidcJsonWebKey> {}
 
 export interface OidcJsonWebKey extends JsonWebKeyWithKid {}
 
-export interface OidcTokenSource {
-  readonly header?: string;
-  readonly scheme?: string;
-  readonly cookie?: string;
-}
-
 export type OidcTokenResolver = (request: Request) => string | undefined;
 
 const DEFAULT_JWKS_CACHE_TTL_SECONDS = 300;
-const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
-  header: "authorization",
-  scheme: "bearer"
-};
-const HTTP_TOKEN_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
-
-interface NormalizedOidcTokenSource {
-  readonly header?: string;
-  readonly scheme?: string;
-  readonly cookie?: string;
-}
 
 export function hasOidcToken(request: Request, tokenSource?: OidcTokenSource | OidcTokenResolver): boolean {
   return oidcTokenFromRequest(request, normalizeTokenSource(tokenSource)) !== undefined;
@@ -358,38 +344,12 @@ function normalizeTokenSource(
   tokenSource: OidcTokenSource | OidcTokenResolver | undefined
 ): NormalizedOidcTokenSource | OidcTokenResolver {
   if (tokenSource === undefined) {
-    return DEFAULT_OIDC_TOKEN_SOURCE;
+    return normalizeOidcTokenSource(undefined);
   }
   if (typeof tokenSource === "function") {
     return tokenSource;
   }
-  const header = firstNonBlank(tokenSource.header);
-  const cookie = firstNonBlank(tokenSource.cookie);
-  const scheme = firstNonBlank(tokenSource.scheme)?.toLowerCase();
-  if (header !== undefined && !isHttpTokenName(header)) {
-    throw badRequest("OIDC token source header is invalid");
-  }
-  if (cookie !== undefined && !isHttpTokenName(cookie)) {
-    throw badRequest("OIDC token source cookie is invalid");
-  }
-  if (scheme !== undefined && !isHttpTokenName(scheme)) {
-    throw badRequest("OIDC token source scheme is invalid");
-  }
-  if (header === undefined && cookie === undefined) {
-    throw badRequest("OIDC token source is required");
-  }
-  if (scheme !== undefined && header === undefined) {
-    throw badRequest("OIDC token source scheme requires a header");
-  }
-  return {
-    ...(header === undefined ? {} : { header: header.toLowerCase() }),
-    ...(scheme === undefined ? {} : { scheme }),
-    ...(cookie === undefined ? {} : { cookie })
-  };
-}
-
-function isHttpTokenName(value: string): boolean {
-  return HTTP_TOKEN_NAME.test(value);
+  return normalizeOidcTokenSource(tokenSource);
 }
 
 function isOidcClaims(claims: JwtClaims): boolean {

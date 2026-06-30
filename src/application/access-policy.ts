@@ -60,6 +60,53 @@ export function normalizeOidcAudiences(audience: string | readonly string[]): Re
   return new Set(values);
 }
 
+export interface OidcTokenSource {
+  readonly header?: string;
+  readonly scheme?: string;
+  readonly cookie?: string;
+}
+
+export interface NormalizedOidcTokenSource {
+  readonly header?: string;
+  readonly scheme?: string;
+  readonly cookie?: string;
+}
+
+const DEFAULT_OIDC_TOKEN_SOURCE: NormalizedOidcTokenSource = {
+  header: "authorization",
+  scheme: "bearer"
+};
+const HTTP_TOKEN_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+
+export function normalizeOidcTokenSource(tokenSource: OidcTokenSource | undefined): NormalizedOidcTokenSource {
+  if (tokenSource === undefined) {
+    return DEFAULT_OIDC_TOKEN_SOURCE;
+  }
+  const header = firstNonBlank(tokenSource.header);
+  const cookie = firstNonBlank(tokenSource.cookie);
+  const scheme = firstNonBlank(tokenSource.scheme)?.toLowerCase();
+  if (header !== undefined && !isHttpTokenName(header)) {
+    throw badRequest("OIDC token source header is invalid");
+  }
+  if (cookie !== undefined && !isHttpTokenName(cookie)) {
+    throw badRequest("OIDC token source cookie is invalid");
+  }
+  if (scheme !== undefined && !isHttpTokenName(scheme)) {
+    throw badRequest("OIDC token source scheme is invalid");
+  }
+  if (header === undefined && cookie === undefined) {
+    throw badRequest("OIDC token source is required");
+  }
+  if (scheme !== undefined && header === undefined) {
+    throw badRequest("OIDC token source scheme requires a header");
+  }
+  return {
+    ...(header === undefined ? {} : { header: header.toLowerCase() }),
+    ...(scheme === undefined ? {} : { scheme }),
+    ...(cookie === undefined ? {} : { cookie })
+  };
+}
+
 export function normalizeOidcRoleList(values: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const roles: string[] = [];
@@ -91,4 +138,18 @@ export function normalizeOidcHostedDomainSet(domains: string | readonly string[]
     normalizeOidcClaimNameList(domains === undefined ? [] : Array.isArray(domains) ? domains : [domains])
       .map((domain) => domain.toLowerCase())
   );
+}
+
+function isHttpTokenName(value: string): boolean {
+  return HTTP_TOKEN_NAME.test(value);
+}
+
+function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed !== undefined && trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return undefined;
 }

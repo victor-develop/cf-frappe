@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted OIDC token-source configuration normalization into access policy so the HTTP OIDC resolver keeps request token extraction and custom request resolvers while the auth capability owns default Bearer, header, cookie, and scheme invariants.
 - Extracted OIDC provider role-list, claim-name, and hosted-domain normalization into access policy so Okta/Auth0/Google Workspace presets keep provider-specific claim mapping while the auth capability owns shared provider normalization invariants.
 - Extracted OIDC issuer, JWKS URL, and audience configuration normalization into access policy so the HTTP OIDC adapter keeps token-source parsing, token extraction, JWKS loading, JWT verification, account sync, and actor mapping while the auth capability owns setup-time configuration invariants.
 - Extracted Cloudflare Access team-domain and audience configuration normalization into access policy so the HTTP auth adapter keeps token extraction, JWKS loading, JWT verification, account sync, and actor mapping while the auth capability owns setup-time configuration invariants.

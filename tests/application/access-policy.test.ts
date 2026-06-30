@@ -8,7 +8,8 @@ import {
   normalizeOidcHostedDomainSet,
   normalizeOidcIssuer,
   normalizeOidcJwksUrl,
-  normalizeOidcRoleList
+  normalizeOidcRoleList,
+  normalizeOidcTokenSource
 } from "../../src";
 
 describe("access policy", () => {
@@ -100,6 +101,38 @@ describe("access policy", () => {
       expect(error).toMatchObject({
         code: "BAD_REQUEST",
         message: "OIDC audience is required",
+        status: 400
+      });
+    }
+  });
+
+  it("normalizes default OIDC token-source configuration", () => {
+    expect(normalizeOidcTokenSource(undefined)).toEqual({
+      header: "authorization",
+      scheme: "bearer"
+    });
+  });
+
+  it("normalizes configured OIDC token-source fields", () => {
+    expect(normalizeOidcTokenSource({ header: " X-Id-Token ", scheme: " DPoP " })).toEqual({
+      header: "x-id-token",
+      scheme: "dpop"
+    });
+    expect(normalizeOidcTokenSource({ cookie: " id_token " })).toEqual({ cookie: "id_token" });
+  });
+
+  it("rejects invalid OIDC token-source configuration with stable bad-request errors", () => {
+    expect(() => normalizeOidcTokenSource({ header: "bad header" })).toThrow("OIDC token source header is invalid");
+    expect(() => normalizeOidcTokenSource({ cookie: "id;token" })).toThrow("OIDC token source cookie is invalid");
+    expect(() => normalizeOidcTokenSource({ cookie: "id_token", scheme: "bearer" })).toThrow(
+      "OIDC token source scheme requires a header"
+    );
+    try {
+      normalizeOidcTokenSource({});
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "OIDC token source is required",
         status: 400
       });
     }
