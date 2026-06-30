@@ -59,3 +59,36 @@ export function normalizeOidcAudiences(audience: string | readonly string[]): Re
   }
   return new Set(values);
 }
+
+export function normalizeOidcRoleList(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const roles: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().replace(/\s+/gu, " ");
+    if (normalized.length > 0 && !seen.has(normalized)) {
+      seen.add(normalized);
+      roles.push(normalized);
+    }
+  }
+  return roles;
+}
+
+export function normalizeOidcClaimNameList(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length > 0 && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      normalized.push(trimmed);
+    }
+  }
+  return normalized;
+}
+
+export function normalizeOidcHostedDomainSet(domains: string | readonly string[] | undefined): ReadonlySet<string> {
+  return new Set(
+    normalizeOidcClaimNameList(domains === undefined ? [] : Array.isArray(domains) ? domains : [domains])
+      .map((domain) => domain.toLowerCase())
+  );
+}

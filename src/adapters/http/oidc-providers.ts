@@ -1,4 +1,9 @@
 import type { DocumentData, JsonValue } from "../../core/types.js";
+import {
+  normalizeOidcClaimNameList,
+  normalizeOidcHostedDomainSet,
+  normalizeOidcRoleList
+} from "../../application/access-policy.js";
 import type { OidcAccountSyncActorResolverOptions, OidcJwtClaims } from "./oidc.js";
 
 export type OidcProviderPreset<TClaims extends OidcJwtClaims = OidcJwtClaims> = Pick<
@@ -69,11 +74,11 @@ const DEFAULT_BASE_ROLES = ["User"] as const;
 export function oidcClaimRoleMapper<TClaims extends OidcJwtClaims = OidcJwtClaims>(
   options: OidcClaimRoleMapperOptions = {}
 ): (claims: TClaims) => readonly string[] {
-  const claimNames = normalizeStringList(options.claimNames ?? ["roles"]);
+  const claimNames = normalizeOidcClaimNameList(options.claimNames ?? ["roles"]);
   const rolePrefix = options.rolePrefix ?? "";
-  const baseRoles = normalizeRoles(options.baseRoles ?? DEFAULT_BASE_ROLES);
+  const baseRoles = normalizeOidcRoleList(options.baseRoles ?? DEFAULT_BASE_ROLES);
   return (claims) =>
-    normalizeRoles([
+    normalizeOidcRoleList([
       ...baseRoles,
       ...claimNames.flatMap((claimName) =>
         claimStringValues(claims, claimName).map((role) => prefixedRole(rolePrefix, role))
@@ -121,7 +126,7 @@ export function auth0OidcProviderPreset(
       provider: options.provider ?? "auth0",
       tenantId: (claims) => claimString(claims, tenantClaim),
       roles: (claims) =>
-        normalizeRoles([
+        normalizeOidcRoleList([
           ...(options.baseRoles ?? DEFAULT_BASE_ROLES),
           ...claimStringValues(claims, roleClaim).map((role) => prefixedRole(rolePrefix, role)),
           ...(options.includePermissions === true
@@ -138,7 +143,7 @@ export function auth0OidcProviderPreset(
 export function googleWorkspaceOidcProviderPreset(
   options: GoogleWorkspaceOidcProviderPresetOptions = {}
 ): OidcProviderPreset<GoogleWorkspaceOidcClaims> {
-  const hostedDomains = normalizeDomainSet(options.hostedDomains);
+  const hostedDomains = normalizeOidcHostedDomainSet(options.hostedDomains);
   const tenantId = options.tenantId;
   return withOptionalMetadata(
     {
@@ -154,7 +159,7 @@ export function googleWorkspaceOidcProviderPreset(
         return hostedDomain !== undefined && hostedDomains.has(hostedDomain);
       },
       emailVerified: (claims) => claims.email_verified === true,
-      roles: () => normalizeRoles(options.baseRoles ?? DEFAULT_BASE_ROLES),
+      roles: () => normalizeOidcRoleList(options.baseRoles ?? DEFAULT_BASE_ROLES),
       ...(tenantId === undefined
         ? {}
         : {
@@ -172,7 +177,7 @@ function withOptionalMetadata<TClaims extends OidcJwtClaims>(
   preset: OidcProviderPreset<TClaims>,
   metadataClaims: readonly string[] | undefined
 ): OidcProviderPreset<TClaims> {
-  const normalized = normalizeStringList(metadataClaims ?? []);
+  const normalized = normalizeOidcClaimNameList(metadataClaims ?? []);
   if (normalized.length === 0) {
     return preset;
   }
@@ -223,41 +228,8 @@ function claimValue(claims: OidcJwtClaims, claimName: string): unknown {
   return (claims as unknown as Record<string, unknown>)[claimName];
 }
 
-function normalizeRoles(values: readonly string[]): readonly string[] {
-  const seen = new Set<string>();
-  const roles: string[] = [];
-  for (const value of values) {
-    const normalized = value.trim().replace(/\s+/gu, " ");
-    if (normalized.length > 0 && !seen.has(normalized)) {
-      seen.add(normalized);
-      roles.push(normalized);
-    }
-  }
-  return roles;
-}
-
 function prefixedRole(prefix: string, value: string): string {
   return `${prefix}${value.trim().replace(/\s+/gu, " ")}`;
-}
-
-function normalizeStringList(values: readonly string[]): readonly string[] {
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (trimmed.length > 0 && !seen.has(trimmed)) {
-      seen.add(trimmed);
-      normalized.push(trimmed);
-    }
-  }
-  return normalized;
-}
-
-function normalizeDomainSet(domains: string | readonly string[] | undefined): ReadonlySet<string> {
-  return new Set(
-    normalizeStringList(domains === undefined ? [] : Array.isArray(domains) ? domains : [domains])
-      .map((domain) => domain.toLowerCase())
-  );
 }
 
 function hostedDomainFromClaims(claims: GoogleWorkspaceOidcClaims): string | undefined {

@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the OIDC configuration policy slice:
+As of the OIDC provider normalization policy slice:
 
 - Vitest files: `235`
-- Vitest cases: `2748`
-- Remaining gap to Frappe static markers: `36`
+- Vitest cases: `2751`
+- Remaining gap to Frappe static markers: `33`
 
 ## Implication
 

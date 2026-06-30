@@ -4,8 +4,11 @@ import {
   normalizeCloudflareAccessAudiences,
   normalizeCloudflareAccessTeamDomain,
   normalizeOidcAudiences,
+  normalizeOidcClaimNameList,
+  normalizeOidcHostedDomainSet,
   normalizeOidcIssuer,
-  normalizeOidcJwksUrl
+  normalizeOidcJwksUrl,
+  normalizeOidcRoleList
 } from "../../src";
 
 describe("access policy", () => {
@@ -100,5 +103,25 @@ describe("access policy", () => {
         status: 400
       });
     }
+  });
+
+  it("normalizes OIDC provider role lists", () => {
+    expect(normalizeOidcRoleList([" User ", "Desk   Manager", "", "User", "Desk Manager"])).toEqual([
+      "User",
+      "Desk Manager"
+    ]);
+  });
+
+  it("normalizes OIDC provider claim-name lists", () => {
+    expect(normalizeOidcClaimNameList([" roles ", "groups", "", "roles"])).toEqual(["roles", "groups"]);
+  });
+
+  it("normalizes OIDC hosted-domain sets", () => {
+    expect([...normalizeOidcHostedDomainSet([" Example.COM ", "", "example.com", "teams.example.com"])]).toEqual([
+      "example.com",
+      "teams.example.com"
+    ]);
+    expect([...normalizeOidcHostedDomainSet(" Example.COM ")]).toEqual(["example.com"]);
+    expect([...normalizeOidcHostedDomainSet(undefined)]).toEqual([]);
   });
 });
