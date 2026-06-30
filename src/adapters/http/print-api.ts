@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { ensurePrintSettingsApiConfigured } from "../../application/print-settings-policy.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import { ensurePrintPdfRendererAvailable } from "../../application/print-policy.js";
 import type { PrintService } from "../../application/print-service.js";
@@ -42,22 +43,18 @@ export function createPrintApi(options: PrintApiOptions): Hono {
   });
 
   app.get("/api/print-settings", async (c) => {
-    if (!options.printSettings) {
-      throw badRequest("Print settings are not configured");
-    }
+    const printSettings = requirePrintSettings(options);
     const actor = await options.actor(c.req.raw);
-    return c.json({ data: await options.printSettings.get(actor, c.req.query("tenant")) });
+    return c.json({ data: await printSettings.get(actor, c.req.query("tenant")) });
   });
 
   app.put("/api/print-settings", async (c) => {
-    if (!options.printSettings) {
-      throw badRequest("Print settings are not configured");
-    }
+    const printSettings = requirePrintSettings(options);
     const actor = await options.actor(c.req.raw);
     const tenantId = c.req.query("tenant");
-    options.printSettings.authorizeAdministration(actor, tenantId);
+    printSettings.authorizeAdministration(actor, tenantId);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
-    const data = await options.printSettings.change({
+    const data = await printSettings.change({
       actor,
       settings: withoutKeys(body, ["expectedVersion"]),
       ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
@@ -82,6 +79,11 @@ export function createPrintApi(options: PrintApiOptions): Hono {
   });
 
   return app;
+}
+
+function requirePrintSettings(options: PrintApiOptions): PrintSettingsService {
+  ensurePrintSettingsApiConfigured(options.printSettings);
+  return options.printSettings;
 }
 
 function withoutKeys<T extends Record<string, unknown>>(input: T, keys: readonly string[]): Record<string, unknown> {

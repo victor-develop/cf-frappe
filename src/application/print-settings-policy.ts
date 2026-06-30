@@ -40,6 +40,12 @@ export function ensurePrintSettingsServiceAvailable<T>(printSettings: T | undefi
   }
 }
 
+export function ensurePrintSettingsApiConfigured<T>(printSettings: T | undefined): asserts printSettings is T {
+  if (printSettings === undefined) {
+    throw badRequest("Print settings are not configured");
+  }
+}
+
 export function normalizePrintSettingsPatchInput(
   input: PrintSettingsInput | Record<string, unknown>
 ): PrintSettingsPatch {

@@ -49,6 +49,33 @@ describe("print api", () => {
     return { app, services };
   }
 
+  it("maps missing print-settings service through the HTTP error boundary", async () => {
+    const services = createServices();
+    const app = createResourceApi({
+      registry: services.registry,
+      documents: services.documents,
+      prints: services.prints,
+      queries: services.queries,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const read = await app.request("/api/print-settings", { headers: adminHeaders });
+    expect(read.status).toBe(400);
+    await expect(read.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Print settings are not configured" }
+    });
+
+    const update = await app.request("/api/print-settings", {
+      method: "PUT",
+      headers: { ...adminHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ defaultLayout: null })
+    });
+    expect(update.status).toBe(400);
+    await expect(update.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Print settings are not configured" }
+    });
+  });
+
   it("lists print format metadata", async () => {
     const { app } = makeApp();
 

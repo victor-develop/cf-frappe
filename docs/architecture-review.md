@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted HTTP print-settings API configuration decisions into print-settings policy so print API routes keep actor resolution, request parsing, settings orchestration, and response shaping through the shared HTTP error boundary.
 - Extracted HTTP job history, schedule, and retry availability decisions into job policies so job API routes keep actor resolution, query/body parsing, service orchestration, and response shaping through the shared HTTP error boundary.
 - Extracted Desk admin service availability decisions for user permissions, user accounts, user profiles, roles, custom fields, field properties, workflows, notification rules, and assignment rules into application policies so Desk admin routes keep actor resolution, request parsing, service orchestration, redirects, and failure rendering.
 - Extracted Desk data patch admin and queue availability decisions into data-patch availability policy so Desk data-patch routes keep actor resolution, form parsing, dashboard rendering, queue orchestration, redirects, and failure rendering.

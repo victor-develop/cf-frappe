@@ -1,5 +1,6 @@
 import {
   authorizePrintSettingsAdministration,
+  ensurePrintSettingsApiConfigured,
   ensurePrintSettingsServiceAvailable,
   ensurePrintSettingsExpectedVersion,
   normalizePrintSettingsPatchInput,
@@ -14,6 +15,22 @@ const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId:
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
 
 describe("print settings policy", () => {
+  it("guards HTTP print-settings API configuration", () => {
+    const service = { get: () => undefined };
+    expect(() => ensurePrintSettingsApiConfigured(service)).not.toThrow();
+    try {
+      ensurePrintSettingsApiConfigured(undefined);
+      throw new Error("expected print settings API configuration guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Print settings are not configured",
+        status: 400
+      });
+    }
+  });
+
   it("guards print settings service availability", () => {
     const service = { get: () => undefined };
     expect(() => ensurePrintSettingsServiceAvailable(service)).not.toThrow();
