@@ -28,6 +28,12 @@ import {
   type DocumentImportResult
 } from "../../application/document-import-service.js";
 import { ensureDashboardServiceAvailable } from "../../application/dashboard-policy.js";
+import {
+  ensureDataPatchAdminAvailable,
+  ensureDataPatchQueueAvailable,
+  ensureDataPatchRollbackQueueAvailable,
+  ensureDataPatchRollbackRetryQueueAvailable
+} from "../../application/data-patch-availability-policy.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type {
   FileDashboard,
@@ -3143,32 +3149,22 @@ function requireJobs(options: DeskAppOptions): JobHistoryService {
 }
 
 function requireDataPatches(options: DeskAppOptions): DataPatchAdminPort {
-  if (!options.dataPatches) {
-    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patches are not enabled", { status: 404 });
-  }
+  ensureDataPatchAdminAvailable(options.dataPatches);
   return options.dataPatches;
 }
 
 function requireDataPatchQueue(options: DeskAppOptions): DataPatchQueuePort {
-  if (!options.dataPatchQueue) {
-    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch queue is not enabled", { status: 404 });
-  }
+  ensureDataPatchQueueAvailable(options.dataPatchQueue);
   return options.dataPatchQueue;
 }
 
 function requireDataPatchRollbackQueue(options: DeskAppOptions): DataPatchRollbackQueuePort {
-  if (!options.dataPatchRollbackQueue) {
-    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch rollback queue is not enabled", { status: 404 });
-  }
+  ensureDataPatchRollbackQueueAvailable(options.dataPatchRollbackQueue);
   return options.dataPatchRollbackQueue;
 }
 
 function requireDataPatchRollbackRetryQueue(options: DeskAppOptions): DataPatchRollbackRetryQueuePort {
-  if (!options.dataPatchRollbackRetryQueue) {
-    throw new FrameworkError("DATA_PATCH_NOT_FOUND", "Data patch rollback retry queue is not enabled", {
-      status: 404
-    });
-  }
+  ensureDataPatchRollbackRetryQueueAvailable(options.dataPatchRollbackRetryQueue);
   return options.dataPatchRollbackRetryQueue;
 }
 
