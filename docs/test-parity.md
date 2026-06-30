@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Desk realtime route policy slice:
+As of the Cloudflare Access configuration policy slice:
 
 - Vitest files: `235`
-- Vitest cases: `2739`
-- Remaining gap to Frappe static markers: `45`
+- Vitest cases: `2743`
+- Remaining gap to Frappe static markers: `41`
 
 ## Implication
 

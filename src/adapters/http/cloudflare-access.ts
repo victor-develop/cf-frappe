@@ -1,4 +1,8 @@
-import { badRequest, permissionDenied } from "../../core/errors.js";
+import { permissionDenied } from "../../core/errors.js";
+import {
+  normalizeCloudflareAccessAudiences,
+  normalizeCloudflareAccessTeamDomain
+} from "../../application/access-policy.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
@@ -68,9 +72,9 @@ export function hasCloudflareAccessToken(request: Request): boolean {
 }
 
 export function cloudflareAccessActorResolver(options: CloudflareAccessActorResolverOptions): ActorResolver {
-  const teamDomain = normalizeTeamDomain(options.teamDomain);
+  const teamDomain = normalizeCloudflareAccessTeamDomain(options.teamDomain);
   const issuer = `https://${teamDomain}`;
-  const audiences = normalizeAudiences(options.audience);
+  const audiences = normalizeCloudflareAccessAudiences(options.audience);
   let cached: { readonly expiresAt: number; readonly jwks: CloudflareAccessJwks } | undefined;
   const loadJwks = async (forceRefresh = false): Promise<JwksLookup> => {
     if (!forceRefresh && cached !== undefined && cached.expiresAt > currentSeconds(options.now)) {
@@ -286,22 +290,6 @@ function accessTokenFromRequest(request: Request): string | undefined {
     return header.trim();
   }
   return firstNonBlank(parseCookies(request.headers.get("cookie")).get(ACCESS_JWT_COOKIE));
-}
-
-function normalizeTeamDomain(teamDomain: string): string {
-  const trimmed = teamDomain.trim().replace(/^https?:\/\//u, "").replace(/\/+$/u, "");
-  if (trimmed.length === 0) {
-    throw badRequest("Cloudflare Access teamDomain is required");
-  }
-  return trimmed;
-}
-
-function normalizeAudiences(audience: string | readonly string[]): ReadonlySet<string> {
-  const values = (Array.isArray(audience) ? audience : [audience]).map((value) => value.trim());
-  if (values.length === 0 || values.some((value) => value.length === 0)) {
-    throw badRequest("Cloudflare Access audience is required");
-  }
-  return new Set(values);
 }
 
 function isCloudflareAccessClaims(claims: JwtClaims): boolean {
