@@ -1,14 +1,29 @@
 # Standalone Architecture Review
 
+## Current Status
+
+Pass for the original architecture-quality criterion as of the later standalone review on 2026-06-30.
+
+The first standalone review below failed the original success criteria. Subsequent slices addressed the blocking findings: bounded event helpers replaced the monolithic payload matching pattern, D1 event insertion was centralized, document naming-series allocation and unique-value reserve/release events now share the same `DocumentStore.commitBatch` boundary as document create/update/delete events, and `document-atomic-commit-policy` owns auxiliary batch entry/projection shaping. A fresh standalone subagent review after those changes returned PASS with no blocking architecture findings.
+
+Current verification evidence:
+
+- Standalone architecture review: PASS after the atomic command-boundary slice.
+- Local gate: `npm run check` passed with `235` Vitest files and `2787` tests.
+- Test parity: current Vitest case count is above the Frappe static-marker reference of `2784`.
+- Repository/release: public GitHub repository, `main` as default branch, and `v0.1.0` release.
+
+## Historical Review
+
 Date: 2026-06-28
 
 Reviewer: standalone subagent with the requested DRY, extreme separation-of-concerns, TDD, reactive functional-first, data-model-driven, event-modeling, and event-sourcing-first lens.
 
-## Verdict
+## Historical Verdict
 
 Fail for the original success criteria.
 
-The current project has a strong event-sourced metadata kernel and broad Cloudflare adapter coverage, but it does not yet pass the requested architecture-quality bar. The review also confirmed the full project goal remains incomplete because the test count is still below the Frappe reference target.
+At that review time, the project had a strong event-sourced metadata kernel and broad Cloudflare adapter coverage, but it did not yet pass the requested architecture-quality bar. That review also concluded the full project goal was incomplete because the test count was still below the Frappe reference target.
 
 ## Findings
 

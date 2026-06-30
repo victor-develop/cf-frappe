@@ -1,6 +1,6 @@
 # Test Parity Target
 
-The original goal requires cf-frappe to have no fewer test cases than the old framework. The current suite clears the static upstream marker count, while the broader goal still depends on architecture review and release evidence.
+The original goal requires cf-frappe to have no fewer test cases than the old framework. The current suite clears the static upstream marker count.
 
 ## Current Reference Count
 
@@ -28,4 +28,4 @@ As of the atomic document command boundary slice:
 
 ## Implication
 
-The framework can pass its local quality gate and still fail the full goal. The remaining work is not to generate noisy tests, but to keep building real parity surfaces and cover them with meaningful contract, runtime, model, API, Desk, D1, Durable Object, migration, auth, workflow, job, realtime, and file-storage tests while the architecture-quality review converges.
+The test-count criterion is satisfied by current evidence: `2787` passing Vitest cases against the Frappe static-marker reference of `2784`. Future work should keep adding meaningful contract, runtime, model, API, Desk, D1, Durable Object, migration, auth, workflow, job, realtime, and file-storage tests as the framework grows, rather than adding noisy tests only to preserve a count.
