@@ -1,4 +1,5 @@
 import {
+  ensureUserNotificationServiceAvailable,
   normalizeUserNotificationId,
   normalizeUserNotificationInboxLimit,
   normalizeUserNotificationUserId,
@@ -10,6 +11,7 @@ import {
   userNotificationInboxProjection
 } from "../../src/application/user-notification-policy.js";
 import { SYSTEM_MANAGER_ROLE } from "../../src";
+import { FrameworkError } from "../../src/core/errors.js";
 import type {
   UserNotificationRecord,
   UserNotificationState
@@ -18,6 +20,22 @@ import type {
 const now = "2026-01-01T00:00:00.000Z";
 
 describe("user notification policy", () => {
+  it("guards user notification service availability", () => {
+    const service = { inbox: async () => ({}) };
+    expect(() => ensureUserNotificationServiceAvailable(service)).not.toThrow();
+    try {
+      ensureUserNotificationServiceAvailable(undefined);
+      throw new Error("expected notification availability guard to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FrameworkError);
+      expect(error).toMatchObject({
+        code: "DOCUMENT_NOT_FOUND",
+        message: "Notifications are not enabled",
+        status: 404
+      });
+    }
+  });
+
   it("plans notification access for the actor inbox and default tenant", () => {
     expect(planUserNotificationAccess({
       actor: { id: "support@example.com", roles: ["User"], tenantId: "acme" },

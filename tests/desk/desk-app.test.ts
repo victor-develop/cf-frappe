@@ -1080,6 +1080,29 @@ describe("Desk app", () => {
     expect(await included.text()).toContain("<td>yes</td>");
   });
 
+  it("uses the notification policy error for Desk notification routes when notifications are disabled", async () => {
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => ({ id: "support@example.com", roles: ["User"], tenantId: "acme" })
+    });
+    const actionBase = "/desk/notifications/evt_assign%3Auser%3Asupport%2540example.com";
+
+    const inbox = await app.request("/desk/notifications");
+    expect(inbox.status).toBe(404);
+    await expect(inbox.text()).resolves.toContain("Notifications are not enabled");
+
+    const read = await app.request(`${actionBase}/read`, { method: "POST" });
+    expect(read.status).toBe(404);
+    await expect(read.text()).resolves.toContain("Notifications are not enabled");
+
+    const dismiss = await app.request(`${actionBase}/dismiss`, { method: "POST" });
+    expect(dismiss.status).toBe(404);
+    await expect(dismiss.text()).resolves.toContain("Notifications are not enabled");
+  });
+
   it("renders report list and report result pages", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({

@@ -55,6 +55,7 @@ import type { SavedListFilterService } from "../../application/saved-list-filter
 import { ensureSavedReportServiceAvailable } from "../../application/saved-report-policy.js";
 import type { SavedReportDefinition, SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
+import { ensureUserNotificationServiceAvailable } from "../../application/user-notification-policy.js";
 import type { UserNotificationService } from "../../application/user-notification-service.js";
 import type { UserPermissionService } from "../../application/user-permission-service.js";
 import type { UserProfileService } from "../../application/user-profile-service.js";
@@ -3185,9 +3186,7 @@ function requireJobSchedules(options: DeskAppOptions): JobScheduleService {
 }
 
 function requireNotifications(options: DeskAppOptions): UserNotificationService {
-  if (!options.notifications) {
-    throw new FrameworkError("DOCUMENT_NOT_FOUND", "Notifications are not enabled", { status: 404 });
-  }
+  ensureUserNotificationServiceAvailable(options.notifications);
   return options.notifications;
 }
 

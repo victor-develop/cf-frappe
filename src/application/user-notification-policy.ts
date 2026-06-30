@@ -1,4 +1,4 @@
-import { badRequest } from "../core/errors.js";
+import { badRequest, notFound } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
@@ -44,6 +44,12 @@ export type UserNotificationLookupDecision =
       readonly message: string;
       readonly code: "DOCUMENT_NOT_FOUND";
     };
+
+export function ensureUserNotificationServiceAvailable<T>(notifications: T | undefined): asserts notifications is T {
+  if (notifications === undefined) {
+    throw notFound("Notifications are not enabled");
+  }
+}
 
 export function planUserNotificationAccess(options: {
   readonly actor: Actor;
