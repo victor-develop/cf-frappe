@@ -2,7 +2,10 @@ import {
   FrameworkError,
   isPermissionDeniedError,
   normalizeCloudflareAccessAudiences,
-  normalizeCloudflareAccessTeamDomain
+  normalizeCloudflareAccessTeamDomain,
+  normalizeOidcAudiences,
+  normalizeOidcIssuer,
+  normalizeOidcJwksUrl
 } from "../../src";
 
 describe("access policy", () => {
@@ -57,6 +60,43 @@ describe("access policy", () => {
       expect(error).toMatchObject({
         code: "BAD_REQUEST",
         message: "Cloudflare Access audience is required",
+        status: 400
+      });
+    }
+  });
+
+  it("normalizes OIDC issuer and JWKS URLs before resolver setup", () => {
+    expect(normalizeOidcIssuer(" https://issuer.example.com ")).toBe("https://issuer.example.com");
+    expect(normalizeOidcJwksUrl(" https://issuer.example.com/.well-known/jwks.json ")).toBe(
+      "https://issuer.example.com/.well-known/jwks.json"
+    );
+  });
+
+  it("rejects blank OIDC issuer and JWKS URLs with stable bad-request errors", () => {
+    expect(() => normalizeOidcIssuer(" ")).toThrow("OIDC issuer is required");
+    expect(() => normalizeOidcJwksUrl(" ")).toThrow("OIDC jwksUrl is required");
+  });
+
+  it("rejects non-HTTPS OIDC issuer and JWKS URLs", () => {
+    expect(() => normalizeOidcIssuer("http://issuer.example.com")).toThrow("OIDC issuer must be an HTTPS URL");
+    expect(() => normalizeOidcJwksUrl("http://issuer.example.com/jwks")).toThrow(
+      "OIDC jwksUrl must be an HTTPS URL"
+    );
+  });
+
+  it("normalizes OIDC audiences", () => {
+    expect([...normalizeOidcAudiences([" desk ", "admin"])]).toEqual(["desk", "admin"]);
+    expect([...normalizeOidcAudiences(" desk ")]).toEqual(["desk"]);
+  });
+
+  it("rejects empty OIDC audience values with stable bad-request errors", () => {
+    expect(() => normalizeOidcAudiences([])).toThrow("OIDC audience is required");
+    try {
+      normalizeOidcAudiences(["desk", " "]);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "OIDC audience is required",
         status: 400
       });
     }

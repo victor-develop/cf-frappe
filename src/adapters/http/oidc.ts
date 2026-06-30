@@ -1,5 +1,10 @@
 import { badRequest, permissionDenied } from "../../core/errors.js";
 import {
+  normalizeOidcAudiences,
+  normalizeOidcIssuer,
+  normalizeOidcJwksUrl
+} from "../../application/access-policy.js";
+import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
@@ -88,9 +93,9 @@ export function hasOidcToken(request: Request, tokenSource?: OidcTokenSource | O
 export function oidcActorResolver<TClaims extends OidcJwtClaims = OidcJwtClaims>(
   options: OidcActorResolverOptions<TClaims>
 ): ActorResolver {
-  const issuer = normalizeIssuer(options.issuer);
-  const audiences = normalizeAudiences(options.audience);
-  const jwksUrl = normalizeJwksUrl(options.jwksUrl);
+  const issuer = normalizeOidcIssuer(options.issuer);
+  const audiences = normalizeOidcAudiences(options.audience);
+  const jwksUrl = normalizeOidcJwksUrl(options.jwksUrl);
   const tokenSource = normalizeTokenSource(options.tokenSource);
   let cached: { readonly expiresAt: number; readonly jwks: OidcJwks } | undefined;
   const loadJwks = async (forceRefresh = false): Promise<JwksLookup<OidcJwks>> => {
@@ -385,46 +390,6 @@ function normalizeTokenSource(
 
 function isHttpTokenName(value: string): boolean {
   return HTTP_TOKEN_NAME.test(value);
-}
-
-function normalizeIssuer(issuer: string): string {
-  const trimmed = issuer.trim();
-  if (trimmed.length === 0) {
-    throw badRequest("OIDC issuer is required");
-  }
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "https:") {
-      throw new Error("unsupported protocol");
-    }
-  } catch {
-    throw badRequest("OIDC issuer must be an HTTPS URL");
-  }
-  return trimmed;
-}
-
-function normalizeJwksUrl(jwksUrl: string): string {
-  const trimmed = jwksUrl.trim();
-  if (trimmed.length === 0) {
-    throw badRequest("OIDC jwksUrl is required");
-  }
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "https:") {
-      throw new Error("unsupported protocol");
-    }
-    return url.toString();
-  } catch {
-    throw badRequest("OIDC jwksUrl must be an HTTPS URL");
-  }
-}
-
-function normalizeAudiences(audience: string | readonly string[]): ReadonlySet<string> {
-  const values = (Array.isArray(audience) ? audience : [audience]).map((value) => value.trim());
-  if (values.length === 0 || values.some((value) => value.length === 0)) {
-    throw badRequest("OIDC audience is required");
-  }
-  return new Set(values);
 }
 
 function isOidcClaims(claims: JwtClaims): boolean {

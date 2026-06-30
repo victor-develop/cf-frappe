@@ -20,11 +20,11 @@ Observed counts:
 
 ## cf-frappe Current Count
 
-As of the Cloudflare Access configuration policy slice:
+As of the OIDC configuration policy slice:
 
 - Vitest files: `235`
-- Vitest cases: `2743`
-- Remaining gap to Frappe static markers: `41`
+- Vitest cases: `2748`
+- Remaining gap to Frappe static markers: `36`
 
 ## Implication
 

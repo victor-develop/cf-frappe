@@ -39,6 +39,7 @@ The current project has a strong event-sourced metadata kernel and broad Cloudfl
 
 ## Post-Review Progress
 
+- Extracted OIDC issuer, JWKS URL, and audience configuration normalization into access policy so the HTTP OIDC adapter keeps token-source parsing, token extraction, JWKS loading, JWT verification, account sync, and actor mapping while the auth capability owns setup-time configuration invariants.
 - Extracted Cloudflare Access team-domain and audience configuration normalization into access policy so the HTTP auth adapter keeps token extraction, JWKS loading, JWT verification, account sync, and actor mapping while the auth capability owns setup-time configuration invariants.
 - Extracted Desk realtime route resolution into realtime policy so generated Desk pages keep request handling, document lookup, form rendering, presence panel placement, and script attribute rendering while the realtime presentation capability owns disabled/default/custom route decisions.
 - Extracted HTTP saved-filter query availability decisions into saved-list-filter policy so resource list and export routes keep actor resolution, metadata lookup, URL filter parsing, saved-filter merge orchestration, and response shaping through the shared HTTP error boundary.
