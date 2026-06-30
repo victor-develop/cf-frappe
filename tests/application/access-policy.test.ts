@@ -11,11 +11,13 @@ import {
   normalizeOidcJwksUrl,
   normalizeOidcRoleList,
   normalizeOidcTokenSource,
+  resolveCloudflareAccessAccountSyncProjection,
   resolveOidcAccountSyncProjection,
   resolveOidcActorFromClaims,
   resolveOidcSyncActorFromClaims,
   resolveOidcSyncedAccountActor,
-  resolveCloudflareAccessActorFromClaims
+  resolveCloudflareAccessActorFromClaims,
+  resolveCloudflareAccessSyncActorFromClaims
 } from "../../src";
 
 describe("access policy", () => {
@@ -120,6 +122,88 @@ describe("access policy", () => {
     expect(() =>
       resolveCloudflareAccessActorFromClaims({ sub: "subject-1" }, { roles: ["User", " "] })
     ).toThrow("Cloudflare Access actor roles are invalid");
+  });
+
+  it("resolves default Cloudflare Access account-sync projections from claims", () => {
+    expect(resolveCloudflareAccessAccountSyncProjection({
+      sub: "subject-1",
+      email: " OWNER@EXAMPLE.COM "
+    })).toEqual({
+      provider: "cloudflare-access",
+      subject: "subject-1",
+      userId: "owner@example.com",
+      tenantId: "default",
+      email: "owner@example.com",
+      emailVerified: true
+    });
+  });
+
+  it("resolves configured Cloudflare Access account-sync projections from claims", () => {
+    expect(resolveCloudflareAccessAccountSyncProjection(
+      {
+        sub: "subject-1",
+        email: "owner@example.com",
+        groups: ["Support"],
+        enabledByProvider: false
+      },
+      {
+        provider: "access-idp",
+        subject: (claims) => `access:${claims.sub}`,
+        actorId: (claims) => claims.sub,
+        tenantId: () => "acme",
+        roles: (claims) => claims.groups,
+        enabled: (claims) => claims.enabledByProvider,
+        emailVerified: false,
+        metadata: (claims) => ({ source: claims.sub })
+      }
+    )).toEqual({
+      provider: "access-idp",
+      subject: "access:subject-1",
+      userId: "subject-1",
+      tenantId: "acme",
+      email: "owner@example.com",
+      roles: ["Support"],
+      enabled: false,
+      emailVerified: false,
+      metadata: { source: "subject-1" }
+    });
+  });
+
+  it("uses normalized email as the Cloudflare Access account-sync subject fallback", () => {
+    expect(resolveCloudflareAccessAccountSyncProjection({ email: " OWNER@EXAMPLE.COM " })).toMatchObject({
+      subject: "owner@example.com",
+      userId: "owner@example.com"
+    });
+  });
+
+  it("rejects Cloudflare Access account-sync projections without a subject", () => {
+    expect(() => resolveCloudflareAccessAccountSyncProjection({})).toThrow(
+      "Cloudflare Access JWT subject is missing"
+    );
+  });
+
+  it("resolves Cloudflare Access sync actors", () => {
+    expect(resolveCloudflareAccessSyncActorFromClaims(
+      { sub: "subject-1" },
+      { provider: "access-idp", tenantId: "acme" }
+    )).toEqual({
+      id: "access-idp:sync",
+      roles: ["System Manager"],
+      tenantId: "acme"
+    });
+    expect(resolveCloudflareAccessSyncActorFromClaims(
+      { sub: "subject-1", email: "owner@example.com" },
+      {
+        provider: "access-idp",
+        tenantId: "acme",
+        syncActorId: (claims) => `${claims.email}:sync`,
+        syncActorRoles: ["Integration Manager"]
+      }
+    )).toEqual({
+      id: "owner@example.com:sync",
+      roles: ["Integration Manager"],
+      tenantId: "acme"
+    });
   });
 
   it("normalizes OIDC issuer and JWKS URLs before resolver setup", () => {
