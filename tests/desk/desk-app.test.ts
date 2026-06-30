@@ -830,6 +830,15 @@ describe("Desk app", () => {
     );
   });
 
+  it("uses the dashboard policy error for Desk dashboard routes when dashboards are disabled", async () => {
+    const { app } = makeDesk(owner);
+
+    const response = await app.request("/desk/dashboards/Operations");
+
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Dashboards are not enabled");
+  });
+
   it("renders metadata-defined kanban boards in Desk", async () => {
     const registry = createRegistry({
       doctypes: [noteDocType],

@@ -4,12 +4,29 @@ import {
   dashboardIndicatorMatches,
   dashboardReportCardValue,
   emptyDashboardDocumentAggregate,
+  ensureDashboardServiceAvailable,
   finishDashboardDocumentAggregate,
   planDashboardReadAccess,
   updateDashboardDocumentAggregate
 } from "../../src";
 
 describe("dashboard policy", () => {
+  it("guards dashboard service availability before Desk dashboard routes", () => {
+    expect(() => ensureDashboardServiceAvailable({ runDashboard: async () => ({}) })).not.toThrow();
+
+    let error: unknown;
+    try {
+      ensureDashboardServiceAvailable(undefined);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: "DASHBOARD_NOT_FOUND",
+      message: "Dashboards are not enabled",
+      status: 404
+    });
+  });
+
   it("shapes dashboard card results with default labels", () => {
     expect(dashboardCardResult({
       name: "open_notes",

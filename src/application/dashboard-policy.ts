@@ -6,6 +6,7 @@ import type {
   DashboardIndicatorOperator
 } from "../core/dashboard.js";
 import { canReadDashboard } from "../core/dashboard.js";
+import { notFound } from "../core/errors.js";
 import type { Actor, JsonPrimitive } from "../core/types.js";
 import type { ReportChartResult, ReportRunResult } from "./report-service.js";
 
@@ -29,6 +30,12 @@ export interface DashboardDocumentAggregateState {
   readonly sum: number;
   readonly min: number | null;
   readonly max: number | null;
+}
+
+export function ensureDashboardServiceAvailable<T>(dashboards: T | undefined): asserts dashboards is T {
+  if (dashboards === undefined) {
+    throw notFound("Dashboards are not enabled", "DASHBOARD_NOT_FOUND");
+  }
 }
 
 export function planDashboardReadAccess(options: {

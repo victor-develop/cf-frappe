@@ -26,6 +26,7 @@ import {
   type DocumentImportMode,
   type DocumentImportResult
 } from "../../application/document-import-service.js";
+import { ensureDashboardServiceAvailable } from "../../application/dashboard-policy.js";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import type {
   FileDashboard,
@@ -3207,9 +3208,7 @@ function requireSavedReports(options: DeskAppOptions): SavedReportService {
 }
 
 function requireDashboards(options: DeskAppOptions): DashboardService {
-  if (!options.dashboards) {
-    throw new FrameworkError("DASHBOARD_NOT_FOUND", "Dashboards are not enabled", { status: 404 });
-  }
+  ensureDashboardServiceAvailable(options.dashboards);
   return options.dashboards;
 }
 
