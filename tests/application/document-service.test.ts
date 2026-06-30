@@ -18,9 +18,13 @@ import {
 } from "../../src";
 import type {
   DocTypeDefinition,
+  DocumentCommit,
+  DocumentCommitBatchEntry,
+  DocumentCommitBatchProjection,
   DocumentCommandEventPayload,
   DocumentCollaborationEventPayload,
   DocumentEventPayload,
+  DomainEvent,
   DocumentShareEventPayload
 } from "../../src";
 import {
@@ -37,7 +41,8 @@ import {
   productDocType,
   projectDocType,
   salesInvoiceDocType,
-  salesInvoiceItemDocType
+  salesInvoiceItemDocType,
+  supportTicketDocType
 } from "../helpers";
 
 describe("DocumentService", () => {
@@ -529,6 +534,39 @@ describe("DocumentService", () => {
     });
   });
 
+  it("commits naming-series allocation atomically with document creation", async () => {
+    class FailingCreateStore extends InMemoryDocumentStore {
+      override async commitBatch(
+        entries: readonly DocumentCommitBatchEntry[],
+        project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+      ): Promise<DocumentCommit> {
+        if (entries.some((entry) => entry.stream === documentStream("acme", "Support Ticket", "TICK-.0001"))) {
+          throw new FrameworkError("DOCUMENT_INVALID", "simulated document create failure", { status: 500 });
+        }
+        return super.commitBatch(entries, project);
+      }
+    }
+    const store = new FailingCreateStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [supportTicketDocType] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["series-1", "ticket-1"])
+    });
+
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Support Ticket",
+        data: { subject: "Atomic series" }
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_INVALID" });
+
+    await expect(
+      store.readStream(namingSeriesStream("acme", "Support Ticket", "TICK-.####"))
+    ).resolves.toHaveLength(0);
+  });
+
   it("reserves metadata-defined unique field values through event streams", async () => {
     const Contact = defineDocType({
       name: "Contact",
@@ -640,6 +678,124 @@ describe("DocumentService", () => {
       { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "grace", active: true } } },
       { type: "UniqueValueReleased", payload: { kind: "DocumentUpdated", patch: { active: false } } },
       { type: "UniqueValueReserved", payload: { kind: "DocumentUpdated", patch: { documentName: "katherine", active: true } } }
+    ]);
+  });
+
+  it("commits unique-value releases atomically with document updates", async () => {
+    const Contact = defineDocType({
+      name: "Atomic Contact",
+      naming: { kind: "provided" },
+      fields: [
+        { name: "email", type: "text", unique: true },
+        { name: "display_name", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+    });
+    class FailingReleaseStore extends InMemoryDocumentStore {
+      override async commitBatch(
+        entries: readonly DocumentCommitBatchEntry[],
+        project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+      ): Promise<DocumentCommit> {
+        if (
+          entries.some((entry) => entry.stream === documentStream("acme", "Atomic Contact", "ada")) &&
+          entries.some((entry) =>
+            entry.stream === uniqueValueStream("acme", "Atomic Contact", "email", "s:ada@example.com") &&
+            entry.expectedVersion > 0
+          )
+        ) {
+          throw new FrameworkError("DOCUMENT_INVALID", "simulated release batch failure", { status: 500 });
+        }
+        return super.commitBatch(entries, project);
+      }
+    }
+    const store = new FailingReleaseStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Contact] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["unique-1", "contact-1", "release-1", "update-1"])
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Atomic Contact",
+      name: "ada",
+      data: { email: "ada@example.com", display_name: "Ada" }
+    });
+
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Atomic Contact",
+        name: "ada",
+        patch: { display_name: "Ada Lovelace" },
+        unset: ["email"],
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_INVALID" });
+
+    await expect(store.readStream(documentStream("acme", "Atomic Contact", "ada"))).resolves.toHaveLength(1);
+    await expect(
+      store.readStream(uniqueValueStream("acme", "Atomic Contact", "email", "s:ada@example.com"))
+    ).resolves.toMatchObject([
+      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { active: true } } }
+    ]);
+  });
+
+  it("commits unique-value releases atomically with document deletes", async () => {
+    const Contact = defineDocType({
+      name: "Atomic Delete Contact",
+      naming: { kind: "provided" },
+      fields: [
+        { name: "email", type: "text", unique: true },
+        { name: "display_name", type: "text" }
+      ],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "delete"] }]
+    });
+    class FailingDeleteReleaseStore extends InMemoryDocumentStore {
+      override async commitBatch(
+        entries: readonly DocumentCommitBatchEntry[],
+        project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+      ): Promise<DocumentCommit> {
+        if (
+          entries.some((entry) => entry.stream === documentStream("acme", "Atomic Delete Contact", "ada")) &&
+          entries.some((entry) =>
+            entry.stream === uniqueValueStream("acme", "Atomic Delete Contact", "email", "s:ada@example.com") &&
+            entry.expectedVersion > 0
+          )
+        ) {
+          throw new FrameworkError("DOCUMENT_INVALID", "simulated delete release batch failure", { status: 500 });
+        }
+        return super.commitBatch(entries, project);
+      }
+    }
+    const store = new FailingDeleteReleaseStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Contact] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["unique-1", "contact-1", "release-1", "delete-1"])
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Atomic Delete Contact",
+      name: "ada",
+      data: { email: "ada@example.com", display_name: "Ada" }
+    });
+
+    await expect(
+      documents.delete({
+        actor: owner,
+        doctype: "Atomic Delete Contact",
+        name: "ada",
+        expectedVersion: 1
+      })
+    ).rejects.toMatchObject({ code: "DOCUMENT_INVALID" });
+
+    await expect(store.readStream(documentStream("acme", "Atomic Delete Contact", "ada"))).resolves.toHaveLength(1);
+    await expect(
+      store.readStream(uniqueValueStream("acme", "Atomic Delete Contact", "email", "s:ada@example.com"))
+    ).resolves.toMatchObject([
+      { type: "UniqueValueStarted", payload: { kind: "DocumentCreated", data: { active: true } } }
     ]);
   });
 

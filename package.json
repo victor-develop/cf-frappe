@@ -21,6 +21,9 @@
   "bin": {
     "cf-frappe": "./dist/cli.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
     "dist",
     "migrations",

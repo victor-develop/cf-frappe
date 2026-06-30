@@ -27,6 +27,7 @@ export * from "./application/data-patch-dashboard-policy.js";
 export * from "./application/data-patch-definition-policy.js";
 export * from "./application/data-patch-jobs.js";
 export * from "./application/document-access-policy.js";
+export * from "./application/document-atomic-commit-policy.js";
 export * from "./application/document-bulk-policy.js";
 export * from "./application/document-command-policy.js";
 export * from "./application/document-delivery-outbox-consumer-policy.js";

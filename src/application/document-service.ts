@@ -32,6 +32,13 @@ import {
   bulkDocumentFailure,
   runBulkDocumentSelections
 } from "./document-bulk-policy.js";
+import {
+  documentAtomicAuxiliarySnapshots,
+  documentAtomicCommitEntries,
+  type AtomicNamingSeriesWrite,
+  type AtomicUniqueReleaseWrite,
+  type AtomicUniqueReservationWrite
+} from "./document-atomic-commit-policy.js";
 import { isDocumentConflictError } from "./concurrency-policy.js";
 import {
   canReadLinkedDocumentTarget,
@@ -87,8 +94,6 @@ import {
   planUniqueValueReservationWriteDecision,
   planUniqueValueReleaseEvent,
   planUniqueValueReservationEvent,
-  projectUniqueValueReleaseWrite,
-  projectUniqueValueReservationWrite,
   releasedUniqueValueReservations,
   uniqueReservationOwnerStillOwnsValue,
   uniqueValueEventCommand,
@@ -190,10 +195,9 @@ interface DocumentServiceDocTypeContext {
   readonly relatedDocType: RelatedDocTypeResolver;
 }
 
-interface UniqueValueReservationWrite {
-  readonly reservation: UniqueValueReservation;
-  readonly existing: DocumentSnapshot | null;
-  readonly event: NewDomainEvent;
+interface DocumentNameResolution {
+  readonly name: string;
+  readonly namingSeriesWrite?: AtomicNamingSeriesWrite;
 }
 
 export interface CreateDocumentCommand {
@@ -571,59 +575,75 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
-    const name = command.name ?? await this.resolveName(doctype, data, {
-      actor: command.actor,
-      tenantId,
-      now
-    });
-    const stream = documentStream(tenantId, doctype.name, name);
-    const existing = foldDocument(await this.store.readStream(stream));
-    ensureDocumentCreateAvailable({ doctypeName: doctype.name, documentName: name, existing });
-    const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
-    const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
-      command.actor,
-      uniqueReservations,
-      now
-    );
-    const plan = planDocumentCreatePolicy({
-      doctype,
-      data,
-      eventType: command.eventType
-    });
-    const event = this.newEvent(documentCreateEventCommand({
-      tenantId,
-      stream,
-      doctypeName: doctype.name,
-      documentName: name,
-      actorId: command.actor.id,
-      occurredAt: now,
-      plan,
-      metadata: command.metadata ?? {}
-    }));
-    const commit = await this.store.commitBatch(
-      [
-        ...uniqueReservationWrites.map((write) => ({
-          stream: write.reservation.stream,
-          expectedVersion: write.existing?.version ?? 0,
-          events: [write.event]
-        })),
-        { stream, expectedVersion: 0, events: [event] }
-      ],
-      (savedEvents) => {
-        const saved = requireSavedEvent(savedEvents, event.id);
-        return {
-          snapshot: snapshotFromDocumentCreatedEvent(saved),
-          auxiliarySnapshots: uniqueReservationWrites.map((write) =>
-            projectUniqueValueReservationWrite({
-              reservation: write.reservation,
-              existing: write.existing,
-              saved: requireSavedEvent(savedEvents, write.event.id)
-            })
-          )
-        };
+    for (let attempt = 0; attempt < NAMING_SERIES_MAX_ATTEMPTS; attempt += 1) {
+      const nameResolution = command.name === undefined
+        ? await this.resolveName(doctype, data, {
+            actor: command.actor,
+            tenantId,
+            now
+          })
+        : { name: command.name };
+      const name = nameResolution.name;
+      const stream = documentStream(tenantId, doctype.name, name);
+      const existing = foldDocument(await this.store.readStream(stream));
+      ensureDocumentCreateAvailable({ doctypeName: doctype.name, documentName: name, existing });
+      const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
+      const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
+        command.actor,
+        uniqueReservations,
+        now
+      );
+      const plan = planDocumentCreatePolicy({
+        doctype,
+        data,
+        eventType: command.eventType
+      });
+      const event = this.newEvent(documentCreateEventCommand({
+        tenantId,
+        stream,
+        doctypeName: doctype.name,
+        documentName: name,
+        actorId: command.actor.id,
+        occurredAt: now,
+        plan,
+        metadata: command.metadata ?? {}
+      }));
+      try {
+        const commit = await this.store.commitBatch(
+          documentAtomicCommitEntries({
+            ...(nameResolution.namingSeriesWrite === undefined
+              ? {}
+              : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
+            uniqueReservationWrites,
+            document: { stream, expectedVersion: 0, event }
+          }),
+          (savedEvents) => {
+            const saved = requireSavedEvent(savedEvents, event.id);
+            return {
+              snapshot: snapshotFromDocumentCreatedEvent(saved),
+              auxiliarySnapshots: documentAtomicAuxiliarySnapshots({
+                savedEvents,
+                ...(nameResolution.namingSeriesWrite === undefined
+                  ? {}
+                  : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
+                uniqueReservationWrites
+              })
+            };
+          }
+        );
+        return this.finishAfterCommit(doctype, commit, requireSavedEvent(commit.events, event.id));
+      } catch (error) {
+        if (
+          nameResolution.namingSeriesWrite !== undefined &&
+          isDocumentConflictError(error) &&
+          attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS
+        ) {
+          continue;
+        }
+        throw error;
       }
-    );
-    return this.finishAfterCommit(doctype, commit, requireSavedEvent(commit.events, event.id));
+    }
+    throw conflict(`Could not allocate naming series for ${doctype.name}`);
   }
 
   async update(command: UpdateDocumentCommand): Promise<DocumentSnapshot> {
@@ -800,6 +820,11 @@ export class DocumentService implements DocumentCommandExecutor {
       nextReservations,
       now
     );
+    const uniqueReleaseWrites = await this.planUniqueValueReleaseWrites(
+      options.command.actor,
+      releasedReservations,
+      now
+    );
     const plan = planDocumentUpdatePolicy({
       doctype: options.doctype,
       patch: normalizedPatch,
@@ -817,32 +842,24 @@ export class DocumentService implements DocumentCommandExecutor {
       metadata: options.command.metadata ?? {}
     }));
     const commit = await this.store.commitBatch(
-      [
-        ...uniqueReservationWrites.map((write) => ({
-          stream: write.reservation.stream,
-          expectedVersion: write.existing?.version ?? 0,
-          events: [write.event]
-        })),
-        { stream: options.stream, expectedVersion: options.existing.version, events: [event] }
-      ],
+      documentAtomicCommitEntries({
+        uniqueReservationWrites,
+        uniqueReleaseWrites,
+        document: { stream: options.stream, expectedVersion: options.existing.version, event }
+      }),
       (savedEvents) => {
         const saved = requireSavedEvent(savedEvents, event.id);
         return {
           snapshot: snapshotFromCommittedDocumentEvent(options.existing, saved, { data }),
-          auxiliarySnapshots: uniqueReservationWrites.map((write) =>
-            projectUniqueValueReservationWrite({
-              reservation: write.reservation,
-              existing: write.existing,
-              saved: requireSavedEvent(savedEvents, write.event.id)
-            })
-          )
+          auxiliarySnapshots: documentAtomicAuxiliarySnapshots({
+            savedEvents,
+            uniqueReservationWrites,
+            uniqueReleaseWrites
+          })
         };
       }
     );
     const saved = requireSavedEvent(commit.events, event.id);
-    await this.releaseUniqueValues(options.command.actor, releasedReservations, saved.occurredAt, {
-      suppressErrors: true
-    });
     return this.finishAfterCommit(options.doctype, commit, saved);
   }
 
@@ -1203,6 +1220,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const now = this.clock.now();
     const uniqueReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
+    const uniqueReleaseWrites = await this.planUniqueValueReleaseWrites(command.actor, uniqueReservations, now);
     const event = this.newEvent(documentDeleteEventCommand({
       tenantId,
       stream,
@@ -1213,12 +1231,20 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
-      const saved = requireFirstSavedEvent(savedEvents);
-      return snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus });
-    });
-    const saved = requireFirstSavedEvent(commit.events);
-    await this.releaseUniqueValues(command.actor, uniqueReservations, saved.occurredAt, { suppressErrors: true });
+    const commit = await this.store.commitBatch(
+      documentAtomicCommitEntries({
+        uniqueReleaseWrites,
+        document: { stream, expectedVersion: existing.version, event }
+      }),
+      (savedEvents) => {
+        const saved = requireSavedEvent(savedEvents, event.id);
+        return {
+          snapshot: snapshotFromCommittedDocumentEvent(existing, saved, { docstatus: plan.nextStatus }),
+          auxiliarySnapshots: documentAtomicAuxiliarySnapshots({ savedEvents, uniqueReleaseWrites })
+        };
+      }
+    );
+    const saved = requireSavedEvent(commit.events, event.id);
     return this.finishAfterCommit(doctype, commit, saved);
   }
 
@@ -1694,7 +1720,7 @@ export class DocumentService implements DocumentCommandExecutor {
     actor: Actor,
     reservations: readonly UniqueValueReservation[],
     occurredAt: string
-  ): Promise<readonly UniqueValueReservationWrite[]> {
+  ): Promise<readonly AtomicUniqueReservationWrite[]> {
     const planned: Array<{ readonly reservation: UniqueValueReservation; readonly existing: DocumentSnapshot | null }> = [];
     for (const reservation of reservations) {
       const existing = foldDocument(await this.store.readStream(reservation.stream));
@@ -1730,6 +1756,33 @@ export class DocumentService implements DocumentCommandExecutor {
     });
   }
 
+  private async planUniqueValueReleaseWrites(
+    actor: Actor,
+    reservations: readonly UniqueValueReservation[],
+    occurredAt: string
+  ): Promise<readonly AtomicUniqueReleaseWrite[]> {
+    const planned: AtomicUniqueReleaseWrite[] = [];
+    for (const reservation of reservations) {
+      const existing = foldDocument(await this.store.readStream(reservation.stream));
+      const decision = planUniqueValueReleaseWriteDecision({ reservation, existing });
+      if (decision.status === "skip") {
+        continue;
+      }
+      const eventPlan = planUniqueValueReleaseEvent(decision.reservation);
+      planned.push({
+        reservation: decision.reservation,
+        existing: decision.existing,
+        event: this.newEvent(uniqueValueEventCommand({
+          reservation: decision.reservation,
+          actorId: actor.id,
+          occurredAt,
+          plan: eventPlan
+        }))
+      });
+    }
+    return planned;
+  }
+
   private async uniqueReservationOwnerStillOwnsValue(
     reservation: UniqueValueReservation,
     documentName: string
@@ -1738,38 +1791,6 @@ export class DocumentService implements DocumentCommandExecutor {
       await this.store.readStream(documentStream(reservation.tenantId, reservation.doctype, documentName))
     );
     return uniqueReservationOwnerStillOwnsValue(reservation, owner);
-  }
-
-  private async releaseUniqueValues(
-    actor: Actor,
-    reservations: readonly UniqueValueReservation[],
-    occurredAt: string,
-    options: { readonly suppressErrors?: boolean } = {}
-  ): Promise<void> {
-    for (const reservation of reservations) {
-      try {
-        const existing = foldDocument(await this.store.readStream(reservation.stream));
-        const decision = planUniqueValueReleaseWriteDecision({ reservation, existing });
-        if (decision.status === "skip") {
-          continue;
-        }
-        const eventPlan = planUniqueValueReleaseEvent(decision.reservation);
-        const event = this.newEvent(uniqueValueEventCommand({
-          reservation: decision.reservation,
-          actorId: actor.id,
-          occurredAt,
-          plan: eventPlan
-        }));
-        await this.store.commit(decision.reservation.stream, decision.existing.version, [event], (savedEvents) => {
-          const saved = requireFirstSavedEvent(savedEvents);
-          return projectUniqueValueReleaseWrite({ existing: decision.existing, saved });
-        });
-      } catch (error) {
-        if (!options.suppressErrors) {
-          throw error;
-        }
-      }
-    }
   }
 
   private async runAfterCommit(
@@ -1801,55 +1822,44 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     data: DocumentData,
     context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
-  ): Promise<string> {
+  ): Promise<DocumentNameResolution> {
     const naming = doctype.naming ?? { kind: "uuid" };
     if (naming.kind !== "series") {
-      return resolveDocumentName(doctype, data, this.ids);
+      return { name: resolveDocumentName(doctype, data, this.ids) };
     }
-    return this.allocateSeriesName(doctype, naming.pattern, context);
+    const write = await this.planNamingSeriesWrite(doctype, naming.pattern, context);
+    return {
+      name: renderNamingSeries(naming.pattern, write.next),
+      namingSeriesWrite: write
+    };
   }
 
-  private async allocateSeriesName(
+  private async planNamingSeriesWrite(
     doctype: DocTypeDefinition,
     pattern: string,
     context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
-  ): Promise<string> {
+  ): Promise<AtomicNamingSeriesWrite> {
     const stream = namingSeriesStream(context.tenantId, doctype.name, pattern);
-    for (let attempt = 0; attempt < NAMING_SERIES_MAX_ATTEMPTS; attempt += 1) {
-      const existing = foldDocument(await this.store.readStream(stream));
-      const current = namingSeriesCurrentValue(existing?.data.current) ?? 0;
-      const next = current + 1;
-      const eventPlan = planNamingSeriesEvent({
-        doctypeName: doctype.name,
-        pattern,
-        next,
-        existing
-      });
-      const event = this.newEvent(namingSeriesEventCommand({
+    const existing = foldDocument(await this.store.readStream(stream));
+    const current = namingSeriesCurrentValue(existing?.data.current) ?? 0;
+    const next = current + 1;
+    const eventPlan = planNamingSeriesEvent({
+      doctypeName: doctype.name,
+      pattern,
+      next,
+      existing
+    });
+    return {
+      stream,
+      existing,
+      next,
+      event: this.newEvent(namingSeriesEventCommand({
         tenantId: context.tenantId,
         stream,
         actorId: context.actor.id,
         occurredAt: context.now,
         plan: eventPlan
-      }));
-      try {
-        await this.store.commit(stream, existing?.version ?? 0, [event], (savedEvents) => {
-          const saved = requireFirstSavedEvent(savedEvents);
-          if (!existing) {
-            return snapshotFromDocumentCreatedEvent(saved);
-          }
-          return snapshotFromCommittedDocumentEvent(existing, saved, {
-            data: { ...existing.data, current: next }
-          });
-        });
-        return renderNamingSeries(pattern, next);
-      } catch (error) {
-        if (isDocumentConflictError(error) && attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS) {
-          continue;
-        }
-        throw error;
-      }
-    }
-    throw conflict(`Could not allocate naming series '${pattern}' for ${doctype.name}`);
+      }))
+    };
   }
 }
