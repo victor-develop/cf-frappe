@@ -81,6 +81,7 @@ import type { WorkflowService } from "../../application/workflow-service.js";
 import { ensureWorkflowServiceAvailable } from "../../application/workflow-policy.js";
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
 import { FrameworkError, badRequest, conflict } from "../../core/errors.js";
+import { isListFilterOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import {
@@ -171,6 +172,8 @@ import {
   isDeskNumericReportField
 } from "./report-builder.js";
 import {
+  DESK_QUICK_FILTER_OPERATOR_QUERY_PREFIX,
+  DESK_QUICK_FILTER_VALUE_QUERY_PREFIX,
   renderDeskHome,
   renderDeskLayout,
   renderDashboardList,
@@ -2037,7 +2040,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
+    const filters = deskListFiltersFromUrl(url, doctype);
     const urlFilterExpression = listFilterExpressionFromUrl(url);
     const order = listOrderFromUrl(url);
     const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
@@ -2729,7 +2732,7 @@ async function renderDeskListPage(
   const doctype = await options.queries.getEffectiveMeta(actor, doctypeName);
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
-  const filters = listFiltersFromUrl(url, { fields: listFilterParseFields(doctype) });
+  const filters = deskListFiltersFromUrl(url, doctype);
   const urlFilterExpression = listFilterExpressionFromUrl(url);
   const order = listOrderFromUrl(url);
   const savedFilterId = url.searchParams.get("saved_filter") ?? undefined;
@@ -4840,15 +4843,44 @@ async function parseDeskSavedFilter(
   const filterExpression = listFilterExpressionFromUrl(url);
   return {
     label: typeof label === "string" ? label : "",
-    filters: listFiltersFromUrl(url, {
-      fields: listFilterParseFields(doctype)
-    }),
+    filters: deskListFiltersFromUrl(url, doctype),
     ...(filterExpression === undefined ? {} : { filterExpression })
   };
 }
 
 function listFilterParseFields(doctype: DocTypeDefinition): readonly string[] {
   return doctype.fields.map((field) => field.name);
+}
+
+function deskListFiltersFromUrl(url: URL, doctype: DocTypeDefinition): readonly ListDocumentsFilter[] {
+  const fields = listFilterParseFields(doctype);
+  const filters = [...listFiltersFromUrl(url, { fields })];
+  const emptyFilterKeys = new Set(url.searchParams.getAll("empty_filter"));
+  for (const field of fields) {
+    const operatorKey = `${DESK_QUICK_FILTER_OPERATOR_QUERY_PREFIX}${field}`;
+    const valueKey = `${DESK_QUICK_FILTER_VALUE_QUERY_PREFIX}${field}`;
+    if (!url.searchParams.has(operatorKey) && !url.searchParams.has(valueKey)) {
+      continue;
+    }
+    const operator = url.searchParams.get(operatorKey) || "eq";
+    if (!isListFilterOperator(operator) || !isDeskQuickFilterOperator(operator)) {
+      throw badRequest(`Desk quick filter operator '${operator}' is not supported`);
+    }
+    const value = url.searchParams.get(valueKey) ?? "";
+    if (value === "" && !emptyFilterKeys.has(valueKey)) {
+      continue;
+    }
+    filters.push({
+      field,
+      ...(operator === "eq" ? {} : { operator }),
+      value
+    });
+  }
+  return filters;
+}
+
+function isDeskQuickFilterOperator(operator: string): operator is "eq" | "ne" | "contains" {
+  return operator === "eq" || operator === "ne" || operator === "contains";
 }
 
 async function parseDeskSavedReport(
@@ -5293,8 +5325,10 @@ async function parseDeskForm(
 ): Promise<ParsedDeskForm> {
   const form = await request.formData();
   const fields = new Set(doctype.fields.map((field) => field.name));
+  const protectedWorkflowStateField = doctype.workflow?.stateField ?? (doctype.workflow ? "workflow_state" : undefined);
   const entries = formView.fields
     .filter((field) => fields.has(field.name))
+    .filter((field) => field.name !== protectedWorkflowStateField)
     .filter((field) => !field.hidden && !field.readOnly)
     .map((field) => {
       const child = field.type === "table" && field.tableOf ? tableDefinitions[field.name] : undefined;

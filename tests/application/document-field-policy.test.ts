@@ -7,7 +7,9 @@ import {
   documentUnsetIssues,
   preserveReadOnlyTableValues,
   readonlyIssues,
-  stripInternalTableFields
+  stripInternalTableFields,
+  workflowStateCreateIssues,
+  workflowStateMutationIssues
 } from "../../src/application/document-field-policy";
 
 const InvoiceItem = defineDocType({
@@ -30,6 +32,19 @@ const Invoice = defineDocType({
     { name: "token", type: "text", noCopy: true },
     { name: "items", type: "table", tableOf: "Invoice Item" }
   ]
+});
+
+const Ticket = defineDocType({
+  name: "Ticket",
+  fields: [
+    { name: "title", type: "text" },
+    { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
+  ],
+  workflow: {
+    initialState: "Open",
+    states: ["Open", "Closed"],
+    transitions: [{ action: "close", from: "Open", to: "Closed" }]
+  }
 });
 
 const relatedDocType = (name: string) => name === InvoiceItem.name ? InvoiceItem : undefined;
@@ -138,6 +153,26 @@ describe("document field policy", () => {
         { skipNoCopy: true }
       )
     ).toEqual({ title: "INV-1", items: [{ sku: "A" }] });
+  });
+
+  it("protects workflow state from direct create, mutation, unset, and copy paths", () => {
+    expect(workflowStateCreateIssues(Ticket, { title: "T-1", workflow_state: "Open" })).toEqual([]);
+    expect(workflowStateCreateIssues(Ticket, { title: "T-1", workflow_state: "Closed" })).toEqual([
+      expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })
+    ]);
+    expect(workflowStateMutationIssues(Ticket, { workflow_state: "Closed" })).toEqual([
+      expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })
+    ]);
+    expect(workflowStateMutationIssues(Ticket, {}, ["workflow_state"])).toEqual([
+      expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })
+    ]);
+    expect(
+      copyDocumentData(
+        Ticket,
+        { title: "T-1", workflow_state: "Closed" },
+        () => undefined
+      )
+    ).toEqual({ title: "T-1" });
   });
 });
 

@@ -226,6 +226,10 @@ The repository currently passes:
 
 Current verification: `235` Vitest files and `2787` tests passing.
 
+### TODO
+
+- Optimize Durable Object routing for UUID-named document creation so creates do not concentrate on the `_new` aggregate key while preserving naming, unique-value, and event-commit correctness.
+
 ### Documentation
 
 - [Frappe Assessment](docs/frappe-assessment.md): comparison against the official Frappe Framework concepts.
@@ -451,6 +455,10 @@ npm run dev
 - `npm run check`
 
 当前验证结果：`235` 个 Vitest 文件，`2787` 个测试全部通过。
+
+### TODO
+
+See [English TODO](#todo).
 
 ### 文档
 

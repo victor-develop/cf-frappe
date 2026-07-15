@@ -2053,7 +2053,7 @@ describe("DocumentService", () => {
         input: {},
         expectedVersion: 2
       })
-    ).resolves.toMatchObject({ version: 3, data: { workflow_state: "Closed" } });
+    ).resolves.toMatchObject({ version: 3, data: { body: "Archived" } });
     await documents.share({
       actor: collaborator,
       doctype: "Note",
@@ -2273,7 +2273,7 @@ describe("DocumentService", () => {
       input: {}
     });
 
-    expect(archived).toMatchObject({ data: { workflow_state: "Closed" } });
+    expect(archived).toMatchObject({ data: { body: "Archived" } });
     await expect(events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
       expect.anything(),
       {
@@ -2281,7 +2281,7 @@ describe("DocumentService", () => {
         payload: {
           kind: "DomainCommandApplied",
           command: "archive",
-          patch: { workflow_state: "Closed" }
+          patch: { body: "Archived" }
         }
       }
     ]);
@@ -2799,6 +2799,90 @@ describe("DocumentService", () => {
     expect(transitioned).toMatchObject({
       version: 2,
       data: { workflow_state: "Closed" }
+    });
+  });
+
+  it("rejects direct workflow state writes outside workflow transitions", async () => {
+    const { documents } = createServices(["e1"]);
+    await expect(
+      documents.create({
+        actor: owner,
+        doctype: "Note",
+        data: data({ title: "Closed on Create", workflow_state: "Closed" })
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })]
+    });
+
+    await documents.create({ actor: owner, doctype: "Note", data: data() });
+    await expect(
+      documents.update({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        patch: { workflow_state: "Closed" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })]
+    });
+    await expect(
+      documents.merge({
+        actor: owner,
+        doctype: "Note",
+        name: "My Note",
+        baseVersion: 1,
+        patch: { workflow_state: "Closed" }
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })]
+    });
+  });
+
+  it("rejects model-declared domain commands that patch workflow state directly", async () => {
+    const ForceNote = defineDocType({
+      name: "Force Note",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
+      ],
+      workflow: {
+        initialState: "Open",
+        states: ["Open", "Closed"],
+        transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
+      },
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }],
+      commands: [
+        {
+          name: "forceClose",
+          eventType: "ForceNoteClosed",
+          allowReadOnlyFields: true,
+          buildPatch: () => ({ workflow_state: "Closed" })
+        }
+      ]
+    });
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [ForceNote] }),
+      store: new InMemoryDocumentStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["force-1"])
+    });
+    await documents.create({ actor: owner, doctype: "Force Note", data: { title: "Force One" } });
+
+    await expect(
+      documents.execute({
+        actor: owner,
+        doctype: "Force Note",
+        name: "Force One",
+        command: "forceClose",
+        input: {}
+      })
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })]
     });
   });
 

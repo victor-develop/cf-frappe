@@ -117,6 +117,7 @@ export interface DocumentUpdateValidationIssueGroups {
   readonly submittedUpdateIssues?: readonly ValidationIssue[] | undefined;
   readonly unsetIssues?: readonly ValidationIssue[] | undefined;
   readonly originIssues?: readonly ValidationIssue[] | undefined;
+  readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
@@ -129,6 +130,7 @@ export function documentUpdateValidationIssues(
     ...(groups.submittedUpdateIssues ?? []),
     ...(groups.unsetIssues ?? []),
     ...(groups.originIssues ?? []),
+    ...(groups.workflowStateIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])
@@ -136,6 +138,7 @@ export function documentUpdateValidationIssues(
 }
 
 export interface DocumentCreateValidationIssueGroups {
+  readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
 }
@@ -144,6 +147,7 @@ export function documentCreateValidationIssues(
   groups: DocumentCreateValidationIssueGroups
 ): readonly ValidationIssue[] {
   return [
+    ...(groups.workflowStateIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])
   ];
@@ -151,6 +155,7 @@ export function documentCreateValidationIssues(
 
 export interface DocumentDomainCommandValidationIssueGroups {
   readonly originIssues?: readonly ValidationIssue[] | undefined;
+  readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
@@ -161,6 +166,7 @@ export function documentDomainCommandValidationIssues(
 ): readonly ValidationIssue[] {
   return [
     ...(groups.originIssues ?? []),
+    ...(groups.workflowStateIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])

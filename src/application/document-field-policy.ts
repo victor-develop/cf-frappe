@@ -76,6 +76,40 @@ export function readonlyIssues(
   return [...patchIssues, ...unsetIssues, ...childIssues];
 }
 
+export function workflowStateCreateIssues(
+  doctype: DocTypeDefinition,
+  data: DocumentData
+): readonly ValidationIssue[] {
+  const stateField = workflowStateFieldName(doctype);
+  if (stateField === undefined) {
+    return [];
+  }
+  const initialState = doctype.workflow?.initialState;
+  if (String(data[stateField] ?? initialState) === initialState) {
+    return [];
+  }
+  return [workflowStateProtectedIssue(stateField)];
+}
+
+export function workflowStateMutationIssues(
+  doctype: DocTypeDefinition,
+  patch: DocumentData,
+  unset: readonly string[] = []
+): readonly ValidationIssue[] {
+  const stateField = workflowStateFieldName(doctype);
+  if (stateField === undefined) {
+    return [];
+  }
+  if (!Object.prototype.hasOwnProperty.call(patch, stateField) && !unset.includes(stateField)) {
+    return [];
+  }
+  return [workflowStateProtectedIssue(stateField)];
+}
+
+export function workflowStateFieldName(doctype: DocTypeDefinition): string | undefined {
+  return doctype.workflow === undefined ? undefined : doctype.workflow.stateField ?? "workflow_state";
+}
+
 export function allowOnSubmitIssues(
   doctype: DocTypeDefinition,
   patch: MutableDocumentData,
@@ -228,8 +262,10 @@ export function copyDocumentData(
   relatedDocType: (doctype: string) => DocTypeDefinition | undefined,
   options: { readonly skipNoCopy?: boolean } = {}
 ): DocumentData {
+  const protectedWorkflowStateField = workflowStateFieldName(doctype);
   const entries = Object.entries(data)
     .filter(([fieldName]) =>
+      fieldName !== protectedWorkflowStateField &&
       !doctype.fields.some((field) =>
         field.name === fieldName && (field.readOnly || (options.skipNoCopy === true && field.noCopy === true))
       )
@@ -257,6 +293,14 @@ export function copyDocumentData(
 
 function fieldIsReadOnly(field: FieldDefinition, document: DocumentSnapshot): boolean {
   return field.readOnly === true || conditionalReadOnlyApplies(field, document);
+}
+
+function workflowStateProtectedIssue(field: string): ValidationIssue {
+  return {
+    field,
+    code: "workflow_state_protected",
+    message: `Workflow state field '${field}' can only be changed through workflow transitions`
+  };
 }
 
 function conditionalReadOnlyApplies(field: FieldDefinition, document: DocumentSnapshot): boolean {

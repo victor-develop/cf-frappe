@@ -43,6 +43,36 @@ describe("Desk form rendering", () => {
     expect(html).toContain('href="/desk/print/Task%20Print/TASK%2F1/pdf"');
     expect(html).toContain('formaction="/desk/Task/TASK%2F1/duplicate"');
   });
+
+  it("renders workflow state fields as display-only form values", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "workflow_state", label: "Workflow State", type: "select", options: ["Open", "Done"] }
+      ],
+      workflow: {
+        initialState: "Open",
+        states: ["Open", "Done"],
+        transitions: [{ action: "finish", from: "Open", to: "Done" }]
+      }
+    });
+
+    const createHtml = renderFormView(Task, resolveFormView(Task), { mode: "create" });
+    expect(createHtml).toContain('data-cf-frappe-workflow-state="protected"');
+    expect(createHtml).toContain('value="Open"');
+    expect(createHtml).not.toContain('name="workflow_state"');
+
+    const updateHtml = renderFormView(Task, resolveFormView(Task), {
+      mode: "update",
+      document: {
+        ...taskSnapshot("TASK/2"),
+        data: { title: "Ship it", workflow_state: "Done" }
+      }
+    });
+    expect(updateHtml).toContain('value="Done"');
+    expect(updateHtml).not.toContain('name="workflow_state"');
+  });
 });
 
 function taskSnapshot(name: string): DocumentSnapshot {

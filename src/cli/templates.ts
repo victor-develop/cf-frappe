@@ -405,12 +405,13 @@ DocType resources can be inspected and mutated through the generated resource AP
 \`\`\`bash
 npx cf-frappe resources list --url https://your-worker.example --doctype Task --filter workflow_state=Open --limit 20 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources get --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources create --url https://your-worker.example --doctype Task --data-json '{"title":"Follow up","priority":"Medium","workflow_state":"Open"}' --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources update --url https://your-worker.example --doctype Task --name "Follow up" --data-json '{"workflow_state":"Doing"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition close --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources create --url https://your-worker.example --doctype Task --data-json '{"title":"Follow up","priority":"Medium"}' --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources update --url https://your-worker.example --doctype Task --name "Follow up" --data-json '{"priority":"High"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition start --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition finish --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition close --document "Follow up" --document-version "Review generated Desk workspace:1" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition finish --document "Follow up" --document-version "Follow up:3" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources timeline --url https://your-worker.example --doctype Task --name "Follow up" --limit 25 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources comment --url https://your-worker.example --doctype Task --name "Follow up" --text "Needs one more look" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources activity --url https://your-worker.example --doctype Task --name "Follow up" --subject "Follow-up sent" --activity-type email --detail "Sent to customer@example.com" --channel email --external-id msg-123 --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
@@ -948,7 +949,7 @@ function sameStarterRecipient(
 export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
   id: STARTER_TASK_SEED_PATCH_ID,
   label: "Seed starter Task records",
-  checksum: "v4",
+  checksum: "v5",
   async run({ resources }) {
     let created = 0;
     let skipped = 0;
@@ -964,12 +965,13 @@ export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
         skipped += 1;
         continue;
       }
-      await resources.documents.create({
+      const createdTask = await resources.documents.create({
         actor: STARTER_TASK_SEED_ACTOR,
         doctype: "Task",
-        data: task,
+        data: starterTaskCreateData(task),
         metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
       });
+      await applyStarterTaskSeedWorkflowState(resources, createdTask.name, task.workflow_state);
       created += 1;
     }
 
@@ -1040,6 +1042,37 @@ export const StarterTaskSeedData = defineDataPatch<CloudFrappeRuntimeServices>({
     }
   }
 });
+
+function starterTaskCreateData(task: typeof STARTER_TASK_SEED_RECORDS[number]) {
+  const { workflow_state: _workflowState, ...data } = task;
+  return data;
+}
+
+async function applyStarterTaskSeedWorkflowState(
+  resources: CloudFrappeRuntimeServices,
+  name: string,
+  state: "Open" | "Doing" | "Done"
+) {
+  if (state === "Doing" || state === "Done") {
+    const doing = await resources.documents.transition({
+      actor: STARTER_TASK_SEED_ACTOR,
+      doctype: "Task",
+      name,
+      action: "start",
+      metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
+    });
+    if (state === "Done") {
+      await resources.documents.transition({
+        actor: STARTER_TASK_SEED_ACTOR,
+        doctype: "Task",
+        name,
+        action: "finish",
+        expectedVersion: doing.version,
+        metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
+      });
+    }
+  }
+}
 
 export const TaskFormScript = defineClientScript({
   name: "task-form",

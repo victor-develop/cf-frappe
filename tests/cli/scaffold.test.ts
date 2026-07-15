@@ -189,7 +189,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(taskApp).toContain("dataPatches: [StarterTaskSeedData]");
     expect(taskApp).toContain('const STARTER_TASK_SEED_PATCH_ID = "tasks.seed_starter_tasks"');
     expect(taskApp).toContain("id: STARTER_TASK_SEED_PATCH_ID");
-    expect(taskApp).toContain('checksum: "v4"');
+    expect(taskApp).toContain('checksum: "v5"');
     expect(taskApp).toContain('name: "Task owner updates"');
     expect(taskApp).toContain('events: ["DocumentUpdated", "DocumentCommentAdded"]');
     expect(taskApp).toContain('recipients: [{ kind: "field", field: "created_by" }]');

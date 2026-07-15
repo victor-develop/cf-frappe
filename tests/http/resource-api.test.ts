@@ -1465,7 +1465,12 @@ describe("resource api", () => {
     await app.request("/api/resource/Note", {
       method: "POST",
       headers: userHeaders,
-      body: JSON.stringify({ title: "HTTP Closed High", priority: "High", workflow_state: "Closed", body: "Closed", count: 3 })
+      body: JSON.stringify({ title: "HTTP Closed High", priority: "High", body: "Closed", count: 3 })
+    });
+    await app.request("/api/resource/Note/HTTP%20Closed%20High/transition/close", {
+      method: "POST",
+      headers: userHeaders,
+      body: "{}"
     });
     await app.request("/api/resource/Note", {
       method: "POST",
@@ -1653,7 +1658,7 @@ describe("resource api", () => {
     expect(csv.headers.get("x-cf-frappe-export-truncated")).toBe("false");
     await expect(csv.text()).resolves.toBe([
       "Name,title,priority,workflow_state,Version,Updated",
-      "HTTP Closed High,HTTP Closed High,High,Closed,1,2026-01-01T00:00:00.000Z",
+      "HTTP Closed High,HTTP Closed High,High,Closed,2,2026-01-01T00:00:00.000Z",
       "HTTP High,HTTP High,High,Open,1,2026-01-01T00:00:00.000Z"
     ].join("\n"));
   });

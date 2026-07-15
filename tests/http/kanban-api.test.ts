@@ -15,7 +15,7 @@ describe("kanban api", () => {
   };
 
   it("serves metadata kanban boards and executed columns", async () => {
-    const services = createServices(["e1", "e2"]);
+    const services = createServices(["e1", "e2", "e3"]);
     services.registry.registerKanban(
       defineKanban({
         name: "Notes Board",
@@ -35,8 +35,9 @@ describe("kanban api", () => {
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "HTTP Closed", priority: "High", workflow_state: "Closed", count: 2 })
+      data: data({ title: "HTTP Closed", priority: "High", count: 2 })
     });
+    await services.documents.transition({ actor: owner, doctype: "Note", name: "HTTP Closed", action: "close" });
     const kanbans = new KanbanService({ registry: services.registry, queries: services.queries });
     const app = createResourceApi({
       registry: services.registry,

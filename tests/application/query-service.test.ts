@@ -118,7 +118,7 @@ describe("QueryService", () => {
   });
 
   it("filters list results through nested compound expressions", async () => {
-    const { documents, queries } = createServices(["e1", "e2", "e3", "e4"]);
+    const { documents, queries } = createServices(["e1", "e2", "e3", "e4", "e5"]);
     await documents.create({
       actor: owner,
       doctype: "Note",
@@ -132,8 +132,9 @@ describe("QueryService", () => {
     await documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Count Closed", priority: "Low", workflow_state: "Closed", count: 3 })
+      data: data({ title: "Count Closed", priority: "Low", count: 3 })
     });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Count Closed", action: "close" });
     await documents.create({
       actor: owner,
       doctype: "Note",
@@ -475,7 +476,7 @@ describe("QueryService", () => {
   });
 
   it("exports metadata list views as bounded escaped CSV", async () => {
-    const { documents, queries } = createServices(["csv1", "csv2", "csv3"]);
+    const { documents, queries } = createServices(["csv1", "csv2", "csv3", "csv4"]);
     await documents.create({
       actor: owner,
       doctype: "Note",
@@ -489,8 +490,9 @@ describe("QueryService", () => {
     await documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "CSV Closed", priority: "High", workflow_state: "Closed", body: "Hidden", count: 2 })
+      data: data({ title: "CSV Closed", priority: "High", body: "Hidden", count: 2 })
     });
+    await documents.transition({ actor: owner, doctype: "Note", name: "CSV Closed", action: "close" });
 
     const csv = await queries.exportDocumentsCsv(owner, "Note", {
       filters: [{ field: "priority", value: "High" }],
@@ -517,7 +519,7 @@ describe("QueryService", () => {
       limit: 1
     });
     expect(allCsv).toMatchObject({ exported: 1, total: 2, truncated: true });
-    expect(allCsv.body).toBe("Name,title,priority,workflow_state,Version,Updated\nCSV Closed,CSV Closed,High,Closed,1,2026-01-01T00:00:00.000Z");
+    expect(allCsv.body).toBe("Name,title,priority,workflow_state,Version,Updated\nCSV Closed,CSV Closed,High,Closed,2,2026-01-01T00:00:00.000Z");
   });
 
   it("lets CSV exports use the export limit without raising the list-page cap", async () => {
@@ -845,7 +847,7 @@ describe("QueryService", () => {
   });
 
   it("applies DocType list-view defaults only for generated list views", async () => {
-    const { documents, queries } = createServices(["e1", "e2"]);
+    const { documents, queries } = createServices(["e1", "e2", "e3"]);
     await documents.create({
       actor: owner,
       doctype: "Note",
@@ -854,8 +856,9 @@ describe("QueryService", () => {
     await documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Closed Note", workflow_state: "Closed" })
+      data: data({ title: "Closed Note" })
     });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Closed Note", action: "close" });
 
     const raw = await queries.listDocuments(owner, "Note");
     expect(raw.total).toBe(2);

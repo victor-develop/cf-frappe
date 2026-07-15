@@ -125,7 +125,9 @@ import {
   documentUnsetIssues,
   preserveReadOnlyTableValues,
   readonlyIssues,
-  stripInternalTableFields
+  stripInternalTableFields,
+  workflowStateCreateIssues,
+  workflowStateMutationIssues
 } from "./document-field-policy.js";
 import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
@@ -568,6 +570,7 @@ export class DocumentService implements DocumentCommandExecutor {
       relatedDocType
     );
     const issues = documentCreateValidationIssues({
+      workflowStateIssues: workflowStateCreateIssues(doctype, data),
       validationIssues: await this.validate(doctype, data, relatedDocType),
       linkIssues: await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType)
     });
@@ -793,6 +796,7 @@ export class DocumentService implements DocumentCommandExecutor {
       submittedUpdateIssues,
       unsetIssues,
       originIssues,
+      workflowStateIssues: workflowStateMutationIssues(options.doctype, fetchedPatchWithoutInternalFields, unset),
       readOnlyIssues,
       validationIssues,
       linkIssues
@@ -994,6 +998,7 @@ export class DocumentService implements DocumentCommandExecutor {
       relatedDocType,
       { existing }
     );
+    const fetchedPatchWithoutInternalFields = stripInternalTableFields(doctype, patchWithFetchedFields, relatedDocType);
     const originIssues = childTableOriginIssues(doctype, patchWithFetchedFields, existing.data, relatedDocType);
     const patchWithReadOnlyValues = preserveReadOnlyTableValues(
       doctype,
@@ -1009,6 +1014,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
     const issues = documentDomainCommandValidationIssues({
       originIssues,
+      workflowStateIssues: workflowStateMutationIssues(doctype, fetchedPatchWithoutInternalFields),
       readOnlyIssues,
       validationIssues,
       linkIssues

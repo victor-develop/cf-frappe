@@ -84,7 +84,7 @@ export const noteDocType = defineDocType({
     {
       name: "archive",
       eventType: "NoteArchived",
-      buildPatch: () => ({ workflow_state: "Closed" })
+      buildPatch: () => ({ body: "Archived" })
     },
     {
       name: "rewriteBody",

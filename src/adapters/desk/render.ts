@@ -47,7 +47,7 @@ import type { FieldPropertyOverrideState } from "../../core/field-property-overr
 import type { WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
-import type { KanbanRunResult } from "../../application/kanban-service.js";
+import type { KanbanCardResult, KanbanRunResult } from "../../application/kanban-service.js";
 import type { CalendarRunResult } from "../../application/calendar-service.js";
 import type {
   DataPatchApplyPlan,
@@ -84,6 +84,9 @@ import {
   isDeskGroupableReportField,
   isDeskNumericReportField
 } from "./report-builder.js";
+
+export const DESK_QUICK_FILTER_OPERATOR_QUERY_PREFIX = "quick_filter_operator:";
+export const DESK_QUICK_FILTER_VALUE_QUERY_PREFIX = "quick_filter_value:";
 
 type ReportChartPointResult = ReportRunResult["charts"][number]["points"][number];
 
@@ -224,6 +227,16 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
         `<a class="nav-link${link.id !== undefined && link.id === options.activeAdmin ? " is-active" : ""}" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`
     )
     .join("");
+  const navigation = `${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
+      <p class="nav-heading">Search</p><a class="nav-link${options.activeSearch ? " is-active" : ""}" href="/desk/search">Global Search</a>
+      ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
+      ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
+      ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
+      ${kanbanNav ? `<p class="nav-heading">Kanban</p>${kanbanNav}` : ""}
+      ${calendarNav ? `<p class="nav-heading">Calendars</p>${calendarNav}` : ""}
+      ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
+      ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
+      ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -234,20 +247,16 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+  <header class="mobile-shell-header">
+    <a class="brand mobile-brand" href="/desk">cf-frappe</a>
+    <details class="mobile-nav">
+      <summary>Menu</summary>
+      <nav>${navigation}</nav>
+    </details>
+  </header>
   <aside class="sidebar" aria-label="Desk navigation">
     <a class="brand" href="/desk">cf-frappe</a>
-    <nav>
-      ${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
-      <p class="nav-heading">Search</p><a class="nav-link${options.activeSearch ? " is-active" : ""}" href="/desk/search">Global Search</a>
-      ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
-      ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
-      ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
-      ${kanbanNav ? `<p class="nav-heading">Kanban</p>${kanbanNav}` : ""}
-      ${calendarNav ? `<p class="nav-heading">Calendars</p>${calendarNav}` : ""}
-      ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
-      ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
-      ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}
-    </nav>
+    <nav>${navigation}</nav>
   </aside>
   <main id="main" class="main">
     <header class="topbar">
@@ -279,29 +288,89 @@ export function renderDeskHome(
       </a>`
     )
     .join("");
-  const rows = doctypes
-    .map(
-      (doctype) => `<tr>
-        <td><a href="/desk/${encodeURIComponent(doctype.name)}">${escapeHtml(labelFor(doctype))}</a></td>
-        <td>${escapeHtml(doctype.module ?? "")}</td>
-        <td>${String(doctype.fields.length)}</td>
-        <td>${escapeHtml(doctype.description ?? "")}</td>
-      </tr>`
-    )
-    .join("");
-  return `${workspaceCards ? `<section class="workspace-grid">${workspaceCards}</section>` : ""}
-  ${dashboards.length > 0 ? renderDashboardList(dashboards) : ""}
-  ${kanbans.length > 0 ? renderKanbanList(kanbans) : ""}
-  ${calendars.length > 0 ? renderCalendarList(calendars) : ""}
-  <section class="panel">
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>DocType</th><th>Module</th><th>Fields</th><th>Description</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="empty">No readable DocTypes.</td></tr>`}</tbody>
-      </table>
+  const startCards = [
+    ...doctypes.map((doctype) => ({
+      href: `/desk/${encodeURIComponent(doctype.name)}`,
+      label: labelFor(doctype),
+      kind: "DocType",
+      meta: [doctype.module, `${String(doctype.fields.length)} fields`].filter(Boolean).join(" · "),
+      description: doctype.description ?? ""
+    })),
+    ...reports.map((report) => ({
+      href: `/desk/reports/${encodeURIComponent(report.name)}`,
+      label: report.label ?? report.name,
+      kind: "Report",
+      meta: report.doctype,
+      description: report.description ?? ""
+    })),
+    ...dashboards.map((dashboard) => ({
+      href: `/desk/dashboards/${encodeURIComponent(dashboard.name)}`,
+      label: dashboard.label ?? dashboard.name,
+      kind: "Dashboard",
+      meta: dashboard.module ?? "",
+      description: dashboard.description ?? ""
+    })),
+    ...kanbans.map((kanban) => ({
+      href: `/desk/kanbans/${encodeURIComponent(kanban.name)}`,
+      label: kanban.label ?? kanban.name,
+      kind: "Kanban",
+      meta: kanban.doctype,
+      description: kanban.description ?? ""
+    })),
+    ...calendars.map((calendar) => ({
+      href: `/desk/calendars/${encodeURIComponent(calendar.name)}`,
+      label: calendar.label ?? calendar.name,
+      kind: "Calendar",
+      meta: calendar.doctype,
+      description: calendar.description ?? ""
+    }))
+  ];
+  const startGrid = startCards.map(renderHomeLinkCard).join("");
+  return `<section class="home-overview">
+    <div>
+      <p class="kicker">Workspace</p>
+      <h2>Operational Desk</h2>
+      <p class="muted">Lists, reports, boards, and admin surfaces available to the current actor.</p>
+    </div>
+    <div class="home-metrics" aria-label="Desk inventory">
+      ${renderHomeMetric("DocTypes", doctypes.length)}
+      ${renderHomeMetric("Reports", reports.length)}
+      ${renderHomeMetric("Boards", kanbans.length)}
+      ${renderHomeMetric("Dashboards", dashboards.length)}
     </div>
   </section>
-  ${renderReportList(reports)}`;
+  ${workspaceCards ? `<section class="home-section"><div class="section-head"><h2>Workspaces</h2></div><div class="workspace-grid">${workspaceCards}</div></section>` : ""}
+  <section class="home-section">
+    <div class="section-head">
+      <h2>Start work</h2>
+      <span>${String(startCards.length)} shortcuts</span>
+    </div>
+    <div class="home-card-grid">${startGrid || `<p class="empty">No readable Desk resources.</p>`}</div>
+  </section>`;
+}
+
+function renderHomeMetric(label: string, value: number): string {
+  return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong>${String(value)}</strong></div>`;
+}
+
+function renderHomeLinkCard(item: {
+  readonly href: string;
+  readonly label: string;
+  readonly kind: string;
+  readonly meta: string;
+  readonly description: string;
+}): string {
+  const description = item.description ? `<p>${escapeHtml(item.description)}</p>` : "";
+  return `<a class="home-link-card" href="${escapeHtml(item.href)}">
+    <span class="resource-kind">${escapeHtml(item.kind)}</span>
+    <strong>${escapeHtml(item.label)}</strong>
+    ${item.meta ? `<small>${escapeHtml(item.meta)}</small>` : ""}
+    ${description}
+  </a>`;
+}
+
+function renderTableCell(label: string, content: string): string {
+  return `<td data-label="${escapeHtml(label)}">${content}</td>`;
 }
 
 export function renderGlobalSearchPage(state: {
@@ -316,12 +385,12 @@ export function renderGlobalSearchPage(state: {
   const rows = (state.result?.data ?? [])
     .map(
       (item) => `<tr>
-        <td><a href="${escapeHtml(item.route)}">${escapeHtml(item.label)}</a></td>
-        <td>${escapeHtml(item.doctype)}</td>
-        <td>${escapeHtml(item.name)}</td>
-        <td>${escapeHtml(item.matchedField)}</td>
-        <td>${escapeHtml(item.matchedText)}</td>
-        <td>${escapeHtml(item.updatedAt)}</td>
+        ${renderTableCell("Document", `<a href="${escapeHtml(item.route)}">${escapeHtml(item.label)}</a>`)}
+        ${renderTableCell("DocType", escapeHtml(item.doctype))}
+        ${renderTableCell("Name", escapeHtml(item.name))}
+        ${renderTableCell("Matched Field", escapeHtml(item.matchedField))}
+        ${renderTableCell("Matched Text", escapeHtml(item.matchedText))}
+        ${renderTableCell("Updated", `<time datetime="${escapeHtml(item.updatedAt)}">${escapeHtml(item.updatedAt)}</time>`)}
       </tr>`
     )
     .join("");
@@ -341,7 +410,7 @@ export function renderGlobalSearchPage(state: {
   ${summary}
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Document</th><th>DocType</th><th>Name</th><th>Matched Field</th><th>Matched Text</th><th>Updated</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="empty">${emptyMessage}</td></tr>`}</tbody>
       </table>
@@ -400,14 +469,14 @@ function workspaceShortcutKindLabel(kind: WorkspaceShortcutKind): string {
 export function renderUserNotificationInbox(inbox: UserNotificationInbox): string {
   const rows = inbox.notifications
     .map((notification) => `<tr>
-        <td>${notification.read ? "read" : "unread"}</td>
-        <td>${escapeHtml(notification.subject)}</td>
-        <td>${escapeHtml(notification.doctype)}</td>
-        <td>${escapeHtml(notification.documentName)}</td>
-        <td>${escapeHtml(notification.actorId)}</td>
-        <td>${escapeHtml(notification.createdAt)}</td>
-        <td>${notification.dismissed ? "yes" : "no"}</td>
-        <td>${renderNotificationActions(notification)}</td>
+        ${renderTableCell("Status", notification.read ? "read" : "unread")}
+        ${renderTableCell("Subject", escapeHtml(notification.subject))}
+        ${renderTableCell("DocType", escapeHtml(notification.doctype))}
+        ${renderTableCell("Name", escapeHtml(notification.documentName))}
+        ${renderTableCell("Actor", escapeHtml(notification.actorId))}
+        ${renderTableCell("Created", `<time datetime="${escapeHtml(notification.createdAt)}">${escapeHtml(notification.createdAt)}</time>`)}
+        ${renderTableCell("Dismissed", notification.dismissed ? "yes" : "no")}
+        ${renderTableCell("Action", renderNotificationActions(notification))}
       </tr>`)
     .join("");
   return `<form class="panel form list-filters" method="get" action="/desk/notifications">
@@ -423,7 +492,7 @@ export function renderUserNotificationInbox(inbox: UserNotificationInbox): strin
   </section>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Status</th><th>Subject</th><th>DocType</th><th>Name</th><th>Actor</th><th>Created</th><th>Dismissed</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8" class="empty">No notifications.</td></tr>`}</tbody>
       </table>
@@ -473,16 +542,16 @@ export function renderFileManager(
     .map((file) => {
       const attachedTo = attachmentLabel(file);
       return `<tr>
-        <td>${file.deletable || file.editable ? renderFileBulkSelection(file, bulkFileActionFormId) : ""}</td>
-        <td>${renderFileContentLinks(file)}</td>
-        <td>${escapeHtml(file.name)}</td>
-        <td>${escapeHtml(file.contentType)}</td>
-        <td>${escapeHtml(formatBytes(file.size))}</td>
-        <td>${file.isPrivate ? "yes" : "no"}</td>
-        <td>${escapeHtml(attachedTo)}</td>
-        <td>${escapeHtml(file.uploadedBy)}</td>
-        <td>${escapeHtml(file.uploadedAt)}</td>
-        <td>${file.editable ? renderFileMetadataAction(file) : ""}${file.deletable ? renderFileDeleteAction(file) : ""}</td>
+        ${renderTableCell("Select", file.deletable || file.editable ? renderFileBulkSelection(file, bulkFileActionFormId) : "")}
+        ${renderTableCell("Filename", renderFileContentLinks(file))}
+        ${renderTableCell("ID", escapeHtml(file.name))}
+        ${renderTableCell("Content Type", escapeHtml(file.contentType))}
+        ${renderTableCell("Size", escapeHtml(formatBytes(file.size)))}
+        ${renderTableCell("Private", file.isPrivate ? "yes" : "no")}
+        ${renderTableCell("Attached To", escapeHtml(attachedTo))}
+        ${renderTableCell("Uploaded By", escapeHtml(file.uploadedBy))}
+        ${renderTableCell("Uploaded At", `<time datetime="${escapeHtml(file.uploadedAt)}">${escapeHtml(file.uploadedAt)}</time>`)}
+        ${renderTableCell("Action", `${file.editable ? renderFileMetadataAction(file) : ""}${file.deletable ? renderFileDeleteAction(file) : ""}`)}
       </tr>`;
     })
     .join("");
@@ -509,7 +578,7 @@ export function renderFileManager(
   </section>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Select</th><th>Filename</th><th>ID</th><th>Content Type</th><th>Size</th><th>Private</th><th>Attached To</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="10" class="empty">No files found.</td></tr>`}</tbody>
       </table>
@@ -539,13 +608,13 @@ export function renderFileAttachmentPanel(
   const rows = dashboard.files
     .map(
       (file) => `<tr>
-        <td>${renderFileContentLinks(file)}</td>
-        <td>${escapeHtml(file.contentType)}</td>
-        <td>${escapeHtml(formatBytes(file.size))}</td>
-        <td>${file.isPrivate ? "yes" : "no"}</td>
-        <td>${escapeHtml(file.uploadedBy)}</td>
-        <td>${escapeHtml(file.uploadedAt)}</td>
-        <td>${file.deletable ? renderAttachedFileDeleteAction(doctype, documentName, file) : ""}</td>
+        ${renderTableCell("Filename", renderFileContentLinks(file))}
+        ${renderTableCell("Content Type", escapeHtml(file.contentType))}
+        ${renderTableCell("Size", escapeHtml(formatBytes(file.size)))}
+        ${renderTableCell("Private", file.isPrivate ? "yes" : "no")}
+        ${renderTableCell("Uploaded By", escapeHtml(file.uploadedBy))}
+        ${renderTableCell("Uploaded At", escapeHtml(file.uploadedAt))}
+        ${renderTableCell("Action", file.deletable ? renderAttachedFileDeleteAction(doctype, documentName, file) : "")}
       </tr>`
     )
     .join("");
@@ -557,7 +626,7 @@ export function renderFileAttachmentPanel(
     </div>
     ${uploadForm}
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Filename</th><th>Content Type</th><th>Size</th><th>Private</th><th>Uploaded By</th><th>Uploaded At</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="empty">No files attached.</td></tr>`}</tbody>
       </table>
@@ -693,26 +762,26 @@ export function renderReportList(
   const rows = reports
     .map(
       (report) => `<tr>
-        <td><a href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a></td>
-        <td>${escapeHtml(report.doctype)}</td>
-        <td>${escapeHtml(report.module ?? "")}</td>
-        <td>${escapeHtml(report.description ?? "")}</td>
+        ${renderTableCell("Report", `<a href="/desk/reports/${encodeURIComponent(report.name)}">${escapeHtml(report.label ?? report.name)}</a>`)}
+        ${renderTableCell("DocType", escapeHtml(report.doctype))}
+        ${renderTableCell("Module", escapeHtml(report.module ?? ""))}
+        ${renderTableCell("Description", escapeHtml(report.description ?? ""))}
       </tr>`
     )
     .join("");
   const builderRows = (options.builderDoctypes ?? [])
     .map(
       (doctype) => `<tr>
-        <td><a href="/desk/report-builder/${encodeURIComponent(doctype.name)}">${escapeHtml(labelFor(doctype))}</a></td>
-        <td>${escapeHtml(doctype.name)}</td>
-        <td>${String(doctype.fields.filter((field) => !field.hidden).length)}</td>
+        ${renderTableCell("Build Report", `<a href="/desk/report-builder/${encodeURIComponent(doctype.name)}">${escapeHtml(labelFor(doctype))}</a>`)}
+        ${renderTableCell("DocType", escapeHtml(doctype.name))}
+        ${renderTableCell("Fields", String(doctype.fields.filter((field) => !field.hidden).length))}
       </tr>`
     )
     .join("");
   const builder = options.builderDoctypes
     ? `<section class="panel report-builder-list">
       <div class="table-wrap">
-        <table>
+        <table class="responsive-table">
           <thead><tr><th>Build Report</th><th>DocType</th><th>Fields</th></tr></thead>
           <tbody>${builderRows || `<tr><td colspan="3" class="empty">No readable DocTypes.</td></tr>`}</tbody>
         </table>
@@ -721,7 +790,7 @@ export function renderReportList(
     : "";
   return `<section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Report</th><th>DocType</th><th>Module</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No readable reports.</td></tr>`}</tbody>
       </table>
@@ -733,16 +802,16 @@ export function renderDashboardList(dashboards: readonly DashboardDefinition[]):
   const rows = dashboards
     .map(
       (dashboard) => `<tr>
-        <td><a href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a></td>
-        <td>${escapeHtml(dashboard.module ?? "")}</td>
-        <td>${String(dashboard.cards.length)}</td>
-        <td>${escapeHtml(dashboard.description ?? "")}</td>
+        ${renderTableCell("Dashboard", `<a href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a>`)}
+        ${renderTableCell("Module", escapeHtml(dashboard.module ?? ""))}
+        ${renderTableCell("Cards", String(dashboard.cards.length))}
+        ${renderTableCell("Description", escapeHtml(dashboard.description ?? ""))}
       </tr>`
     )
     .join("");
   return `<section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Dashboard</th><th>Module</th><th>Cards</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No readable dashboards.</td></tr>`}</tbody>
       </table>
@@ -762,17 +831,17 @@ export function renderKanbanList(kanbans: readonly KanbanDefinition[]): string {
   const rows = kanbans
     .map(
       (kanban) => `<tr>
-        <td><a href="/desk/kanbans/${encodeURIComponent(kanban.name)}">${escapeHtml(kanban.label ?? kanban.name)}</a></td>
-        <td>${escapeHtml(kanban.doctype)}</td>
-        <td>${escapeHtml(kanban.columnField)}</td>
-        <td>${escapeHtml(kanban.module ?? "")}</td>
-        <td>${escapeHtml(kanban.description ?? "")}</td>
+        ${renderTableCell("Kanban", `<a href="/desk/kanbans/${encodeURIComponent(kanban.name)}">${escapeHtml(kanban.label ?? kanban.name)}</a>`)}
+        ${renderTableCell("DocType", escapeHtml(kanban.doctype))}
+        ${renderTableCell("Column Field", escapeHtml(kanban.columnField))}
+        ${renderTableCell("Module", escapeHtml(kanban.module ?? ""))}
+        ${renderTableCell("Description", escapeHtml(kanban.description ?? ""))}
       </tr>`
     )
     .join("");
   return `<section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Kanban</th><th>DocType</th><th>Column Field</th><th>Module</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="5" class="empty">No readable kanban boards.</td></tr>`}</tbody>
       </table>
@@ -792,33 +861,51 @@ export function renderKanbanView(result: KanbanRunResult): string {
       </header>
       ${column.cards.length === 0
         ? `<p class="empty">No cards.</p>`
-        : column.cards.map((card) => `<a class="kanban-card" href="/desk/${encodeURIComponent(card.doctype)}/${encodeURIComponent(card.name)}">
-          <strong>${escapeHtml(card.title)}</strong>
-          <span>${escapeHtml(card.name)}</span>
-          <small>v${String(card.version)} updated ${escapeHtml(card.updatedAt)}</small>
-        </a>`).join("")}
+        : column.cards.map((card) => renderKanbanCard(card)).join("")}
       ${column.hasMore ? `<p class="muted">More cards hidden by board limit.</p>` : ""}
     </section>`)
     .join("");
-  return `${description}<section class="kanban-board">${columns || `<p class="empty">No kanban columns.</p>`}</section>`;
+  return `${description}
+  <section class="toolbar board-toolbar">
+    <a class="button primary" href="/desk/${encodeURIComponent(result.board.doctype)}/new">New ${escapeHtml(result.board.doctype)}</a>
+    <a class="button" href="/desk/${encodeURIComponent(result.board.doctype)}">List</a>
+    <a class="button" href="/desk/kanbans/${encodeURIComponent(result.board.name)}">Refresh</a>
+    <span class="board-mode">Read-only board</span>
+  </section>
+  <section class="kanban-board">${columns || `<p class="empty">No kanban columns.</p>`}</section>`;
+}
+
+function renderKanbanCard(card: KanbanCardResult): string {
+  const priority = typeof card.data.priority === "string" && card.data.priority.length > 0
+    ? `<span class="value-chip value-chip-${escapeHtml(slug(card.data.priority) || "value")}">${escapeHtml(card.data.priority)}</span>`
+    : "";
+  return `<a class="kanban-card" href="/desk/${encodeURIComponent(card.doctype)}/${encodeURIComponent(card.name)}">
+    <strong>${escapeHtml(card.title)}</strong>
+    <span>${escapeHtml(card.name)}</span>
+    <div class="kanban-card-meta">
+      ${priority}
+      <span class="status-pill">${escapeHtml(card.docstatus)}</span>
+      <small>v${String(card.version)} · ${escapeHtml(card.updatedAt)}</small>
+    </div>
+  </a>`;
 }
 
 export function renderCalendarList(calendars: readonly CalendarDefinition[]): string {
   const rows = calendars
     .map(
       (calendar) => `<tr>
-        <td><a href="/desk/calendars/${encodeURIComponent(calendar.name)}">${escapeHtml(calendar.label ?? calendar.name)}</a></td>
-        <td>${escapeHtml(calendar.doctype)}</td>
-        <td>${escapeHtml(calendar.startField)}</td>
-        <td>${escapeHtml(calendar.endField ?? "")}</td>
-        <td>${escapeHtml(calendar.module ?? "")}</td>
-        <td>${escapeHtml(calendar.description ?? "")}</td>
+        ${renderTableCell("Calendar", `<a href="/desk/calendars/${encodeURIComponent(calendar.name)}">${escapeHtml(calendar.label ?? calendar.name)}</a>`)}
+        ${renderTableCell("DocType", escapeHtml(calendar.doctype))}
+        ${renderTableCell("Start Field", escapeHtml(calendar.startField))}
+        ${renderTableCell("End Field", escapeHtml(calendar.endField ?? ""))}
+        ${renderTableCell("Module", escapeHtml(calendar.module ?? ""))}
+        ${renderTableCell("Description", escapeHtml(calendar.description ?? ""))}
       </tr>`
     )
     .join("");
   return `<section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Calendar</th><th>DocType</th><th>Start Field</th><th>End Field</th><th>Module</th><th>Description</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="empty">No readable calendars.</td></tr>`}</tbody>
       </table>
@@ -959,15 +1046,15 @@ export function renderSavedReportBuilder(
       const href = `/desk/report-builder/${encodeURIComponent(doctype.name)}/${encodeURIComponent(saved.id)}`;
       const exportHref = `${href}/export.csv`;
       return `<tr>
-        <td><a href="${href}">${escapeHtml(saved.label)}</a></td>
-        <td>${escapeHtml(saved.definition.columns.map((column) => column.label ?? column.name).join(", "))}</td>
-        <td>${escapeHtml(saved.updatedAt)}</td>
-        <td>
+        ${renderTableCell("Saved Report", `<a href="${href}">${escapeHtml(saved.label)}</a>`)}
+        ${renderTableCell("Columns", escapeHtml(saved.definition.columns.map((column) => column.label ?? column.name).join(", ")))}
+        ${renderTableCell("Updated", escapeHtml(saved.updatedAt))}
+        ${renderTableCell("Actions", `
           <a class="button" href="${exportHref}">Export CSV</a>
           <form class="inline-action" method="post" action="${href}/delete">
             <button class="button danger" type="submit">Delete</button>
           </form>
-        </td>
+        `)}
       </tr>`;
     })
     .join("");
@@ -1080,7 +1167,7 @@ export function renderSavedReportBuilder(
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Saved Report</th><th>Columns</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No saved reports.</td></tr>`}</tbody>
       </table>
@@ -1350,10 +1437,10 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
     .map((grant) => {
       const applicable = (grant.applicableDoctypes ?? []).join(", ");
       return `<tr>
-        <td>${escapeHtml(grant.targetDoctype)}</td>
-        <td>${escapeHtml(grant.targetName)}</td>
-        <td>${escapeHtml(applicable)}</td>
-        <td>
+        ${renderTableCell("Target DocType", escapeHtml(grant.targetDoctype))}
+        ${renderTableCell("Target Name", escapeHtml(grant.targetName))}
+        ${renderTableCell("Applicable DocTypes", escapeHtml(applicable))}
+        ${renderTableCell("Action", `
           <form class="inline-action" method="post" action="/desk/admin/user-permissions/revoke">
             <input type="hidden" name="user" value="${escapeHtml(state.userId)}">
             <input type="hidden" name="targetDoctype" value="${escapeHtml(grant.targetDoctype)}">
@@ -1362,7 +1449,7 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
             <input type="hidden" name="expectedVersion" value="${String(state.version)}">
             <button class="button danger" type="submit">Revoke</button>
           </form>
-        </td>
+        `)}
       </tr>`;
     })
     .join("");
@@ -1384,7 +1471,7 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Target DocType</th><th>Target Name</th><th>Applicable DocTypes</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No grants configured.</td></tr>`}</tbody>
       </table>
@@ -1406,13 +1493,13 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   const providerSyncForm = renderUserAuthProviderSyncForm(account, selectedUserId);
   const rows = account
     ? `<tr>
-        <td>${escapeHtml(account.userId)}</td>
-        <td>${escapeHtml(account.email ?? "")}</td>
-        <td>${escapeHtml(state.profile?.profile.fullName ?? "")}</td>
-        <td>${escapeHtml(account.roles.join(", "))}</td>
-        <td>${account.enabled ? "enabled" : "disabled"}</td>
-        <td>${String(account.version)}</td>
-        <td>${escapeHtml(account.updatedAt ?? account.createdAt ?? "")}</td>
+        ${renderTableCell("User", escapeHtml(account.userId))}
+        ${renderTableCell("Email", escapeHtml(account.email ?? ""))}
+        ${renderTableCell("Full Name", escapeHtml(state.profile?.profile.fullName ?? ""))}
+        ${renderTableCell("Roles", escapeHtml(account.roles.join(", ")))}
+        ${renderTableCell("Status", account.enabled ? "enabled" : "disabled")}
+        ${renderTableCell("Version", String(account.version))}
+        ${renderTableCell("Updated", escapeHtml(account.updatedAt ?? account.createdAt ?? ""))}
       </tr>`
     : "";
   const accountTools = account
@@ -1464,7 +1551,7 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   ${providerSyncForm}
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>User</th><th>Email</th><th>Full Name</th><th>Roles</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="empty">No account loaded.</td></tr>`}</tbody>
       </table>
@@ -1549,11 +1636,11 @@ export function renderRoleAdmin(
     .map((role) => {
       const action = role.enabled ? "disable" : "enable";
       return `<tr>
-        <td>${escapeHtml(role.name)}</td>
-        <td>${escapeHtml(role.description ?? "")}</td>
-        <td>${role.enabled ? "enabled" : "disabled"}</td>
-        <td>${String(role.version)}</td>
-        <td>
+        ${renderTableCell("Role", escapeHtml(role.name))}
+        ${renderTableCell("Description", escapeHtml(role.description ?? ""))}
+        ${renderTableCell("Status", role.enabled ? "enabled" : "disabled")}
+        ${renderTableCell("Role Version", String(role.version))}
+        ${renderTableCell("Actions", `
           <form class="inline-action" method="post" action="/desk/admin/roles/${encodeURIComponent(role.name)}/description">
             <input type="hidden" name="expectedVersion" value="${String(state.version)}">
             <input name="description" value="${escapeHtml(role.description ?? "")}">
@@ -1563,7 +1650,7 @@ export function renderRoleAdmin(
             <input type="hidden" name="expectedVersion" value="${String(state.version)}">
             <button class="button ${role.enabled ? "danger" : "primary"}" type="submit">${role.enabled ? "Disable" : "Enable"}</button>
           </form>
-        </td>
+        `)}
       </tr>`;
     })
     .join("");
@@ -1580,7 +1667,7 @@ export function renderRoleAdmin(
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Role</th><th>Description</th><th>Status</th><th>Role Version</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="5" class="empty">No roles configured.</td></tr>`}</tbody>
       </table>
@@ -1607,14 +1694,14 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
           </form>`
         : "";
       return `<tr>
-        <td>${escapeHtml(field.name)}</td>
-        <td>${escapeHtml(field.label ?? "")}</td>
-        <td>${escapeHtml(field.type)}</td>
-        <td>${renderCustomFieldDetails(field)}</td>
-        <td>${escapeHtml(renderCustomFieldFlags(field))}</td>
-        <td>${entry.enabled ? "enabled" : "disabled"}</td>
-        <td>${escapeHtml(entry.updatedAt)}</td>
-        <td>${action}</td>
+        ${renderTableCell("Field", escapeHtml(field.name))}
+        ${renderTableCell("Label", escapeHtml(field.label ?? ""))}
+        ${renderTableCell("Type", escapeHtml(field.type))}
+        ${renderTableCell("Details", renderCustomFieldDetails(field))}
+        ${renderTableCell("Flags", escapeHtml(renderCustomFieldFlags(field)))}
+        ${renderTableCell("Status", entry.enabled ? "enabled" : "disabled")}
+        ${renderTableCell("Updated", `<time datetime="${escapeHtml(entry.updatedAt)}">${escapeHtml(entry.updatedAt)}</time>`)}
+        ${renderTableCell("Actions", action)}
       </tr>`;
     })
     .join("");
@@ -1664,7 +1751,7 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Field</th><th>Label</th><th>Type</th><th>Details</th><th>Flags</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8" class="empty">No custom fields configured.</td></tr>`}</tbody>
       </table>
@@ -1689,15 +1776,15 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
   const overrides = current?.overrides ?? {};
   const rows = state.state?.fields
     .map((entry) => `<tr>
-      <td>${escapeHtml(entry.fieldName)}</td>
-      <td>${escapeHtml(renderFieldPropertyOverrides(entry.overrides))}</td>
-      <td>${escapeHtml(entry.updatedAt)}</td>
-      <td>
+      ${renderTableCell("Field", escapeHtml(entry.fieldName))}
+      ${renderTableCell("Overrides", escapeHtml(renderFieldPropertyOverrides(entry.overrides)))}
+      ${renderTableCell("Updated", `<time datetime="${escapeHtml(entry.updatedAt)}">${escapeHtml(entry.updatedAt)}</time>`)}
+      ${renderTableCell("Actions", `
         <form class="inline-action" method="post" action="/desk/admin/field-properties/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.fieldName)}/clear">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button danger" type="submit">Clear</button>
         </form>
-      </td>
+      `)}
     </tr>`)
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/field-properties">
@@ -1745,7 +1832,7 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Field</th><th>Overrides</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No field property overrides configured.</td></tr>`}</tbody>
       </table>
@@ -1767,11 +1854,11 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
   const transitions = workflow?.transitions.map(renderWorkflowTransitionLine).join("\n") ?? "";
   const rows = workflow?.transitions
     .map((transition) => `<tr>
-      <td>${escapeHtml(transition.action)}</td>
-      <td>${escapeHtml(transition.from)}</td>
-      <td>${escapeHtml(transition.to)}</td>
-      <td>${escapeHtml((transition.roles ?? []).join(", "))}</td>
-      <td>${escapeHtml(transition.eventType ?? "")}</td>
+      ${renderTableCell("Action", escapeHtml(transition.action))}
+      ${renderTableCell("From", escapeHtml(transition.from))}
+      ${renderTableCell("To", escapeHtml(transition.to))}
+      ${renderTableCell("Roles", escapeHtml((transition.roles ?? []).join(", ")))}
+      ${renderTableCell("Event Type", escapeHtml(transition.eventType ?? ""))}
     </tr>`)
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/workflows">
@@ -1798,7 +1885,7 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Action</th><th>From</th><th>To</th><th>Roles</th><th>Event Type</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="5" class="empty">No workflow override configured.</td></tr>`}</tbody>
       </table>
@@ -1812,24 +1899,24 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   const rule = selectedRule?.rule;
   const rows = state.state?.rules
     .map((entry) => `<tr>
-      <td>${escapeHtml(entry.rule.name)}</td>
-      <td>${entry.enabled ? "enabled" : "disabled"}</td>
-      <td>${escapeHtml(entry.rule.events.join(", "))}</td>
-      <td>${escapeHtml(entry.rule.recipients.map(notificationRuleRecipientLabel).join(", "))}</td>
-      <td>${escapeHtml((entry.rule.channels ?? ["inbox"]).join(", "))}</td>
-      <td>${escapeHtml(notificationRuleConditionLabel(entry.rule.condition))}</td>
-      <td>${escapeHtml(entry.rule.subject ?? "")}</td>
-      <td>
+      ${renderTableCell("Name", escapeHtml(entry.rule.name))}
+      ${renderTableCell("Status", entry.enabled ? "enabled" : "disabled")}
+      ${renderTableCell("Events", escapeHtml(entry.rule.events.join(", ")))}
+      ${renderTableCell("Recipients", escapeHtml(entry.rule.recipients.map(notificationRuleRecipientLabel).join(", ")))}
+      ${renderTableCell("Channels", escapeHtml((entry.rule.channels ?? ["inbox"]).join(", ")))}
+      ${renderTableCell("Condition", escapeHtml(notificationRuleConditionLabel(entry.rule.condition)))}
+      ${renderTableCell("Subject", escapeHtml(entry.rule.subject ?? ""))}
+      ${renderTableCell("Actions", `
         <a class="button" href="${escapeHtml(notificationRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
-        <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
+        <form class="inline-action" method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button" type="submit">${entry.enabled ? "Disable" : "Enable"}</button>
         </form>
-        <form method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
+        <form class="inline-action" method="post" action="/desk/admin/notification-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button danger" type="submit">Clear</button>
         </form>
-      </td>
+      `)}
     </tr>`)
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/notification-rules">
@@ -1857,7 +1944,7 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Recipients</th><th>Channels</th><th>Condition</th><th>Subject</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8" class="empty">No notification rules configured.</td></tr>`}</tbody>
       </table>
@@ -1871,22 +1958,22 @@ export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): stri
   const rule = selectedRule?.rule;
   const rows = state.state?.rules
     .map((entry) => `<tr>
-      <td>${escapeHtml(entry.rule.name)}</td>
-      <td>${entry.enabled ? "enabled" : "disabled"}</td>
-      <td>${escapeHtml(entry.rule.events.join(", "))}</td>
-      <td>${escapeHtml(entry.rule.assignees.map(assignmentRuleAssigneeLabel).join(", "))}</td>
-      <td>${escapeHtml(notificationRuleConditionLabel(entry.rule.condition))}</td>
-      <td>
+      ${renderTableCell("Name", escapeHtml(entry.rule.name))}
+      ${renderTableCell("Status", entry.enabled ? "enabled" : "disabled")}
+      ${renderTableCell("Events", escapeHtml(entry.rule.events.join(", ")))}
+      ${renderTableCell("Assignees", escapeHtml(entry.rule.assignees.map(assignmentRuleAssigneeLabel).join(", ")))}
+      ${renderTableCell("Condition", escapeHtml(notificationRuleConditionLabel(entry.rule.condition)))}
+      ${renderTableCell("Actions", `
         <a class="button" href="${escapeHtml(assignmentRuleAdminHref(state.selectedDoctype, entry.rule.name))}">Edit</a>
-        <form method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
+        <form class="inline-action" method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/${entry.enabled ? "disable" : "enable"}">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button" type="submit">${entry.enabled ? "Disable" : "Enable"}</button>
         </form>
-        <form method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
+        <form class="inline-action" method="post" action="/desk/admin/assignment-rules/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(entry.rule.name)}/clear">
           <input type="hidden" name="expectedVersion" value="${String(version)}">
           <button class="button danger" type="submit">Clear</button>
         </form>
-      </td>
+      `)}
     </tr>`)
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/assignment-rules">
@@ -1912,7 +1999,7 @@ export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): stri
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Name</th><th>Status</th><th>Events</th><th>Assignees</th><th>Condition</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="empty">No assignment rules configured.</td></tr>`}</tbody>
       </table>
@@ -2166,24 +2253,24 @@ export function renderJobAdmin(
     .map((job) => {
       const retry = job.retry ? JSON.stringify(job.retry) : "";
       return `<tr>
-        <td>${escapeHtml(job.name)}</td>
-        <td>${escapeHtml(job.pool ?? "default")}</td>
-        <td>${escapeHtml(job.description ?? "")}</td>
-        <td>${escapeHtml(retry)}</td>
+        ${renderTableCell("Job", escapeHtml(job.name))}
+        ${renderTableCell("Pool", escapeHtml(job.pool ?? "default"))}
+        ${renderTableCell("Description", escapeHtml(job.description ?? ""))}
+        ${renderTableCell("Retry", escapeHtml(retry))}
       </tr>`;
     })
     .join("");
   const executionRows = dashboard.executions
     .map(
       (record) => `<tr>
-        <td>${escapeHtml(record.idempotencyKey)}</td>
-        <td>${escapeHtml(record.jobName)}</td>
-        <td>${escapeHtml(record.runId)}</td>
-        <td>${escapeHtml(record.status)}</td>
-        <td>${escapeHtml(record.startedAt)}</td>
-        <td>${escapeHtml(record.finishedAt ?? "")}</td>
-        <td>${escapeHtml(record.result === undefined ? record.error ?? "" : JSON.stringify(record.result))}</td>
-        <td>${options.allowRetry ? renderJobRetryAction(record.idempotencyKey, record.status) : ""}</td>
+        ${renderTableCell("Idempotency Key", escapeHtml(record.idempotencyKey))}
+        ${renderTableCell("Job", escapeHtml(record.jobName))}
+        ${renderTableCell("Run ID", escapeHtml(record.runId))}
+        ${renderTableCell("Status", escapeHtml(record.status))}
+        ${renderTableCell("Started", `<time datetime="${escapeHtml(record.startedAt)}">${escapeHtml(record.startedAt)}</time>`)}
+        ${renderTableCell("Finished", record.finishedAt === undefined ? "" : `<time datetime="${escapeHtml(record.finishedAt)}">${escapeHtml(record.finishedAt)}</time>`)}
+        ${renderTableCell("Result / Error", escapeHtml(record.result === undefined ? record.error ?? "" : JSON.stringify(record.result)))}
+        ${renderTableCell("Action", options.allowRetry ? renderJobRetryAction(record.idempotencyKey, record.status) : "")}
       </tr>`
     )
     .join("");
@@ -2199,7 +2286,7 @@ export function renderJobAdmin(
   ${options.showSchedulesLink ? `<section class="toolbar"><a class="button" href="/desk/admin/jobs/schedules">Schedules</a></section>` : ""}
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Job</th><th>Pool</th><th>Description</th><th>Retry</th></tr></thead>
         <tbody>${jobRows || `<tr><td colspan="4" class="empty">No jobs registered.</td></tr>`}</tbody>
       </table>
@@ -2207,7 +2294,7 @@ export function renderJobAdmin(
   </section>
   <section class="panel job-history">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Idempotency Key</th><th>Job</th><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th><th>Result / Error</th><th>Action</th></tr></thead>
         <tbody>${executionRows || `<tr><td colspan="8" class="empty">No executions recorded.</td></tr>`}</tbody>
       </table>
@@ -2229,13 +2316,13 @@ export function renderDataPatchAdmin(
   const showBatchQueueOptions = queue.apply || (canPlanRollback && queue.rollback);
   const rows = dashboard.patches
     .map((patch) => `<tr>
-      <td>${escapeHtml(patch.id)}</td>
-      <td>${escapeHtml(patch.label ?? "")}</td>
-      <td>${escapeHtml(patch.checksum)}</td>
-      <td>${escapeHtml(patch.status)}</td>
-      <td>${escapeHtml(dataPatchTimestamp(patch))}</td>
-      <td>${escapeHtml(dataPatchDetail(patch))}</td>
-      <td>${renderDataPatchAction(patch, queue)}</td>
+      ${renderTableCell("Patch", escapeHtml(patch.id))}
+      ${renderTableCell("Label", escapeHtml(patch.label ?? ""))}
+      ${renderTableCell("Checksum", escapeHtml(patch.checksum))}
+      ${renderTableCell("Status", escapeHtml(patch.status))}
+      ${renderTableCell("Timestamp", escapeHtml(dataPatchTimestamp(patch)))}
+      ${renderTableCell("Result / Error", escapeHtml(dataPatchDetail(patch)))}
+      ${renderTableCell("Action", renderDataPatchAction(patch, queue))}
     </tr>`)
     .join("");
   return `<form class="panel form" method="post" action="/desk/admin/data-patches/apply">
@@ -2257,7 +2344,7 @@ export function renderDataPatchAdmin(
   </form>
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Patch</th><th>Label</th><th>Checksum</th><th>Status</th><th>Timestamp</th><th>Result / Error</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="empty">No data patches registered.</td></tr>`}</tbody>
       </table>
@@ -2376,17 +2463,17 @@ export function renderJobScheduleAdmin(
 ): string {
   const rows = dashboard.schedules
     .map((schedule) => `<tr>
-        <td>${escapeHtml(schedule.source)}</td>
-        <td>${escapeHtml(schedule.id)}</td>
-        <td>${escapeHtml(schedule.cron)}</td>
-        <td>${escapeHtml(schedule.jobName)}</td>
-        <td>${escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : ""))}</td>
-        <td>${schedule.enabled ? "yes" : "no"}</td>
-        <td>${escapeHtml(scheduleOverrideState(schedule))}</td>
-        <td>${schedule.registered ? "yes" : "no"}</td>
-        <td>${escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds))}</td>
-        <td>${escapeHtml(dynamicScheduleFields(schedule))}</td>
-        <td>${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable, dashboard.filters) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule, dashboard.filters) : ""}${options.allowEdit ? renderScheduleDefinitionAction(schedule, dashboard.filters) : ""}</td>
+        ${renderTableCell("Source", escapeHtml(schedule.source))}
+        ${renderTableCell("ID", escapeHtml(schedule.id))}
+        ${renderTableCell("Cron", escapeHtml(schedule.cron))}
+        ${renderTableCell("Job", escapeHtml(schedule.jobName))}
+        ${renderTableCell("Tenant", escapeHtml(schedule.tenantId ?? (schedule.dynamic.tenantId ? "dynamic" : "")))}
+        ${renderTableCell("Enabled", schedule.enabled ? "yes" : "no")}
+        ${renderTableCell("Override", escapeHtml(scheduleOverrideState(schedule)))}
+        ${renderTableCell("Registered", schedule.registered ? "yes" : "no")}
+        ${renderTableCell("Delay", escapeHtml(schedule.delaySeconds === undefined ? "" : String(schedule.delaySeconds)))}
+        ${renderTableCell("Dynamic", escapeHtml(dynamicScheduleFields(schedule)))}
+        ${renderTableCell("Action", `${options.allowRun ? renderScheduleRunAction(schedule.id, schedule.dispatchable, dashboard.filters) : ""}${options.allowOverride ? renderScheduleOverrideAction(schedule, dashboard.filters) : ""}${options.allowEdit ? renderScheduleDefinitionAction(schedule, dashboard.filters) : ""}`)}
       </tr>`)
     .join("");
   const editor = options.allowEdit ? renderJobScheduleEditor(dashboard.filters) : "";
@@ -2402,7 +2489,7 @@ export function renderJobScheduleAdmin(
   </section>` : ""}
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>Source</th><th>ID</th><th>Cron</th><th>Job</th><th>Tenant</th><th>Enabled</th><th>Override</th><th>Registered</th><th>Delay</th><th>Dynamic</th><th>Action</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="11" class="empty">No schedules configured.</td></tr>`}</tbody>
       </table>
@@ -2515,7 +2602,7 @@ export function renderReportView(
     .map(
       (row) =>
         `<tr>${result.columns
-          .map((column) => `<td>${escapeHtml(formatValue(row[column.name]))}</td>`)
+          .map((column) => renderTableCell(column.label ?? column.name, escapeHtml(formatValue(row[column.name]))))
           .join("")}</tr>`
     )
     .join("");
@@ -2535,7 +2622,7 @@ export function renderReportView(
   ${renderReportGroups(result.groups)}
   <section class="panel">
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr>${headers}</tr></thead>
         <tbody>${rows || `<tr><td colspan="${result.columns.length}" class="empty">No rows matched.</td></tr>`}</tbody>
       </table>
@@ -2825,15 +2912,15 @@ function renderReportGroups(groups: ReportRunResult["groups"]): string {
       const rows = group.rows
         .map(
           (row) =>
-            `<tr><td>${escapeHtml(row.label)}</td>${row.summaries
-              .map((summary) => `<td>${escapeHtml(formatValue(summary.value))}</td>`)
+            `<tr>${renderTableCell(group.field, escapeHtml(row.label))}${row.summaries
+              .map((summary) => renderTableCell(summary.label, escapeHtml(formatValue(summary.value))))
               .join("")}</tr>`
         )
         .join("");
       return `<section class="panel report-group">
         <h2>${escapeHtml(group.label)}</h2>
         <div class="table-wrap">
-          <table>
+          <table class="responsive-table">
             <thead><tr><th>${escapeHtml(group.field)}</th>${summaryHeaders}</tr></thead>
             <tbody>${rows || `<tr><td colspan="2" class="empty">No rows matched.</td></tr>`}</tbody>
           </table>
@@ -2865,12 +2952,14 @@ export function renderListView(
 ): string {
   const fields = listView.columns;
   const filterFields = listView.filterFields;
-  const filterFieldMap = new Map(filterFields.map((field) => [field.name, field]));
-  const filterForm = listView.filterControls
-    .map((control) => {
-      const field = filterFieldMap.get(control.field);
-      return field ? renderFilterControl(field, filters, control) : "";
-    })
+  const filterControlsByField = new Map<string, ListFilterControlDefinition[]>();
+  for (const control of listView.filterControls) {
+    const controls = filterControlsByField.get(control.field) ?? [];
+    controls.push(control);
+    filterControlsByField.set(control.field, controls);
+  }
+  const filterForm = filterFields
+    .map((field) => renderFilterControlsForField(field, filters, filterControlsByField.get(field.name) ?? []))
     .join("");
   const compoundFilterForm = renderCompoundFilterBuilder(listView, options.filterExpression);
   const orderForm = renderListOrderControls(listView);
@@ -2891,38 +2980,93 @@ export function renderListView(
   const newAction = options.canCreate === false
     ? ""
     : `<a class="button primary" href="/desk/${encodeURIComponent(doctype.name)}/new">New ${escapeHtml(labelFor(doctype))}</a>`;
+  const fieldLabels = fields.map((field) => field.label ?? field.name);
   const rows = documents
     .map((document) => {
       const cells = fields
-        .map((field) => `<td>${escapeHtml(formatValue(document.data[field.name]))}</td>`)
+        .map((field, index) => `<td data-label="${escapeHtml(fieldLabels[index] ?? field.name)}">${renderListCellValue(field, document.data[field.name])}</td>`)
         .join("");
       const selectable = selectableNames.has(document.name);
       return `<tr>
         ${hasBulkActions ? renderBulkDocumentActionCell(document, selectable, bulkActionFormId) : ""}
-        <td><a href="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(document.name)}">${escapeHtml(document.name)}</a></td>
+        <td data-label="Name"><a href="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(document.name)}">${escapeHtml(document.name)}</a></td>
         ${cells}
-        <td>${String(document.version)}</td>
-        <td>${escapeHtml(document.updatedAt)}</td>
+        <td data-label="Version"><span class="version-pill">v${String(document.version)}</span></td>
+        <td data-label="Updated"><time datetime="${escapeHtml(document.updatedAt)}">${escapeHtml(document.updatedAt)}</time></td>
       </tr>`;
     })
     .join("");
-  return `<section class="toolbar">
-    ${newAction}
-    ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
-    ${hasBulkActions ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}">${options.bulkReturnHref ? `<input type="hidden" name="returnTo" value="${escapeHtml(options.bulkReturnHref)}">` : ""}</form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}` : ""}
+  const recordCount = `${String(documents.length)} ${documents.length === 1 ? "record" : "records"}`;
+  const bulkControls = hasBulkActions
+    ? `<form id="${bulkActionFormId}" method="post" action="${escapeHtml(bulkActions[0]?.action ?? "")}">${options.bulkReturnHref ? `<input type="hidden" name="returnTo" value="${escapeHtml(options.bulkReturnHref)}">` : ""}</form>${bulkActions.map((action) => renderListBulkActionButton(action, bulkActionFormId)).join("")}`
+    : "";
+  const filterDisclosureOpen = filters.length > 0 || options.filterExpression !== undefined ? " open" : "";
+  const filterTools = filterForm || compoundFilterForm || orderForm
+    ? `<details class="desk-disclosure list-filters"${filterDisclosureOpen}>
+        <summary><span>Filters and sort</span><small>${renderListFilterSummary(filters, options.filterExpression)}</small></summary>
+        <form class="form list-filter-form" method="get"><div class="fields">${filterForm}${compoundFilterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>
+      </details>`
+    : "";
+  const importTools = importModes.length > 0
+    ? `<details class="desk-disclosure list-import-disclosure"${options.importResult ? " open" : ""}>
+        <summary><span>Import CSV</span><small>Create or update records from a pasted CSV.</small></summary>
+        ${renderListImportPanel(doctype, importModes, options.importResult, options.importReturnHref)}
+      </details>`
+    : "";
+  return `<section class="toolbar list-toolbar">
+    <div class="toolbar-main">
+      ${newAction}
+      ${options.exportHref ? `<a class="button" href="${escapeHtml(options.exportHref)}">Export CSV</a>` : ""}
+      ${bulkControls}
+    </div>
+    <div class="toolbar-aside"><span class="record-count">${recordCount}</span></div>
   </section>
-  ${importModes.length > 0 ? renderListImportPanel(doctype, importModes, options.importResult, options.importReturnHref) : ""}
-  ${savedFilterPanel}
-  ${filterForm || compoundFilterForm || orderForm ? `<form class="panel form list-filters" method="get"><div class="fields">${filterForm}${compoundFilterForm}${orderForm}${savedFilterControl}</div><div class="actions"><button class="button primary" type="submit">Filter</button>${saveFilterButton}<a class="button" href="/desk/${encodeURIComponent(doctype.name)}?default_filters=0">Clear</a></div></form>` : ""}
-  <section class="panel">
+  ${filters.length > 0 || options.filterExpression !== undefined ? `<div class="active-filter-bar">${renderActiveListFilters(filters, options.filterExpression)}</div>` : ""}
+  <section class="panel list-table-panel">
     <div class="table-wrap">
-      <table>
+      <table class="document-table">
         <thead><tr>${hasBulkActions ? "<th>Select</th>" : ""}<th>Name</th>${header}<th>Version</th><th>Updated</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="${fields.length + (hasBulkActions ? 4 : 3)}" class="empty">No documents yet.</td></tr>`}</tbody>
       </table>
     </div>
   </section>
+  ${savedFilterPanel}
+  ${filterTools}
+  ${importTools}
   ${renderClientScripts(doctype.name, "list", options.clientScripts ?? [], undefined, undefined, options.realtimeRoute)}`;
+}
+
+function renderListCellValue(field: FieldDefinition, value: JsonValue | undefined): string {
+  const formatted = formatValue(value);
+  if (formatted === "") {
+    return `<span class="empty">-</span>`;
+  }
+  if (field.type === "select" || field.name.toLowerCase().includes("state") || field.name.toLowerCase().includes("status")) {
+    return `<span class="value-chip value-chip-${escapeHtml(slug(formatted) || "value")}">${escapeHtml(formatted)}</span>`;
+  }
+  return escapeHtml(formatted);
+}
+
+function renderListFilterSummary(
+  filters: readonly ListDocumentsFilter[],
+  expression: ListFilterExpression | undefined
+): string {
+  const count = filters.length + (expression === undefined ? 0 : 1);
+  return count === 0 ? "Ready when needed" : `${String(count)} active`;
+}
+
+function renderActiveListFilters(
+  filters: readonly ListDocumentsFilter[],
+  expression: ListFilterExpression | undefined
+): string {
+  const chips = filters
+    .map((filter) => {
+      const operator = filter.operator ?? "eq";
+      return `<span class="filter-chip">${escapeHtml(filter.field)} ${escapeHtml(operator)} ${escapeHtml(formatValue(filter.value))}</span>`;
+    })
+    .join("");
+  const expressionChip = expression === undefined ? "" : `<span class="filter-chip">Advanced expression</span>`;
+  return `${chips}${expressionChip}`;
 }
 
 function renderListImportPanel(
@@ -2971,16 +3115,19 @@ function renderCompoundFilterBuilder(
   }
   const value = expression === undefined ? "" : JSON.stringify(expression, null, 2);
   const visualGroup = compoundFilterVisualGroup(expression);
-  return `<fieldset class="compound-filter-builder" data-cf-frappe-compound-filter-builder data-filter-fields="${escapeHtml(JSON.stringify(listView.filterBuilderFields))}">
-    <legend>Compound filters</legend>
-    <div class="compound-filter-visual">
-      ${renderCompoundFilterGroup(listView.filterBuilderFields, visualGroup, true)}
-    </div>
-    <template data-cf-frappe-filter-row-template>${renderCompoundFilterRow(listView.filterBuilderFields, undefined)}</template>
-    <template data-cf-frappe-filter-group-template>${renderCompoundFilterGroup(listView.filterBuilderFields, { kind: "group", match: "all", filters: [] }, false)}</template>
-    <label class="field wide" for="filter-expression"><span>Advanced JSON</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
-    ${expression === undefined ? "" : `<div class="filter-expression-preview">${renderListFilterExpression(expression)}</div>`}
-  </fieldset>`;
+  return `<details class="nested-disclosure compound-filter-disclosure"${expression === undefined ? "" : " open"}>
+    <summary>Advanced filters</summary>
+    <fieldset class="compound-filter-builder" data-cf-frappe-compound-filter-builder data-filter-fields="${escapeHtml(JSON.stringify(listView.filterBuilderFields))}">
+      <legend>Compound filters</legend>
+      <div class="compound-filter-visual">
+        ${renderCompoundFilterGroup(listView.filterBuilderFields, visualGroup, true)}
+      </div>
+      <template data-cf-frappe-filter-row-template>${renderCompoundFilterRow(listView.filterBuilderFields, undefined)}</template>
+      <template data-cf-frappe-filter-group-template>${renderCompoundFilterGroup(listView.filterBuilderFields, { kind: "group", match: "all", filters: [] }, false)}</template>
+      <label class="field wide" for="filter-expression"><span>Advanced JSON</span><textarea id="filter-expression" name="filter_expression" rows="5">${escapeHtml(value)}</textarea></label>
+      ${expression === undefined ? "" : `<div class="filter-expression-preview">${renderListFilterExpression(expression)}</div>`}
+    </fieldset>
+  </details>`;
 }
 
 function compoundFilterVisualGroup(expression: ListFilterExpression | undefined): ListFilterGroup {
@@ -3133,10 +3280,10 @@ function renderListOrderDirectionOptions(order: ResolvedListView["order"]): stri
 
 function renderBulkDocumentActionCell(document: DocumentSnapshot, selectable: boolean, formId: string): string {
   if (!selectable) {
-    return "<td></td>";
+    return `<td data-label="Select"></td>`;
   }
   const name = escapeHtml(document.name);
-  return `<td><input form="${formId}" name="document" type="checkbox" value="${name}" aria-label="Select ${name}"><input form="${formId}" name="expectedVersion:${name}" type="hidden" value="${String(document.version)}"></td>`;
+  return `<td data-label="Select"><input class="bulk-select" form="${formId}" name="document" type="checkbox" value="${name}" aria-label="Select ${name}"><input form="${formId}" name="expectedVersion:${name}" type="hidden" value="${String(document.version)}"></td>`;
 }
 
 function renderListBulkActionButton(action: ListBulkAction, formId: string): string {
@@ -3192,6 +3339,7 @@ export function renderFormView(
   }
 ): string {
   const updateDocument = options.mode === "update" ? options.document : undefined;
+  const protectedWorkflowStateField = workflowStateFieldName(doctype);
   const action =
     options.mode === "create"
       ? `/desk/${encodeURIComponent(doctype.name)}`
@@ -3206,7 +3354,9 @@ export function renderFormView(
         options.document,
         options.mode,
         options.linkOptions ?? {},
-        options.tableDefinitions ?? {}
+        options.tableDefinitions ?? {},
+        protectedWorkflowStateField,
+        doctype.workflow?.initialState
       )
     )
     .join("");
@@ -3251,22 +3401,31 @@ export function renderFormView(
     updateDocument?.docstatus === "cancelled" && options.canAmend
       ? `<button class="button" type="submit" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/amend">Amend</button>`
       : "";
+  const cancelAction = `<a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>`;
+  const saveAction = canSave
+    ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>`
+    : "";
+  const formActions = `${cancelAction}${saveAction}${duplicateAction}${amendAction}`;
   const versionField = options.document
     ? `<input type="hidden" name="expectedVersion" value="${String(options.document.version)}">`
     : "";
-  return `<form class="panel form" method="post" action="${action}">
+  return `<form class="panel form document-form" method="post" action="${action}">
+    <div class="form-action-bar">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <span>${options.document ? `${escapeHtml(options.document.docstatus)} · v${String(options.document.version)}` : escapeHtml(doctype.name)}</span>
+      </div>
+      <div class="form-action-buttons">${formActions}</div>
+    </div>
     <div class="form-head">
       <h2>${escapeHtml(title)}</h2>
-      ${options.document ? `<p>v${String(options.document.version)} · ${escapeHtml(options.document.docstatus)}</p>` : ""}
+      ${options.document ? `<p><span class="status-pill">${escapeHtml(options.document.docstatus)}</span> <span>v${String(options.document.version)}</span></p>` : `<p>${escapeHtml(doctype.name)}</p>`}
     </div>
     ${versionField}
     ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
     ${sections}
     <div class="actions">
-      <a class="button" href="/desk/${encodeURIComponent(doctype.name)}">Cancel</a>
-      ${canSave ? `<button class="button primary" type="submit">${options.mode === "create" ? "Create" : "Save"}</button>` : ""}
-      ${duplicateAction}
-      ${amendAction}
+      ${formActions}
     </div>
     ${commands}
     ${workflowActions}
@@ -3343,10 +3502,10 @@ export function renderDocumentTimeline(
   const rows = timeline.entries
     .map(
       (entry) => `<tr>
-        <td>${String(entry.sequence)}</td>
-        <td><strong>${escapeHtml(entry.summary)}</strong><small>${escapeHtml(entry.type)}</small>${renderTimelineChanges(entry.changes)}</td>
-        <td>${escapeHtml(entry.actorId)}</td>
-        <td>${escapeHtml(entry.occurredAt)}</td>
+        ${renderTableCell("#", String(entry.sequence))}
+        ${renderTableCell("Event", `<strong>${escapeHtml(entry.summary)}</strong><small>${escapeHtml(entry.type)}</small>${renderTimelineChanges(entry.changes)}`)}
+        ${renderTableCell("Actor", escapeHtml(entry.actorId))}
+        ${renderTableCell("Occurred", escapeHtml(entry.occurredAt))}
       </tr>`
     )
     .join("");
@@ -3374,7 +3533,7 @@ export function renderDocumentTimeline(
     ${sharePanel}
     ${assignmentPanel}
     <div class="table-wrap">
-      <table>
+      <table class="responsive-table">
         <thead><tr><th>#</th><th>Event</th><th>Actor</th><th>Occurred</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" class="empty">No events yet.</td></tr>`}</tbody>
       </table>
@@ -3600,18 +3759,21 @@ function renderFormSection(
   document: DocumentSnapshot | undefined,
   mode: "create" | "update",
   linkOptions: FormLinkOptions,
-  tableDefinitions: FormTableDefinitions
+  tableDefinitions: FormTableDefinitions,
+  protectedWorkflowStateField: string | undefined,
+  workflowInitialState: string | undefined
 ): string {
   const fields = section.fields
     .map((field) =>
       renderField(
         field,
-        document?.data[field.name],
+        document?.data[field.name] ?? (field.name === protectedWorkflowStateField ? workflowInitialState : undefined),
         mode,
         linkOptions[field.name] ?? [],
         tableDefinitions[field.name],
         linkOptions,
-        tableDefinitions
+        tableDefinitions,
+        field.name === protectedWorkflowStateField
       )
     )
     .join("");
@@ -3628,21 +3790,27 @@ function renderField(
   linkOptions: readonly LinkOption[],
   tableDefinition: DocTypeDefinition | undefined,
   allLinkOptions: FormLinkOptions,
-  tableDefinitions: FormTableDefinitions
+  tableDefinitions: FormTableDefinitions,
+  protectedWorkflowState = false
 ): string {
   const id = `field-${slug(field.name)}`;
   const label = escapeHtml(field.label ?? field.name);
   const required = field.required ? " required" : "";
-  const readonly = field.readOnly || (mode === "update" && field.readOnly) ? " readonly" : "";
+  const readonly = field.readOnly || protectedWorkflowState || (mode === "update" && field.readOnly) ? " readonly" : "";
   const hiddenDependsOn = field.hiddenDependsOn === undefined
     ? ""
     : ` data-cf-frappe-hidden-depends-on="${escapeHtml(JSON.stringify(field.hiddenDependsOn))}"`;
   const placeholder = renderFieldPlaceholder(field);
-  const common = `id="${id}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}"${hiddenDependsOn}${required}${readonly}`;
+  const nameAttribute = protectedWorkflowState ? "" : ` name="${escapeHtml(field.name)}"`;
+  const protectedAttribute = protectedWorkflowState ? ' data-cf-frappe-workflow-state="protected"' : "";
+  const common = `id="${id}"${nameAttribute} data-cf-frappe-field-type="${field.type}"${protectedAttribute}${hiddenDependsOn}${required}${readonly}`;
   const formatted = formatFormValue(value);
   const help = renderFieldHelp(field);
   if (field.type === "table") {
     return renderTableField(field, value, tableDefinition, allLinkOptions, tableDefinitions, field.name, field.name);
+  }
+  if (protectedWorkflowState) {
+    return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="text" ${common} value="${escapeHtml(formatted)}"${placeholder}>${help}</label>`;
   }
   if (field.type === "link") {
     const options = renderLinkOptions(linkOptions, formatted);
@@ -3659,6 +3827,9 @@ function renderField(
   }
   const type = inputType(field);
   const checked = field.type === "boolean" && value === true ? " checked" : "";
+  if (field.type === "boolean") {
+    return `<label class="field checkbox-field" for="${id}"><input type="${type}" ${common} value="true"${checked}${placeholder}><span>${label}${field.required ? " *" : ""}</span>${help}</label>`;
+  }
   return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="${type}" ${common} value="${escapeHtml(formatted)}"${checked}${placeholder}>${help}</label>`;
 }
 
@@ -3716,6 +3887,10 @@ function renderFieldHelp(field: FieldDefinition): string {
     field.readOnly ? "Read only" : "",
     field.description ?? ""
   ].filter((item) => item.length > 0).map((item) => `<small>${escapeHtml(item)}</small>`).join("");
+}
+
+function workflowStateFieldName(doctype: DocTypeDefinition): string | undefined {
+  return doctype.workflow === undefined ? undefined : doctype.workflow.stateField ?? "workflow_state";
 }
 
 function renderTableRow(options: {
@@ -3865,7 +4040,7 @@ function renderFilterControl(
   control: ListFilterControlDefinition
 ): string {
   const id = `filter-${slug(field.name)}`;
-  const label = escapeHtml(`${field.label ?? field.name}${control.labelSuffix ? ` ${control.labelSuffix}` : ""}`);
+  const label = escapeHtml(renderFilterLabel(field, control));
   const operator = control.operator;
   const value = currentFilterValue(filters, field.name, operator);
   const common = `id="${id}-${operator}" name="${escapeHtml(control.queryKey)}"`;
@@ -3889,6 +4064,109 @@ function renderFilterControl(
     return `<label class="field" for="${id}-${operator}"><span>${label}</span><select ${common}>${options}</select></label>`;
   }
   return `<label class="field" for="${id}-${operator}"><span>${label}</span><input type="${control.inputType}" ${common} value="${escapeHtml(value)}"></label>`;
+}
+
+function renderFilterControlsForField(
+  field: FieldDefinition,
+  filters: readonly ListDocumentsFilter[],
+  controls: readonly ListFilterControlDefinition[]
+): string {
+  const choiceControls = quickFilterChoiceControls(controls);
+  if (choiceControls) {
+    const activeControl = activeQuickFilterControl(field.name, filters, choiceControls);
+    if (activeControl) {
+      return renderQuickFilterChoiceControl(field, filters, choiceControls, activeControl);
+    }
+  }
+  return controls.map((control) => renderFilterControl(field, filters, control)).join("");
+}
+
+function quickFilterChoiceControls(
+  controls: readonly ListFilterControlDefinition[]
+): readonly [ListFilterControlDefinition, ListFilterControlDefinition] | undefined {
+  if (controls.length !== 2) {
+    return undefined;
+  }
+  const negative = controls.find((control) => control.operator === "ne");
+  const primary = controls.find((control) => control.operator === "eq" || control.operator === "contains");
+  if (!primary || !negative) {
+    return undefined;
+  }
+  return [primary, negative];
+}
+
+function activeQuickFilterControl(
+  field: string,
+  filters: readonly ListDocumentsFilter[],
+  controls: readonly [ListFilterControlDefinition, ListFilterControlDefinition]
+): ListFilterControlDefinition | undefined {
+  const activeControls = controls.filter((control) =>
+    filters.some((filter) => filter.field === field && (filter.operator ?? "eq") === control.operator)
+  );
+  if (activeControls.length > 1) {
+    return undefined;
+  }
+  return activeControls[0] ?? controls[0];
+}
+
+function renderQuickFilterChoiceControl(
+  field: FieldDefinition,
+  filters: readonly ListDocumentsFilter[],
+  controls: readonly [ListFilterControlDefinition, ListFilterControlDefinition],
+  activeControl: ListFilterControlDefinition
+): string {
+  const id = `filter-${slug(field.name)}`;
+  const label = escapeHtml(field.label ?? field.name);
+  const value = currentFilterValue(filters, field.name, activeControl.operator);
+  const operatorName = escapeHtml(`${DESK_QUICK_FILTER_OPERATOR_QUERY_PREFIX}${field.name}`);
+  const valueName = escapeHtml(`${DESK_QUICK_FILTER_VALUE_QUERY_PREFIX}${field.name}`);
+  const operatorOptions = controls
+    .map((control) =>
+      `<option value="${escapeHtml(control.operator)}"${control.operator === activeControl.operator ? " selected" : ""}>${escapeHtml(control.operatorLabel)}</option>`
+    )
+    .join("");
+  return `<fieldset class="quick-filter-choice"><legend>${label}</legend>
+    <label class="field compact" for="${id}-operator"><span>Operator</span><select id="${id}-operator" name="${operatorName}">${operatorOptions}</select></label>
+    ${renderQuickFilterChoiceValueControl(field, activeControl, id, valueName, value)}
+  </fieldset>`;
+}
+
+function renderQuickFilterChoiceValueControl(
+  field: FieldDefinition,
+  control: ListFilterControlDefinition,
+  id: string,
+  name: string,
+  value: string
+): string {
+  const common = `id="${id}-value" name="${name}"`;
+  if (field.type === "select") {
+    const options = [`<option value=""></option>`]
+      .concat(
+        (field.options ?? []).map(
+          (option) =>
+            `<option value="${escapeHtml(option)}"${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`
+        )
+      )
+      .join("");
+    return `<label class="field grow" for="${id}-value"><span>Value</span><select ${common}>${options}</select></label>`;
+  }
+  if (field.type === "boolean") {
+    const options = [
+      `<option value=""></option>`,
+      `<option value="true"${value === "true" ? " selected" : ""}>True</option>`,
+      `<option value="false"${value === "false" ? " selected" : ""}>False</option>`
+    ].join("");
+    return `<label class="field grow" for="${id}-value"><span>Value</span><select ${common}>${options}</select></label>`;
+  }
+  return `<label class="field grow" for="${id}-value"><span>Value</span><input type="${control.inputType}" ${common} value="${escapeHtml(value)}"></label>`;
+}
+
+function renderFilterLabel(field: FieldDefinition, control: ListFilterControlDefinition): string {
+  const label = field.label ?? field.name;
+  if (control.labelSuffix === "is not") {
+    return `Exclude ${label}`;
+  }
+  return control.labelSuffix ? `${label} ${control.labelSuffix}` : label;
 }
 
 function currentFilterValue(
@@ -3955,13 +4233,18 @@ function deskCss(): string {
   color-scheme: light;
   --bg: #f7f8fa;
   --surface: #ffffff;
+  --surface-muted: #f1f4f8;
   --border: #d9dee7;
+  --border-strong: #c4ccd8;
   --text: #1f2937;
   --muted: #5b6472;
   --primary: #185abc;
   --primary-dark: #123f83;
+  --success: #137333;
+  --warning: #b26a00;
   --danger: #b42318;
   --focus: #b45309;
+  --shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.04);
 }
 * { box-sizing: border-box; }
 body {
@@ -4003,6 +4286,41 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
   color: var(--text);
   font-weight: 700;
   text-decoration: none;
+}
+.mobile-shell-header {
+  display: none;
+}
+.mobile-brand {
+  margin: 0;
+}
+.mobile-nav {
+  position: relative;
+}
+.mobile-nav summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+.mobile-nav summary::-webkit-details-marker { display: none; }
+.mobile-nav nav {
+  position: absolute;
+  inset: calc(100% + 8px) 0 auto auto;
+  width: min(92vw, 320px);
+  max-height: 72vh;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: auto;
 }
 .nav-link {
   display: block;
@@ -4047,6 +4365,101 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   margin-bottom: 16px;
 }
 .toolbar .compact-field { min-width: 160px; }
+.home-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 20px;
+  align-items: end;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.home-overview h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+}
+.home-overview p {
+  margin: 0;
+}
+.home-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.metric-card {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.metric-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.metric-card strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+.home-section {
+  margin-bottom: 22px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.section-head h2 {
+  font-size: 16px;
+}
+.section-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.home-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.home-link-card {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 132px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.home-link-card:hover,
+.workspace-card:hover,
+.kanban-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px rgb(24 90 188 / 0.08);
+}
+.home-link-card p,
+.home-link-card small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.resource-kind {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
 .workspace-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -4113,6 +4526,10 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   gap: 12px;
   align-items: start;
 }
+.board-toolbar {
+  justify-content: flex-start;
+  align-items: center;
+}
 .kanban-column {
   display: grid;
   gap: 10px;
@@ -4147,11 +4564,19 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   color: var(--text);
   text-decoration: none;
 }
-.kanban-card:hover { border-color: var(--primary); }
 .kanban-card span,
 .kanban-card small {
   color: var(--muted);
   font-size: 13px;
+}
+.kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.kanban-card-meta small {
+  overflow-wrap: anywhere;
 }
 .calendar-list {
   display: grid;
@@ -4198,7 +4623,103 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.main > .panel,
+.main > form.panel,
+.main > .toolbar,
+.main > .desk-disclosure {
+  margin-bottom: 14px;
+}
+.main > .panel:last-child,
+.main > form.panel:last-child,
+.main > .toolbar:last-child,
+.main > .desk-disclosure:last-child {
+  margin-bottom: 0;
+}
 .table-wrap { overflow-x: auto; }
+.table-wrap table {
+  min-width: 620px;
+}
+.table-wrap .document-table,
+.table-wrap .responsive-table {
+  min-width: 0;
+}
+.list-toolbar {
+  justify-content: space-between;
+  align-items: center;
+}
+.toolbar-main,
+.toolbar-aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+#bulk-document-action {
+  display: none;
+}
+.record-count,
+.board-mode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.active-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 12px;
+}
+.filter-chip,
+.value-chip,
+.status-pill,
+.version-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.value-chip-high { background: #fef3c7; color: #92400e; }
+.value-chip-medium { background: #e0f2fe; color: #075985; }
+.value-chip-low { background: #ecfdf3; color: #166534; }
+.value-chip-open { background: #e0f2fe; color: #075985; }
+.value-chip-doing { background: #fef3c7; color: #92400e; }
+.value-chip-done,
+.status-pill { background: #ecfdf3; color: #166534; }
+.list-table-panel {
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.document-table th,
+.responsive-table th {
+  background: #fbfcfe;
+  white-space: nowrap;
+}
+.document-table td,
+.responsive-table td {
+  white-space: nowrap;
+}
+.document-table td:nth-child(2),
+.document-table td[data-label="Name"] {
+  min-width: 220px;
+}
+.document-table tbody tr:hover,
+.responsive-table tbody tr:hover {
+  background: #fbfcfe;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -4228,10 +4749,77 @@ tr:last-child td { border-bottom: 0; }
   border-color: #fecdca;
 }
 .form { padding: 18px; max-width: 860px; }
+.main > .form:not(.document-form):not(.timeline-assignment-form):not(.timeline-share-form):not(.timeline-follower-form):not(.timeline-tag-form) {
+  max-width: none;
+}
+.document-form {
+  max-width: 980px;
+  padding: 0;
+  overflow: clip;
+}
+.form-action-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(255 255 255 / 0.96);
+}
+.form-action-bar div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.form-action-bar span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.form-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.document-form .form-head,
+.document-form .form-section,
+.document-form > .error,
+.document-form > .actions,
+.document-form > .command-row {
+  margin-left: 18px;
+  margin-right: 18px;
+}
+.document-form .form-head {
+  margin-top: 18px;
+}
+.document-form > .actions {
+  padding-bottom: 18px;
+}
 .timeline { margin-top: 16px; max-width: 860px; }
 .presence { margin-top: 16px; max-width: 860px; padding: 18px; }
-.list-filters { max-width: none; margin-bottom: 16px; }
+.list-filters { max-width: none; }
 .list-filters .actions { justify-content: flex-start; }
+.quick-filter-choice {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.75fr) minmax(180px, 1fr);
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.quick-filter-choice legend {
+  grid-column: 1 / -1;
+  padding: 0;
+  font-weight: 650;
+}
+.quick-filter-choice .field span {
+  color: var(--muted);
+  font-size: 13px;
+}
 .compound-filter-builder {
   grid-column: 1 / -1;
   display: grid;
@@ -4245,6 +4833,10 @@ tr:last-child td { border-bottom: 0; }
   padding: 0 6px;
   color: var(--muted);
   font-weight: 700;
+}
+.nested-disclosure .compound-filter-builder {
+  border: 0;
+  padding: 14px;
 }
 .compound-filter-visual,
 .compound-filter-items {
@@ -4422,6 +5014,55 @@ tr:last-child td { border-bottom: 0; }
   text-decoration: none;
 }
 .saved-filter-link.is-active { background: #e9eef7; border-color: var(--primary); }
+.desk-disclosure {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.desk-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 52px;
+  padding: 12px 16px;
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+.desk-disclosure > summary small {
+  color: var(--muted);
+  font-weight: 600;
+}
+.desk-disclosure[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.list-filter-form {
+  max-width: none;
+  padding: 16px;
+}
+.list-import-disclosure .list-import {
+  margin: 0;
+  border: 0;
+  border-radius: 0 0 8px 8px;
+}
+.nested-disclosure {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+.nested-disclosure > summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+.nested-disclosure[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
 .form-head, .timeline-head, .attachment-head, .presence-head {
   display: flex;
   justify-content: space-between;
@@ -4542,8 +5183,25 @@ tr:last-child td { border-bottom: 0; }
 }
 .fields.cols-1 { grid-template-columns: 1fr; }
 .field { display: grid; gap: 6px; }
+.field.wide { grid-column: 1 / -1; }
 .field span { font-weight: 650; }
 .field small { color: var(--muted); }
+.checkbox-field,
+.field.checkbox {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  min-height: 44px;
+}
+.checkbox-field input,
+.field.checkbox input {
+  width: 20px;
+  min-height: 20px;
+}
+.checkbox-field small,
+.field.checkbox small {
+  grid-column: 2;
+}
 .choice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -4626,6 +5284,7 @@ textarea { min-height: 120px; resize: vertical; }
 input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); }
 .actions, .command-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 18px;
@@ -4661,15 +5320,179 @@ input[readonly], textarea[readonly] { background: #f3f4f6; color: var(--muted); 
   color: var(--danger);
 }
 @media (max-width: 760px) {
-  .sidebar {
-    position: static;
-    width: auto;
-    border-right: 0;
+  body {
+    font-size: 15px;
+  }
+  .mobile-shell-header {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .sidebar {
+    display: none;
   }
   .main { margin-left: 0; padding: 16px; }
+  .topbar {
+    margin-bottom: 14px;
+  }
+  h1 { font-size: 26px; }
+  .home-overview {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 14px;
+  }
+  .home-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-card-grid,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+  .list-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .toolbar-main,
+  .toolbar-aside {
+    align-items: stretch;
+  }
+  .toolbar-main .button,
+  .toolbar-main form,
+  .toolbar-main button {
+    flex: 1 1 auto;
+  }
+  .record-count {
+    justify-content: center;
+    width: 100%;
+  }
+  .document-table,
+  .document-table thead,
+  .document-table tbody,
+  .document-table tr,
+  .document-table th,
+  .document-table td,
+  .responsive-table,
+  .responsive-table thead,
+  .responsive-table tbody,
+  .responsive-table tr,
+  .responsive-table th,
+  .responsive-table td {
+    display: block;
+  }
+  .document-table thead,
+  .responsive-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .document-table tbody,
+  .responsive-table tbody {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+  }
+  .document-table tr,
+  .responsive-table tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .document-table td,
+  .responsive-table td {
+    display: grid;
+    grid-template-columns: minmax(88px, 0.36fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    min-width: 0;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .document-table td:last-child,
+  .responsive-table td:last-child {
+    border-bottom: 0;
+  }
+  .document-table td::before,
+  .responsive-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    overflow-wrap: normal;
+  }
+  .document-table td[data-label="Name"],
+  .responsive-table td[data-label="Name"],
+  .responsive-table td[data-label="Document"],
+  .responsive-table td[data-label="Filename"],
+  .responsive-table td[data-label="Report"],
+  .responsive-table td[data-label="Build Report"],
+  .responsive-table td[data-label="Dashboard"],
+  .responsive-table td[data-label="Kanban"],
+  .responsive-table td[data-label="Calendar"],
+  .responsive-table td[data-label="Saved Report"],
+  .responsive-table td[data-label="Job"],
+  .responsive-table td[data-label="Patch"],
+  .responsive-table td[data-label="Description"],
+  .responsive-table td[data-label="Columns"],
+  .responsive-table td[data-label="Applicable DocTypes"],
+  .responsive-table td[data-label="Recipients"],
+  .responsive-table td[data-label="Assignees"],
+  .responsive-table td[data-label="Condition"],
+  .responsive-table td[data-label="Subject"],
+  .responsive-table td[data-label="Event"],
+  .responsive-table td[data-label="Action"],
+  .responsive-table td[data-label="Actions"],
+  .responsive-table td[data-label="Result / Error"],
+  .responsive-table td[data-label="Retry"] {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .responsive-table td[data-label="Action"] .inline-action,
+  .responsive-table td[data-label="Actions"] .inline-action,
+  .responsive-table td[data-label="Action"] .data-patch-actions,
+  .responsive-table td[data-label="Actions"] .data-patch-actions {
+    width: 100%;
+  }
+  .responsive-table .data-patch-queue-action {
+    grid-template-columns: 1fr;
+  }
+  .responsive-table .data-patch-command-action {
+    flex-wrap: wrap;
+  }
+  .desk-disclosure > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .form-action-bar {
+    top: 61px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .form-action-buttons {
+    justify-content: flex-start;
+  }
+  .actions {
+    justify-content: flex-start;
+  }
+  .actions .button {
+    flex: 1 1 128px;
+  }
   .topbar, .form-head { align-items: flex-start; flex-direction: column; }
   .fields { grid-template-columns: 1fr; }
+  .quick-filter-choice { grid-template-columns: 1fr; }
   .report-formula-builder { grid-template-columns: 1fr; }
   .compound-filter-group-head,
   .compound-filter-group-actions { align-items: stretch; flex-direction: column; }

@@ -121,7 +121,18 @@ describe("Desk app", () => {
       readonly savedReports?: boolean;
     } = {}
   ) {
-    const services = createServices(["e1", "e2", "e3", "e4"]);
+    const services = createServices([
+      "e1",
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "e8",
+      "e9",
+      "e10"
+    ]);
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
@@ -551,8 +562,8 @@ describe("Desk app", () => {
     expect(html).toContain('value="launch"');
     expect(html).toContain("/desk/Note/Desk%20Launch%20Plan");
     expect(html).toContain("Desk Launch Plan");
-    expect(html).toContain("<td>Note</td>");
-    expect(html).toContain("<td>name</td>");
+    expect(html).toContain('<td data-label="DocType">Note</td>');
+    expect(html).toContain('<td data-label="Matched Field">name</td>');
     expect(html).toContain("1 matches");
   });
 
@@ -766,7 +777,7 @@ describe("Desk app", () => {
       registry,
       store,
       clock: fixedClock(now),
-      ids: deterministicIds(["dash-1", "dash-2", "dash-3"])
+      ids: deterministicIds(["dash-1", "dash-2", "dash-3", "dash-4"])
     });
     const queries = new QueryService({ registry, projections: store });
     const reports = new ReportService({ registry, queries });
@@ -792,8 +803,9 @@ describe("Desk app", () => {
     await documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "High Closed", priority: "High", workflow_state: "Closed", count: 5 })
+      data: data({ title: "High Closed", priority: "High", count: 5 })
     });
+    await documents.transition({ actor: owner, doctype: "Note", name: "High Closed", action: "close" });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -803,7 +815,7 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain("Operational KPIs");
-    expect(listHtml).toContain("<td>4</td>");
+    expect(listHtml).toContain('<td data-label="Cards">4</td>');
 
     const page = await app.request("/desk/dashboards/Operations");
     expect(page.status).toBe(200);
@@ -874,7 +886,7 @@ describe("Desk app", () => {
       registry,
       store,
       clock: fixedClock(now),
-      ids: deterministicIds(["kanban-1", "kanban-2"])
+      ids: deterministicIds(["kanban-1", "kanban-2", "kanban-3"])
     });
     const queries = new QueryService({ registry, projections: store });
     const kanbans = new KanbanService({ registry, queries });
@@ -893,8 +905,9 @@ describe("Desk app", () => {
     await documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Kanban Closed", priority: "High", workflow_state: "Closed", count: 2 })
+      data: data({ title: "Kanban Closed", priority: "High", count: 2 })
     });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Kanban Closed", action: "close" });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -908,7 +921,7 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain("Work by state");
-    expect(listHtml).toContain("<td>workflow_state</td>");
+    expect(listHtml).toContain('<td data-label="Column Field">workflow_state</td>');
 
     const page = await app.request("/desk/kanbans/Notes%20Board");
     expect(page.status).toBe(200);
@@ -1007,7 +1020,7 @@ describe("Desk app", () => {
     expect(list.status).toBe(200);
     const listHtml = await list.text();
     expect(listHtml).toContain("Events by date");
-    expect(listHtml).toContain("<td>starts_on</td>");
+    expect(listHtml).toContain('<td data-label="Start Field">starts_on</td>');
 
     const page = await app.request("/desk/calendars/Events%20Calendar?from=2026-01-01&to=2026-01-31");
     expect(page.status).toBe(200);
@@ -1069,7 +1082,7 @@ describe("Desk app", () => {
 
     expect(read.status).toBe(303);
     const readInbox = await app.request("/desk/notifications");
-    expect(await readInbox.text()).toContain("<td>read</td>");
+    expect(await readInbox.text()).toContain('<td data-label="Status">read</td>');
 
     const dismiss = await app.request(`${actionBase}/dismiss`, { method: "POST" });
 
@@ -1077,7 +1090,7 @@ describe("Desk app", () => {
     const hidden = await app.request("/desk/notifications");
     expect(await hidden.text()).toContain("No notifications.");
     const included = await app.request("/desk/notifications?include_dismissed=1");
-    expect(await included.text()).toContain("<td>yes</td>");
+    expect(await included.text()).toContain('<td data-label="Dismissed">yes</td>');
   });
 
   it("uses the notification policy error for Desk notification routes when notifications are disabled", async () => {
@@ -1378,7 +1391,7 @@ describe("Desk app", () => {
     expect(html).toContain("High Count B");
     expect(html.indexOf("High Count B")).toBeLessThan(html.indexOf("High Count A"));
     expect(html).toContain("<th>Double Count</th>");
-    expect(html).toContain("<td>14</td>");
+    expect(html).toContain('<td data-label="Double Count">14</td>');
     expect(html).toContain("<dt>Summaries</dt><dd>Records, Total count</dd>");
     expect(html).toContain("<dt>Groups</dt><dd>By priority</dd>");
     expect(html).toContain("<dt>Charts</dt><dd>Chart</dd>");
@@ -1858,7 +1871,7 @@ describe("Desk app", () => {
     expect(run.status).toBe(200);
     const html = await run.text();
     expect(html).toContain("<th>Adjusted Count</th>");
-    expect(html).toContain("<td>15</td>");
+    expect(html).toContain('<td data-label="Adjusted Count">15</td>');
   });
 
   it("builds two-level nested saved report formulas from visual Desk report-builder controls", async () => {
@@ -1928,7 +1941,7 @@ describe("Desk app", () => {
     expect(run.status).toBe(200);
     const html = await run.text();
     expect(html).toContain("<th>Deep Score</th>");
-    expect(html).toContain("<td>8</td>");
+    expect(html).toContain('<td data-label="Deep Score">8</td>');
   });
 
   it("builds core-depth saved report formulas from visual Desk report-builder control names", async () => {
@@ -1978,7 +1991,7 @@ describe("Desk app", () => {
     expect(run.status).toBe(200);
     const html = await run.text();
     expect(html).toContain("<th>Core Depth Score</th>");
-    expect(html).toContain("<td>20</td>");
+    expect(html).toContain('<td data-label="Core Depth Score">20</td>');
   });
 
   it("rejects invalid Desk report-builder formula literal operands without persisting them", async () => {
@@ -3572,8 +3585,9 @@ describe("Desk app", () => {
     await services.documents.create({
       actor: owner,
       doctype: "Note",
-      data: data({ title: "Desk Closed High", priority: "High", workflow_state: "Closed", body: "Closed", count: 3 })
+      data: data({ title: "Desk Closed High", priority: "High", body: "Closed", count: 3 })
     });
+    await services.documents.transition({ actor: owner, doctype: "Note", name: "Desk Closed High", action: "close" });
     await services.documents.create({
       actor: owner,
       doctype: "Note",
@@ -3589,10 +3603,16 @@ describe("Desk app", () => {
     expect(html).not.toContain("Desk Closed High");
     expect(html).not.toContain("Hidden body");
     expect(html).toContain("<th>title</th><th>priority</th><th>workflow_state</th>");
-    expect(html).toContain('name="filter_title__contains"');
-    expect(html).toContain('name="filter_title__ne"');
-    expect(html).toContain('name="filter_priority"');
-    expect(html).toContain('name="filter_priority__ne"');
+    expect(html).toContain("<legend>title</legend>");
+    expect(html).toContain('name="quick_filter_operator:title"');
+    expect(html).toContain('name="quick_filter_value:title"');
+    expect(html).toContain('<option value="contains" selected>contains</option><option value="ne">is not</option>');
+    expect(html).toContain("<legend>priority</legend>");
+    expect(html).toContain('name="quick_filter_operator:priority"');
+    expect(html).toContain('name="quick_filter_value:priority"');
+    expect(html).toContain("<legend>workflow_state</legend>");
+    expect(html).toContain('name="quick_filter_operator:workflow_state"');
+    expect(html).toContain('name="quick_filter_value:workflow_state"');
     expect(html).toContain('name="filter_count__gte"');
     expect(html).toContain('name="filter_count__lte"');
     expect(html).toContain('<option value="High" selected>High</option>');
@@ -3614,8 +3634,18 @@ describe("Desk app", () => {
     expect(advancedHtml).not.toContain("Desk Low");
     expect(advancedHtml).not.toContain("Desk Closed High");
     expect(advancedHtml).toContain('<option value="Low" selected>Low</option>');
+    expect(advancedHtml).toContain('<option value="eq">equals</option><option value="ne" selected>is not</option>');
     expect(advancedHtml).toContain('name="filter_count__gte" value="2"');
     expect(advancedHtml).toContain('name="filter_count__lte" value="8"');
+
+    const quickExcluded = await app.request(
+      "/desk/Note?quick_filter_operator%3Apriority=ne&quick_filter_value%3Apriority=Low&filter_count__gte=2&filter_count__lte=8"
+    );
+    expect(quickExcluded.status).toBe(200);
+    const quickExcludedHtml = await quickExcluded.text();
+    expect(quickExcludedHtml).toContain("Desk High");
+    expect(quickExcludedHtml).not.toContain("Desk Low");
+    expect(quickExcludedHtml).not.toContain("Desk Closed High");
 
     const compoundExpression = encodeURIComponent(JSON.stringify({
       kind: "group",
@@ -3747,7 +3777,7 @@ describe("Desk app", () => {
     await expect(csv.text()).resolves.toBe([
       "Name,title,priority,workflow_state,Version,Updated",
       "Desk Low,Desk Low,Low,Open,1,2026-01-01T00:00:00.000Z",
-      "Desk Closed High,Desk Closed High,High,Closed,1,2026-01-01T00:00:00.000Z",
+      "Desk Closed High,Desk Closed High,High,Closed,2,2026-01-01T00:00:00.000Z",
       "Desk Empty Body,Desk Empty Body,Low,Open,1,2026-01-01T00:00:00.000Z",
       "Desk High,Desk High,High,Open,1,2026-01-01T00:00:00.000Z"
     ].join("\n"));
@@ -7142,7 +7172,7 @@ describe("Desk app", () => {
     const createdHtml = await afterCreate.text();
     expect(createdHtml).toContain("runtime-daily");
     expect(createdHtml).toContain("15 4 * * *");
-    expect(createdHtml).toContain("<td>runtime</td>");
+    expect(createdHtml).toContain('<td data-label="Source">runtime</td>');
     expect(createdHtml).toContain('formaction="/desk/admin/jobs/schedules/runtime-daily/delete"');
 
     const updated = await app.request("/desk/admin/jobs/schedules", {
@@ -7159,7 +7189,7 @@ describe("Desk app", () => {
     const afterUpdate = await app.request("/desk/admin/jobs/schedules");
     const updatedHtml = await afterUpdate.text();
     expect(updatedHtml).toContain("30 5 * * *");
-    expect(updatedHtml).toContain("<td>no</td>");
+    expect(updatedHtml).toContain('<td data-label="Enabled">no</td>');
 
     const deleted = await app.request("/desk/admin/jobs/schedules/runtime-daily/delete", {
       method: "POST",
@@ -8017,7 +8047,7 @@ describe("Desk app", () => {
     });
     expect(command.status).toBe(303);
     await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
-      data: { workflow_state: "Closed" }
+      data: { body: "Archived" }
     });
     await expect(services.events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
       expect.anything(),
@@ -8055,6 +8085,28 @@ describe("Desk app", () => {
     const closed = await app.request("/desk/Note/My%20Note");
     expect(closed.status).toBe(200);
     await expect(closed.text()).resolves.not.toContain("/transition/close");
+  });
+
+  it("ignores workflow state fields on generated Desk form saves", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data() });
+
+    const saved = await app.request("/desk/Note/My%20Note", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "My Note",
+        body: "Edited through Desk",
+        workflow_state: "Closed",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+
+    expect(saved.status).toBe(303);
+    await expect(services.queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
+      version: 2,
+      data: { body: "Edited through Desk", workflow_state: "Open" }
+    });
   });
 
   it("rejects stale generated form posts instead of appending over newer events", async () => {
