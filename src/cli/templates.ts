@@ -1,4 +1,5 @@
 import {
+  D1_AUTOMATION_RUN_MIGRATION_ID,
   D1_CORE_MIGRATION_ID,
   D1_DATA_PATCH_MIGRATION_ID,
   D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
@@ -66,8 +67,9 @@ export function starterProjectFiles(input: StarterProjectTemplateInput): readonl
       path: "migrations/0005_cf_frappe_data_patch_rollbacks.sql",
       contents: starterMigrationSql(D1_DATA_PATCH_ROLLBACK_MIGRATION_ID)
     },
-    { path: "migrations/0006_doctype_file_v1_indexes.sql", contents: starterMigrationSql(STARTER_FILE_INDEX_MIGRATION_ID) },
-    { path: "migrations/0007_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
+    { path: "migrations/0006_cf_frappe_automation_runs.sql", contents: starterMigrationSql(D1_AUTOMATION_RUN_MIGRATION_ID) },
+    { path: "migrations/0007_doctype_file_v1_indexes.sql", contents: starterMigrationSql(STARTER_FILE_INDEX_MIGRATION_ID) },
+    { path: "migrations/0008_doctype_task_v1_indexes.sql", contents: starterMigrationSql(STARTER_TASK_INDEX_MIGRATION_ID) }
   ];
 }
 

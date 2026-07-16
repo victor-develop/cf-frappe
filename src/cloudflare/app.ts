@@ -1,4 +1,9 @@
 import { AuditService } from "../application/audit-service.js";
+import {
+  AUTOMATION_RUN_DRAIN_JOB_NAME,
+  AutomationRunConsumer
+} from "../application/automation-run-consumer.js";
+import { AutomationRunService } from "../application/automation-run-service.js";
 import { AssignmentRuleService } from "../application/assignment-rule-service.js";
 import { CalendarService } from "../application/calendar-service.js";
 import { CustomFieldService } from "../application/custom-field-service.js";
@@ -54,7 +59,7 @@ import { RoleCatalogUserRoleValidator } from "../application/user-role-validator
 import type { DocumentCommandExecutor } from "../application/document-service.js";
 import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
-import { D1DataPatchLog, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
+import { D1DataPatchLog, D1DocumentStore, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
 import {
   cloudflareAccessAccountSyncActorResolver,
@@ -118,6 +123,8 @@ export interface CloudFrappeRuntimeServices {
   readonly notifications: UserNotificationService;
   readonly notificationRules: NotificationRuleService;
   readonly assignmentRules: AssignmentRuleService;
+  readonly automationRuns: AutomationRunService;
+  readonly automationRunConsumer: AutomationRunConsumer;
   readonly userProfiles?: UserProfileService;
   readonly userPermissions: UserPermissionService;
   readonly customFields: CustomFieldService;
@@ -348,6 +355,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   }
   const projections = new D1ProjectionStore(env.DB);
   const events = new D1EventStore(env.DB);
+  const automationRunStore = new D1DocumentStore(env.DB);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -494,6 +502,16 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         ...(deliveryOutboxOptions.retry === undefined ? {} : { retry: deliveryOutboxOptions.retry })
       })
     : undefined;
+  const automationRuns = new AutomationRunService({
+    store: automationRunStore,
+    projections
+  });
+  const automationRunConsumer = new AutomationRunConsumer({
+    runs: automationRuns,
+    documents,
+    events,
+    projections
+  });
   const savedReports = new SavedReportService({ registry: options.registry, events, reports });
   const baseServices: Omit<CloudFrappeRuntimeServices, "files"> = {
     registry: options.registry,
@@ -506,6 +524,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     notifications,
     notificationRules,
     assignmentRules,
+    automationRuns,
+    automationRunConsumer,
     ...(userProfiles === undefined ? {} : { userProfiles }),
     userPermissions,
     customFields,
@@ -569,6 +589,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     documentDeliveryOutboxConsumer !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME);
+  const automationRunDrainQueueEnabled =
+    jobOptions !== undefined &&
+    jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
@@ -581,7 +604,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         jobExecutionLog,
         additionalJobResources<TJobResources>({
           ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
-          ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {})
+          ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
+          ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
         })
       )
     : undefined;

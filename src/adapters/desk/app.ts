@@ -21,6 +21,7 @@ import type {
 } from "../../application/data-patch-service.js";
 import type { DocumentShareService } from "../../application/document-share-service.js";
 import type { DocumentCommandExecutor } from "../../application/document-service.js";
+import { ensureDocumentHistoryServiceAvailable } from "../../application/assigned-documents-policy.js";
 import type { DocumentHistoryService } from "../../application/document-history-service.js";
 import {
   canImportDocuments,
@@ -186,6 +187,7 @@ import {
   renderFieldPropertyAdmin,
   renderDataPatchAdmin,
   renderCustomFieldAdmin,
+  renderAssignedToMePage,
   renderDocumentPresencePanel,
   renderDocumentTimeline,
   renderFormView,
@@ -355,7 +357,42 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         workspaces,
         showNotifications: options.notifications !== undefined,
         showFiles: options.files !== undefined,
-        body: renderDeskHome(doctypes, reports, workspaces, dashboards, kanbans, calendars)
+        body: renderDeskHome(doctypes, reports, workspaces, dashboards, kanbans, calendars, {
+          showAssignments: options.timeline !== undefined
+        })
+      })
+    );
+  });
+
+  app.get("/desk/assigned-to-me", async (c) => {
+    const history = requireDocumentHistory(options);
+    const actor = await options.actor(c.req.raw);
+    const url = new URL(c.req.url);
+    const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
+    const doctype = url.searchParams.get("doctype") ?? undefined;
+    const result = await history.listAssignedDocuments(actor, {
+      ...(limit === undefined ? {} : { limit }),
+      ...(doctype === undefined ? {} : { doctype })
+    });
+    const doctypes = await listDeskDoctypes(options, actor);
+    const reports = listReports(options, actor);
+    const dashboards = await listDashboards(options, actor);
+    const kanbans = await listKanbans(options, actor);
+    const calendars = await listCalendars(options, actor);
+    const workspaces = listWorkspaces(options, actor);
+    return html(
+      renderDeskLayoutFor(options, {
+        title: "Assigned to Me",
+        adminLinks: adminLinksFor(options, actor),
+        doctypes,
+        reports,
+        dashboards,
+        kanbans,
+        calendars,
+        workspaces,
+        activeAssignments: true,
+        showAssignments: true,
+        body: renderAssignedToMePage(result, doctypes)
       })
     );
   });
@@ -3175,11 +3212,17 @@ function requireNotifications(options: DeskAppOptions): UserNotificationService 
   return options.notifications;
 }
 
+function requireDocumentHistory(options: DeskAppOptions): DocumentHistoryService {
+  ensureDocumentHistoryServiceAvailable(options.timeline);
+  return options.timeline;
+}
+
 function renderDeskLayoutFor(options: DeskAppOptions, layout: DeskLayoutOptions): string {
   return renderDeskLayout({
     ...layout,
     showNotifications: layout.showNotifications ?? options.notifications !== undefined,
-    showFiles: layout.showFiles ?? options.files !== undefined
+    showFiles: layout.showFiles ?? options.files !== undefined,
+    showAssignments: layout.showAssignments ?? options.timeline !== undefined
   });
 }
 

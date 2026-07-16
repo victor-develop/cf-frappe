@@ -13,6 +13,7 @@ import type {
   WorkflowDefinition
 } from "./types.js";
 import { normalizeAssignmentRules } from "./assignment-rules.js";
+import { normalizeAutomationRules } from "./automation-rules.js";
 import { FrameworkError } from "./errors.js";
 import { assertFormViewDefinition } from "./form-view.js";
 import { cloneJsonValue } from "./json.js";
@@ -56,6 +57,7 @@ export function defineDocType<TData extends DocumentData>(
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition, definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
+  const automationRules = normalizeAutomationRules(definition, definition.automationRules);
   const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
   const workflow = definition.workflow ? freezeWorkflowDefinition(definition.workflow) : undefined;
   const commands = definition.commands ? freezeCommandDefinitions(definition.commands) : undefined;
@@ -72,7 +74,8 @@ export function defineDocType<TData extends DocumentData>(
     ...(commands ? { commands } : {}),
     ...(indexes ? { indexes } : {}),
     ...(retiredIndexes ? { retiredIndexes } : {}),
-    ...(assignmentRules ? { assignmentRules } : {})
+    ...(assignmentRules ? { assignmentRules } : {}),
+    ...(automationRules ? { automationRules } : {})
   });
 }
 

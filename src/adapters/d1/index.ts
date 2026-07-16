@@ -1,4 +1,5 @@
 export * from "./audit-event-query.js";
+export * from "./automation-run-index.js";
 export * from "./data-patch-log.js";
 export * from "./document-store.js";
 export * from "./event-store.js";

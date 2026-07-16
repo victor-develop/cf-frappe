@@ -53,8 +53,9 @@ describe("cf-frappe CLI scaffold", () => {
       "migrations/0003_cf_frappe_job_execution_messages.sql",
       "migrations/0004_cf_frappe_data_patches.sql",
       "migrations/0005_cf_frappe_data_patch_rollbacks.sql",
-      "migrations/0006_doctype_file_v1_indexes.sql",
-      "migrations/0007_doctype_task_v1_indexes.sql"
+      "migrations/0006_cf_frappe_automation_runs.sql",
+      "migrations/0007_doctype_file_v1_indexes.sql",
+      "migrations/0008_doctype_task_v1_indexes.sql"
     ]);
 
     const packageJson = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as {
@@ -420,25 +421,31 @@ describe("cf-frappe CLI scaffold", () => {
     await expect(readFile(join(target, "migrations/0005_cf_frappe_data_patch_rollbacks.sql"), "utf8")).resolves.toContain(
       "rollback_pending"
     );
-    await expect(readFile(join(target, "migrations/0006_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0006_cf_frappe_automation_runs.sql"), "utf8")).resolves.toContain(
+      "CREATE TABLE IF NOT EXISTS cf_frappe_automation_runs"
+    );
+    await expect(readFile(join(target, "migrations/0006_cf_frappe_automation_runs.sql"), "utf8")).resolves.toContain(
+      "idx_cf_frappe_automation_runs_claim"
+    );
+    await expect(readFile(join(target, "migrations/0007_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
       "-- doctype_file_v1_indexes: File projection indexes"
     );
-    await expect(readFile(join(target, "migrations/0006_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0007_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
       "attached_to_doctype"
     );
-    await expect(readFile(join(target, "migrations/0006_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0007_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
       "uploaded_by"
     );
-    await expect(readFile(join(target, "migrations/0006_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0007_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
       "is_private"
     );
-    await expect(readFile(join(target, "migrations/0006_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0007_doctype_file_v1_indexes.sql"), "utf8")).resolves.toContain(
       "-- checksum: fnv1a32:"
     );
-    await expect(readFile(join(target, "migrations/0007_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0008_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
       "idx_cf_frappe_documents_task_workflow_state_priority_ea45bef5"
     );
-    await expect(readFile(join(target, "migrations/0007_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
+    await expect(readFile(join(target, "migrations/0008_doctype_task_v1_indexes.sql"), "utf8")).resolves.toContain(
       "-- checksum: fnv1a32:"
     );
   });
@@ -1313,8 +1320,8 @@ if (seededAfterRollback.data.length !== 0) {
 
     expect(first).toBe(0);
     expect(stdout.text()).toContain("Planned D1 migrations from src/apps/index.ts into migrations");
-    expect(stdout.text()).toContain("Wrote migrations/0008_doctype_customer_v2_indexes.sql (1 statements)");
-    const generated = await readFile(join(target, "migrations/0008_doctype_customer_v2_indexes.sql"), "utf8");
+    expect(stdout.text()).toContain("Wrote migrations/0009_doctype_customer_v2_indexes.sql (1 statements)");
+    const generated = await readFile(join(target, "migrations/0009_doctype_customer_v2_indexes.sql"), "utf8");
     expect(generated).toContain("-- doctype_customer_v2_indexes: Customer projection indexes");
     expect(generated).toContain("-- checksum: fnv1a32:");
     expect(generated).toContain("WHERE doctype = 'Customer';");
@@ -1396,7 +1403,7 @@ if (seededAfterRollback.data.length !== 0) {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr.text()).toContain("Existing migration file '0007_doctype_task_v1_indexes.sql' has checksum");
+    expect(stderr.text()).toContain("Existing migration file '0008_doctype_task_v1_indexes.sql' has checksum");
     expect(stderr.text()).toContain("Bump the DocType version for a new migration");
   });
 
@@ -1422,7 +1429,8 @@ if (seededAfterRollback.data.length !== 0) {
     expect(exitCode).toBe(0);
     expect(stdout.text()).toContain("Wrote fresh-migrations/0001_cf_frappe_core.sql");
     expect(stdout.text()).toContain("Wrote fresh-migrations/0005_cf_frappe_data_patch_rollbacks.sql");
-    expect(stdout.text()).toContain("Wrote fresh-migrations/0006_doctype_task_v1_indexes.sql");
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0006_cf_frappe_automation_runs.sql");
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0007_doctype_task_v1_indexes.sql");
     await expect(readFile(join(tempRoot, "fresh-migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
       "-- 0001_cf_frappe_core: cf-frappe event/projection tables"
     );
@@ -1441,11 +1449,12 @@ if (seededAfterRollback.data.length !== 0) {
       tsxVersion: "^4.20.6",
       wranglerVersion: "^4.103.0"
     });
-    const taskMigration = await readFile(join(target, "migrations/0007_doctype_task_v1_indexes.sql"), "utf8");
+    const taskMigration = await readFile(join(target, "migrations/0008_doctype_task_v1_indexes.sql"), "utf8");
     await rm(join(target, "migrations/0004_cf_frappe_data_patches.sql"));
     await rm(join(target, "migrations/0005_cf_frappe_data_patch_rollbacks.sql"));
-    await rm(join(target, "migrations/0006_doctype_file_v1_indexes.sql"));
-    await rm(join(target, "migrations/0007_doctype_task_v1_indexes.sql"));
+    await rm(join(target, "migrations/0006_cf_frappe_automation_runs.sql"));
+    await rm(join(target, "migrations/0007_doctype_file_v1_indexes.sql"));
+    await rm(join(target, "migrations/0008_doctype_task_v1_indexes.sql"));
     await writeFile(join(target, "migrations/0004_doctype_task_v1_indexes.sql"), taskMigration);
     const registry = createRegistry({
       doctypes: [
@@ -1472,16 +1481,23 @@ if (seededAfterRollback.data.length !== 0) {
     expect(first).toBe(0);
     expect(stdout.text()).toContain("Wrote migrations/0005_cf_frappe_data_patches.sql");
     expect(stdout.text()).toContain("Wrote migrations/0006_cf_frappe_data_patch_rollbacks.sql");
+    expect(stdout.text()).toContain("Wrote migrations/0007_cf_frappe_automation_runs.sql");
     await expect(readFile(join(target, "migrations/0005_cf_frappe_data_patches.sql"), "utf8")).resolves.toContain(
       "-- 0004_cf_frappe_data_patches: cf-frappe data patch journal"
     );
     await expect(readFile(join(target, "migrations/0006_cf_frappe_data_patch_rollbacks.sql"), "utf8")).resolves.toContain(
       "-- 0005_cf_frappe_data_patch_rollbacks: cf-frappe data patch rollback journal"
     );
+    await expect(readFile(join(target, "migrations/0007_cf_frappe_automation_runs.sql"), "utf8")).resolves.toContain(
+      "-- 0006_cf_frappe_automation_runs: cf-frappe automation run claim index"
+    );
     await expect(readFile(join(target, "migrations/0005_0004_cf_frappe_data_patches.sql"), "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
     await expect(readFile(join(target, "migrations/0006_0005_cf_frappe_data_patch_rollbacks.sql"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(readFile(join(target, "migrations/0007_0006_cf_frappe_automation_runs.sql"), "utf8")).rejects.toMatchObject({
       code: "ENOENT"
     });
 

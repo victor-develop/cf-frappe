@@ -1,4 +1,6 @@
 import {
+  assignedDocumentMatchesAssignee,
+  compareAssignedDocumentSummaries,
   documentHistoryAssignmentsResult,
   documentHistoryEventsAtVersion,
   documentHistoryFollowersResult,
@@ -7,10 +9,15 @@ import {
   documentTimelineEventChanges,
   documentTimelineBaselineEventCount,
   documentTimelineSummary,
+  ensureDocumentHistoryServiceAvailable,
+  normalizeAssignedDocumentsAssignee,
+  normalizeAssignedDocumentsDoctype,
+  normalizeAssignedDocumentsLimit,
   normalizeDocumentTimelineBaselineLimit,
   normalizeDocumentTimelineBeforeSequence,
   normalizeDocumentTimelineLimit,
   selectDocumentTimelinePage,
+  type AssignedDocumentSummary,
   type DocumentEventPayload,
   type DocumentSnapshot,
   type DomainEvent
@@ -62,6 +69,47 @@ describe("document history policy", () => {
     expect(normalizeDocumentTimelineBaselineLimit(5)).toBe(5);
     expect(() => normalizeDocumentTimelineBaselineLimit(-1))
       .toThrow("Timeline diff baseline event limit must be a non-negative integer");
+  });
+
+  it("normalizes assigned-document filters and availability", () => {
+    expect(normalizeAssignedDocumentsLimit(undefined)).toBe(50);
+    expect(normalizeAssignedDocumentsLimit(500)).toBe(200);
+    expect(normalizeAssignedDocumentsLimit(3)).toBe(3);
+    expect(() => normalizeAssignedDocumentsLimit(0))
+      .toThrow("Assigned documents limit must be a positive integer");
+    expect(() => normalizeAssignedDocumentsLimit(1.5))
+      .toThrow("Assigned documents limit must be a positive integer");
+
+    expect(normalizeAssignedDocumentsAssignee(undefined, " owner@example.com ")).toBe("owner@example.com");
+    expect(normalizeAssignedDocumentsAssignee(" support@example.com ", "owner@example.com")).toBe("support@example.com");
+    expect(() => normalizeAssignedDocumentsAssignee("   ", "owner@example.com"))
+      .toThrow("Assigned documents assignee is required");
+
+    expect(normalizeAssignedDocumentsDoctype(undefined)).toBeUndefined();
+    expect(normalizeAssignedDocumentsDoctype("   ")).toBeUndefined();
+    expect(normalizeAssignedDocumentsDoctype(" Note ")).toBe("Note");
+
+    expect(() => ensureDocumentHistoryServiceAvailable(undefined)).toThrow("Assignments are not enabled");
+    expect(() => ensureDocumentHistoryServiceAvailable({ listAssignedDocuments: async () => ({}) })).not.toThrow();
+  });
+
+  it("matches and sorts assigned document summaries", () => {
+    expect(assignedDocumentMatchesAssignee(["amy@example.com"], "amy@example.com")).toBe(true);
+    expect(assignedDocumentMatchesAssignee(["amy@example.com"], "zoe@example.com")).toBe(false);
+
+    const sorted = [
+      assigned("Task", "B", "Beta", "2026-01-02T00:00:00.000Z"),
+      assigned("Note", "Z", "Zeta", "2026-01-02T00:00:00.000Z"),
+      assigned("Note", "A", "Alpha", "2026-01-02T00:00:00.000Z"),
+      assigned("Note", "Old", "Old", "2026-01-01T00:00:00.000Z")
+    ].sort(compareAssignedDocumentSummaries);
+
+    expect(sorted.map((item) => `${item.updatedAt}:${item.doctype}:${item.label}:${item.name}`)).toEqual([
+      "2026-01-02T00:00:00.000Z:Note:Alpha:A",
+      "2026-01-02T00:00:00.000Z:Note:Zeta:Z",
+      "2026-01-02T00:00:00.000Z:Task:Beta:B",
+      "2026-01-01T00:00:00.000Z:Note:Old:Old"
+    ]);
   });
 
   it("calculates baseline event counts and rejects exhausted baseline budgets", () => {
@@ -242,5 +290,24 @@ function snapshot(data: DocumentSnapshot["data"], docstatus: DocumentSnapshot["d
     data,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+}
+
+function assigned(
+  doctype: AssignedDocumentSummary["doctype"],
+  name: AssignedDocumentSummary["name"],
+  label: string,
+  updatedAt: string
+): AssignedDocumentSummary {
+  return {
+    tenantId: "acme",
+    doctype,
+    name,
+    label,
+    route: `/desk/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`,
+    version: 1,
+    docstatus: "draft",
+    updatedAt,
+    assignees: ["amy@example.com"]
   };
 }

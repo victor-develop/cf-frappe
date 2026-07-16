@@ -77,6 +77,10 @@ export function documentDeliveryOutboxStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__DocumentDeliveryOutbox", "deliveries");
 }
 
+export function automationRunStream(tenantId: TenantId, runId: string): StreamName {
+  return documentStream(tenantId, "__AutomationRuns", runId);
+}
+
 export function roleCatalogStream(tenantId: TenantId): StreamName {
   return documentStream(tenantId, "__Roles", "catalog");
 }

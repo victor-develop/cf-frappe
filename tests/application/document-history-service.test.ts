@@ -1,5 +1,5 @@
-import { DocumentHistoryService, type DomainEvent } from "../../src";
-import { createServices, data, owner } from "../helpers";
+import { DocumentHistoryService, type Actor, type DocumentSnapshot, type DomainEvent } from "../../src";
+import { createServices, data, manager, noteDocType, owner } from "../helpers";
 
 describe("DocumentHistoryService", () => {
   it("derives chronological timeline entries from the document event stream", async () => {
@@ -184,6 +184,150 @@ describe("DocumentHistoryService", () => {
       name: "Assigned Note",
       version: 4,
       assignees: ["amy@example.com"]
+    });
+  });
+
+  it("lists current assignments for the actor with deterministic ordering and limits", async () => {
+    const { documents, history } = createServices([
+      "create-a",
+      "create-c",
+      "create-removed",
+      "assign-a",
+      "assign-c",
+      "assign-removed",
+      "unassign-removed"
+    ]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned A" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned C" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Removed" }) });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Assigned A", assignee: owner.id });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Assigned C", assignee: owner.id });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Assigned Removed", assignee: owner.id });
+    await documents.unassign({ actor: owner, doctype: "Note", name: "Assigned Removed", assignee: owner.id });
+
+    const result = await history.listAssignedDocuments(owner, { limit: 1 });
+
+    expect(result).toMatchObject({
+      tenantId: "acme",
+      assignee: owner.id,
+      limit: 1,
+      total: 2,
+      filters: {}
+    });
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toMatchObject({
+      doctype: "Note",
+      name: "Assigned A",
+      label: "Assigned A",
+      route: "/desk/Note/Assigned%20A",
+      assignees: [owner.id]
+    });
+  });
+
+  it("supports explicit assignee and DocType filters when listing assignments", async () => {
+    const { documents, history } = createServices(["create-owner", "create-support", "assign-owner", "assign-support"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Owner Follow Up" }) });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Support Follow Up" }) });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Owner Follow Up", assignee: owner.id });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Support Follow Up", assignee: "support@example.com" });
+
+    const result = await history.listAssignedDocuments(owner, {
+      assignee: " support@example.com ",
+      doctype: " Note "
+    });
+
+    expect(result).toMatchObject({
+      assignee: "support@example.com",
+      total: 1,
+      filters: { doctype: "Note" }
+    });
+    expect(result.data.map((item) => item.name)).toEqual(["Support Follow Up"]);
+  });
+
+  it("uses the default tenant when listing assignments for an actor without a tenant", async () => {
+    const { history } = createServices();
+    const tenantlessActor: Actor = { id: owner.id, roles: owner.roles };
+
+    await expect(history.listAssignedDocuments(tenantlessActor)).resolves.toMatchObject({
+      tenantId: "default",
+      assignee: owner.id,
+      total: 0
+    });
+  });
+
+  it("only exposes assigned documents that the actor can read", async () => {
+    const support = { ...owner, id: "support@example.com" };
+    const { documents, history } = createServices(["create-private", "assign-private", "share-private"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Private Assignment" }) });
+    await documents.assign({ actor: owner, doctype: "Note", name: "Private Assignment", assignee: support.id });
+
+    await expect(history.listAssignedDocuments(support)).resolves.toMatchObject({
+      assignee: support.id,
+      total: 0,
+      data: []
+    });
+
+    await documents.share({
+      actor: owner,
+      doctype: "Note",
+      name: "Private Assignment",
+      userId: support.id,
+      permissions: ["read"]
+    });
+
+    await expect(history.listAssignedDocuments(support)).resolves.toMatchObject({
+      assignee: support.id,
+      total: 1,
+      data: [expect.objectContaining({ name: "Private Assignment" })]
+    });
+  });
+
+  it("skips deleted documents when listing assignments", async () => {
+    const { documents, history } = createServices(["create-deleted", "assign-deleted", "delete-deleted"]);
+    await documents.create({ actor: manager, doctype: "Note", data: data({ title: "Deleted Assignment" }) });
+    await documents.assign({ actor: manager, doctype: "Note", name: "Deleted Assignment", assignee: manager.id });
+    await documents.delete({ actor: manager, doctype: "Note", name: "Deleted Assignment" });
+
+    await expect(history.listAssignedDocuments(manager)).resolves.toMatchObject({
+      assignee: manager.id,
+      total: 0,
+      data: []
+    });
+  });
+
+  it("continues paginated assignment scans and ignores deleted projections", async () => {
+    const deleted = assignedSnapshot("Deleted Assignment", "deleted");
+    const visible = assignedSnapshot("Visible Assignment", "draft");
+    const offsets: number[] = [];
+    const history = new DocumentHistoryService({
+      events: {
+        readStream: async (stream) =>
+          stream.endsWith(":Visible%20Assignment")
+            ? [assignmentEvent(visible, "amy@example.com")]
+            : []
+      },
+      queries: {
+        getDocument: async () => {
+          throw new Error("not used");
+        },
+        getEffectiveMeta: async () => noteDocType,
+        listEffectiveDoctypes: async () => [noteDocType],
+        listDocuments: async (_actor, _doctype, options = {}) => {
+          const offset = options.offset ?? 0;
+          offsets.push(offset);
+          return offset === 0
+            ? { data: [deleted], limit: 100, offset: 0, total: 101 }
+            : { data: [visible], limit: 100, offset: 100, total: 101 };
+        }
+      }
+    });
+
+    const result = await history.listAssignedDocuments(owner, { assignee: "amy@example.com" });
+
+    expect(offsets).toEqual([0, 100]);
+    expect(result).toMatchObject({
+      total: 1,
+      data: [expect.objectContaining({ name: "Visible Assignment" })]
     });
   });
 
@@ -398,3 +542,32 @@ describe("DocumentHistoryService", () => {
     });
   });
 });
+
+function assignedSnapshot(name: string, docstatus: DocumentSnapshot["docstatus"]): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "Note",
+    name,
+    version: 1,
+    docstatus,
+    data: data({ title: name }),
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+}
+
+function assignmentEvent(document: DocumentSnapshot, assignee: string): DomainEvent {
+  return {
+    id: `evt-${document.name}`,
+    stream: `acme:Note:${encodeURIComponent(document.name)}`,
+    sequence: 1,
+    type: "NoteAssigned",
+    tenantId: document.tenantId,
+    doctype: document.doctype,
+    documentName: document.name,
+    actorId: owner.id,
+    occurredAt: "2026-01-01T00:00:00.000Z",
+    payload: { kind: "DocumentAssigned", assigneeId: assignee },
+    metadata: {}
+  };
+}

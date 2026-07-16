@@ -35,6 +35,7 @@
     "prepack": "npm run build",
     "lint": "npm run typecheck",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run test && npm run build",
     "dev": "wrangler dev --persist-to=.wrangler/state",
@@ -57,6 +58,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260621.1",
     "@types/node": "^26.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "typescript": "^5.7.2",
     "vitest": "^4.1.9",
     "wrangler": "^4.103.0"

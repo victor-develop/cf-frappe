@@ -1093,6 +1093,63 @@ describe("Desk app", () => {
     expect(await included.text()).toContain('<td data-label="Dismissed">yes</td>');
   });
 
+  it("renders assigned-to-me navigation and a filtered assignment workspace", async () => {
+    const { app, services } = makeDesk();
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Alpha" }) });
+    await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Assigned Beta" }) });
+    await services.documents.assign({ actor: owner, doctype: "Note", name: "Assigned Alpha", assignee: owner.id });
+    await services.documents.assign({ actor: owner, doctype: "Note", name: "Assigned Beta", assignee: owner.id });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('href="/desk/assigned-to-me"');
+    expect(homeHtml).toContain("Assigned to Me");
+
+    const response = await app.request("/desk/assigned-to-me?doctype=Note&limit=1");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<a class="nav-link is-active" href="/desk/assigned-to-me">Assigned to Me</a>');
+    expect(html).toContain('action="/desk/assigned-to-me"');
+    expect(html).toContain('<option value="Note" selected>Note</option>');
+    expect(html).toContain('value="1"');
+    expect(html).toContain("Assigned to owner@example.com");
+    expect(html).toContain("1 of 2 assigned");
+    expect(html).toContain('href="/desk/Note/Assigned%20Alpha"');
+    expect(html).not.toContain('href="/desk/Note/Assigned%20Beta"');
+  });
+
+  it("renders an empty assigned-to-me workspace", async () => {
+    const { app } = makeDesk({ ...owner, id: "support@example.com" });
+
+    const response = await app.request("/desk/assigned-to-me");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Assigned to support@example.com");
+    expect(html).toContain("0 of 0 assigned");
+    expect(html).toContain("Nothing assigned to you.");
+  });
+
+  it("uses the document history policy error for assigned-to-me routes when timeline is disabled", async () => {
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      actor: () => owner
+    });
+
+    const home = await app.request("/desk");
+    expect(home.status).toBe(200);
+    await expect(home.text()).resolves.not.toContain('href="/desk/assigned-to-me"');
+
+    const response = await app.request("/desk/assigned-to-me");
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toContain("Assignments are not enabled");
+  });
+
   it("uses the notification policy error for Desk notification routes when notifications are disabled", async () => {
     const services = createServices();
     const app = createDeskApp({

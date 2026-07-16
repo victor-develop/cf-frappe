@@ -39,6 +39,10 @@ import {
   type AtomicUniqueReleaseWrite,
   type AtomicUniqueReservationWrite
 } from "./document-atomic-commit-policy.js";
+import {
+  AutomationRunPlanner,
+  type AutomationRunCommitPlan
+} from "./automation-run-service.js";
 import { isDocumentConflictError } from "./concurrency-policy.js";
 import {
   canReadLinkedDocumentTarget,
@@ -186,6 +190,7 @@ export interface DocumentServiceOptions {
   readonly documentShares?: DocumentShareProvider;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
+  readonly automationRuns?: AutomationRunPlanner;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
   readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
 }
@@ -533,6 +538,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly doctypeResolver: DocumentServiceDocTypeResolver | undefined;
   private readonly userPermissions: UserPermissionProvider | undefined;
   private readonly documentShares: DocumentShareProvider | undefined;
+  private readonly automationRuns: AutomationRunPlanner;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
   private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
 
@@ -544,6 +550,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.doctypeResolver = options.doctypeResolver;
     this.userPermissions = options.userPermissions;
     this.documentShares = options.documentShares;
+    this.automationRuns = options.automationRuns ?? new AutomationRunPlanner({ ids: this.ids });
     this.onHookError = options.onHookError;
     this.afterCommit = options.afterCommit;
   }
@@ -611,26 +618,42 @@ export class DocumentService implements DocumentCommandExecutor {
         plan,
         metadata: command.metadata ?? {}
       }));
+      const automationPlan = this.planAutomationRuns(doctype, event, {
+        tenantId,
+        doctype: doctype.name,
+        name,
+        version: 1,
+        docstatus: plan.docstatus,
+        data,
+        createdAt: now,
+        updatedAt: now
+      });
       try {
         const commit = await this.store.commitBatch(
-          documentAtomicCommitEntries({
-            ...(nameResolution.namingSeriesWrite === undefined
-              ? {}
-              : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
-            uniqueReservationWrites,
-            document: { stream, expectedVersion: 0, event }
-          }),
+          [
+            ...documentAtomicCommitEntries({
+              ...(nameResolution.namingSeriesWrite === undefined
+                ? {}
+                : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
+              uniqueReservationWrites,
+              document: { stream, expectedVersion: 0, event }
+            }),
+            ...automationPlan.entries
+          ],
           (savedEvents) => {
             const saved = requireSavedEvent(savedEvents, event.id);
             return {
               snapshot: snapshotFromDocumentCreatedEvent(saved),
-              auxiliarySnapshots: documentAtomicAuxiliarySnapshots({
-                savedEvents,
-                ...(nameResolution.namingSeriesWrite === undefined
-                  ? {}
-                  : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
-                uniqueReservationWrites
-              })
+              auxiliarySnapshots: [
+                ...documentAtomicAuxiliarySnapshots({
+                  savedEvents,
+                  ...(nameResolution.namingSeriesWrite === undefined
+                    ? {}
+                    : { namingSeriesWrite: nameResolution.namingSeriesWrite }),
+                  uniqueReservationWrites
+                }),
+                ...automationPlan.auxiliarySnapshots(savedEvents)
+              ]
             };
           }
         );
@@ -845,21 +868,33 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: options.command.metadata ?? {}
     }));
+    const automationPlan = this.planAutomationRuns(options.doctype, event, {
+      ...options.existing,
+      version: options.existing.version + 1,
+      data,
+      updatedAt: now
+    });
     const commit = await this.store.commitBatch(
-      documentAtomicCommitEntries({
-        uniqueReservationWrites,
-        uniqueReleaseWrites,
-        document: { stream: options.stream, expectedVersion: options.existing.version, event }
-      }),
+      [
+        ...documentAtomicCommitEntries({
+          uniqueReservationWrites,
+          uniqueReleaseWrites,
+          document: { stream: options.stream, expectedVersion: options.existing.version, event }
+        }),
+        ...automationPlan.entries
+      ],
       (savedEvents) => {
         const saved = requireSavedEvent(savedEvents, event.id);
         return {
           snapshot: snapshotFromCommittedDocumentEvent(options.existing, saved, { data }),
-          auxiliarySnapshots: documentAtomicAuxiliarySnapshots({
-            savedEvents,
-            uniqueReservationWrites,
-            uniqueReleaseWrites
-          })
+          auxiliarySnapshots: [
+            ...documentAtomicAuxiliarySnapshots({
+              savedEvents,
+              uniqueReservationWrites,
+              uniqueReleaseWrites
+            }),
+            ...automationPlan.auxiliarySnapshots(savedEvents)
+          ]
         };
       }
     );
@@ -952,12 +987,26 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
-      const saved = requireFirstSavedEvent(savedEvents);
-      return snapshotFromCommittedDocumentEvent(existing, saved, {
-        data: { ...existing.data, ...plan.patch }
-      });
+    const data = { ...existing.data, ...plan.patch };
+    const automationPlan = this.planAutomationRuns(doctype, event, {
+      ...existing,
+      version: existing.version + 1,
+      data,
+      updatedAt: now
     });
+    const commit = await this.store.commitBatch(
+      [
+        { stream, expectedVersion: existing.version, events: [event] },
+        ...automationPlan.entries
+      ],
+      (savedEvents) => {
+        const saved = requireFirstSavedEvent(savedEvents);
+        return {
+          snapshot: snapshotFromCommittedDocumentEvent(existing, saved, { data }),
+          auxiliarySnapshots: automationPlan.auxiliarySnapshots(savedEvents)
+        };
+      }
+    );
     return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
@@ -1036,12 +1085,25 @@ export class DocumentService implements DocumentCommandExecutor {
       patch: patchWithReadOnlyValues,
       metadata: command.metadata ?? {}
     }));
-    const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
-      const saved = requireFirstSavedEvent(savedEvents);
-      return snapshotFromCommittedDocumentEvent(existing, saved, {
-        data: { ...existing.data, ...patchWithReadOnlyValues }
-      });
+    const automationPlan = this.planAutomationRuns(doctype, event, {
+      ...existing,
+      version: existing.version + 1,
+      data,
+      updatedAt: now
     });
+    const commit = await this.store.commitBatch(
+      [
+        { stream, expectedVersion: existing.version, events: [event] },
+        ...automationPlan.entries
+      ],
+      (savedEvents) => {
+        const saved = requireFirstSavedEvent(savedEvents);
+        return {
+          snapshot: snapshotFromCommittedDocumentEvent(existing, saved, { data }),
+          auxiliarySnapshots: automationPlan.auxiliarySnapshots(savedEvents)
+        };
+      }
+    );
     return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
@@ -1488,10 +1550,25 @@ export class DocumentService implements DocumentCommandExecutor {
       plan: options.plan,
       metadata: options.command.metadata ?? {}
     }));
-    const commit = await this.store.commit(options.stream, options.existing.version, [event], (savedEvents) => {
-      const saved = requireFirstSavedEvent(savedEvents);
-      return snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.plan.nextStatus });
+    const automationPlan = this.planAutomationRuns(options.doctype, event, {
+      ...options.existing,
+      version: options.existing.version + 1,
+      docstatus: options.plan.nextStatus,
+      updatedAt: now
     });
+    const commit = await this.store.commitBatch(
+      [
+        { stream: options.stream, expectedVersion: options.existing.version, events: [event] },
+        ...automationPlan.entries
+      ],
+      (savedEvents) => {
+        const saved = requireFirstSavedEvent(savedEvents);
+        return {
+          snapshot: snapshotFromCommittedDocumentEvent(options.existing, saved, { docstatus: options.plan.nextStatus }),
+          auxiliarySnapshots: automationPlan.auxiliarySnapshots(savedEvents)
+        };
+      }
+    );
     return this.finishAfterCommit(options.doctype, commit, requireFirstSavedEvent(commit.events));
   }
 
@@ -1501,6 +1578,18 @@ export class DocumentService implements DocumentCommandExecutor {
     saved: DomainEvent
   ): Promise<DocumentSnapshot> {
     return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
+  }
+
+  private planAutomationRuns(
+    doctype: DocTypeDefinition,
+    event: NewDomainEvent,
+    snapshot: DocumentSnapshot
+  ): AutomationRunCommitPlan {
+    return this.automationRuns.planEnqueueFromDomainEvent({
+      event,
+      snapshot,
+      rules: doctype.automationRules
+    });
   }
 
   private async runBeforeValidate(

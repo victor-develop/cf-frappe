@@ -1,4 +1,4 @@
-import { D1DocumentStore, D1EventStore } from "../../src";
+import { D1DocumentStore, D1EventStore, D1ProjectionStore } from "../../src";
 import type { DocumentData, DocumentEventPayload, DocumentSnapshot, JsonValue, NewDomainEvent } from "../../src";
 
 describe("D1DocumentStore", () => {
@@ -70,6 +70,82 @@ describe("D1DocumentStore", () => {
     await expect(store.readStream(stream)).resolves.toMatchObject([{ id: "evt1", sequence: 1 }]);
     expect(db.documents.get("acme:__UniqueValues:Note:title:s:One")).toMatchObject({ version: 1 });
     expect(db.documents.get("acme:Note:One")).toMatchObject({ version: 1 });
+  });
+
+  it("updates the D1 automation run claim index with automation run projections", async () => {
+    const db = new FakeD1Database();
+    const store = new D1DocumentStore(db as unknown as D1Database);
+    const projections = new D1ProjectionStore(db as unknown as D1Database);
+    const source: NewDomainEvent = {
+      ...event,
+      id: "evt-source",
+      type: "NoteUpdated",
+      payload: { kind: "DocumentUpdated", patch: { title: "Two" } }
+    };
+    const automationRun = automationRunEvent("evt-run", "run-1", {
+      status: "pending",
+      enqueuedAt: "2026-01-01T00:00:00.000Z"
+    });
+    const futureRetry = automationRunEvent("evt-future", "run-2", {
+      status: "failed",
+      enqueuedAt: "2026-01-01T00:00:00.000Z",
+      retryAt: "2026-01-01T00:05:00.000Z"
+    });
+    const delivered = automationRunEvent("evt-delivered", "run-3", {
+      status: "delivered",
+      enqueuedAt: "2026-01-01T00:00:00.000Z",
+      deliveredAt: "2026-01-01T00:01:00.000Z"
+    });
+
+    await store.commitBatch(
+      [
+        { stream, expectedVersion: 0, events: [source] },
+        { stream: "acme:__AutomationRuns:run-1", expectedVersion: 0, events: [automationRun] },
+        { stream: "acme:__AutomationRuns:run-2", expectedVersion: 0, events: [futureRetry] },
+        { stream: "acme:__AutomationRuns:run-3", expectedVersion: 0, events: [delivered] }
+      ],
+      () => ({
+        snapshot: {
+          tenantId: "acme",
+          doctype: "Note",
+          name: "One",
+          version: 1,
+          docstatus: "draft",
+          data: { title: "Two" },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z"
+        },
+        auxiliarySnapshots: [
+          automationRunSnapshot("run-1", 1, "pending", { enqueuedAt: "2026-01-01T00:00:00.000Z" }),
+          automationRunSnapshot("run-2", 1, "failed", {
+            enqueuedAt: "2026-01-01T00:00:00.000Z",
+            retryAt: "2026-01-01T00:05:00.000Z"
+          }),
+          automationRunSnapshot("run-3", 1, "delivered", {
+            enqueuedAt: "2026-01-01T00:00:00.000Z",
+            deliveredAt: "2026-01-01T00:01:00.000Z"
+          })
+        ]
+      })
+    );
+
+    expect(db.automationRuns.get("acme:run-1")).toMatchObject({
+      status: "pending",
+      available_at: "2026-01-01T00:00:00.000Z"
+    });
+    expect(db.automationRuns.get("acme:run-2")).toMatchObject({
+      status: "failed",
+      available_at: "2026-01-01T00:05:00.000Z"
+    });
+    expect(db.automationRuns.get("acme:run-3")).toMatchObject({
+      status: "delivered",
+      available_at: null
+    });
+    await expect(projections.listAutomationRunClaimCandidates({
+      tenantId: "acme",
+      now: "2026-01-01T00:01:00.000Z",
+      limit: 10
+    })).resolves.toMatchObject([{ doctype: "__AutomationRuns", name: "run-1" }]);
   });
 
   it("rolls back event inserts when projection upsert fails", async () => {
@@ -404,9 +480,76 @@ function snapshotFrom(event: { tenantId: string; doctype: string; documentName: 
   };
 }
 
+function automationRunEvent(
+  id: string,
+  runId: string,
+  data: { readonly status: string; readonly enqueuedAt: string; readonly retryAt?: string; readonly deliveredAt?: string }
+): NewDomainEvent {
+  return {
+    id,
+    tenantId: "acme",
+    stream: `acme:__AutomationRuns:${runId}`,
+    type: "AutomationRunEnqueued",
+    doctype: "__AutomationRuns",
+    documentName: runId,
+    actorId: "owner",
+    occurredAt: data.enqueuedAt,
+    payload: {
+      kind: "AutomationRunEnqueued",
+      runId,
+      sourceEventId: "evt-source",
+      sourceEventType: "NoteUpdated",
+      sourcePayloadKind: "DocumentUpdated",
+      sourceDoctype: "Note",
+      sourceDocumentName: "One",
+      sourceActorId: "owner",
+      ruleName: "Mirror",
+      actionIndex: 0,
+      action: { kind: "updateDocument", target: { doctype: "Note", name: "One" }, patch: { title: "Two" } },
+      retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 }
+    },
+    metadata: {}
+  };
+}
+
+function automationRunSnapshot(
+  runId: string,
+  version: number,
+  status: string,
+  data: { readonly enqueuedAt: string; readonly retryAt?: string; readonly deliveredAt?: string }
+): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "__AutomationRuns",
+    name: runId,
+    version,
+    docstatus: status === "delivered" ? "submitted" : status === "dead" ? "cancelled" : "draft",
+    data: {
+      sourceEventId: "evt-source",
+      sourceEventType: "NoteUpdated",
+      sourcePayloadKind: "DocumentUpdated",
+      sourceDoctype: "Note",
+      sourceDocumentName: "One",
+      sourceActorId: "owner",
+      ruleName: "Mirror",
+      actionIndex: 0,
+      action: { kind: "updateDocument", target: { doctype: "Note", name: "One" }, patch: { title: "Two" } },
+      retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 },
+      status,
+      attempts: 0,
+      enqueuedAt: data.enqueuedAt,
+      ...(data.retryAt === undefined ? {} : { retryAt: data.retryAt }),
+      ...(data.deliveredAt === undefined ? {} : { deliveredAt: data.deliveredAt })
+    },
+    createdAt: data.enqueuedAt,
+    updatedAt: data.deliveredAt ?? data.retryAt ?? data.enqueuedAt
+  };
+}
+
 class FakeD1Database {
   readonly events: any[] = [];
   readonly documents = new Map<string, any>();
+  readonly automationRuns = new Map<string, any>();
   readonly statements: FakeD1PreparedStatement[] = [];
   readonly failDocumentUpsert: boolean;
   readonly failEventInsertAsConstraint: boolean;
@@ -425,6 +568,7 @@ class FakeD1Database {
   async batch(statements: FakeD1PreparedStatement[]) {
     const events = [...this.events];
     const documents = new Map(this.documents);
+    const automationRuns = new Map(this.automationRuns);
     try {
       const results = [];
       for (const statement of statements) {
@@ -437,6 +581,10 @@ class FakeD1Database {
       this.documents.clear();
       for (const [key, value] of documents) {
         this.documents.set(key, value);
+      }
+      this.automationRuns.clear();
+      for (const [key, value] of automationRuns) {
+        this.automationRuns.set(key, value);
       }
       throw error;
     }
@@ -468,6 +616,25 @@ class FakeD1PreparedStatement {
   }
 
   async all() {
+    if (this.sql.includes("FROM cf_frappe_automation_runs")) {
+      const tenantId = String(this.params[0]);
+      const now = String(this.params[1]);
+      const limit = Number(this.params[2]);
+      const indexed = [...this.db.automationRuns.values()]
+        .filter((run) => run.tenant_id === tenantId)
+        .filter((run) => ["pending", "failed", "claimed"].includes(String(run.status)))
+        .filter((run) => run.available_at !== null && String(run.available_at) <= now)
+        .sort((left, right) =>
+          String(left.enqueued_at).localeCompare(String(right.enqueued_at)) ||
+          String(left.run_id).localeCompare(String(right.run_id))
+        )
+        .slice(0, limit);
+      return {
+        results: indexed
+          .map((run) => this.db.documents.get(`${run.tenant_id}:__AutomationRuns:${run.run_id}`))
+          .filter((document) => document !== undefined)
+      };
+    }
     if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("stream = ?")) {
       if (this.sql.includes("1 = 0")) {
         return { results: [] };
@@ -583,6 +750,18 @@ class FakeD1PreparedStatement {
         docstatus,
         data_json,
         created_at,
+        updated_at
+      });
+      return { success: true };
+    }
+    if (this.sql.includes("INSERT INTO cf_frappe_automation_runs")) {
+      const [tenant_id, run_id, status, available_at, enqueued_at, updated_at] = this.params;
+      this.db.automationRuns.set(`${tenant_id}:${run_id}`, {
+        tenant_id,
+        run_id,
+        status,
+        available_at,
+        enqueued_at,
         updated_at
       });
       return { success: true };

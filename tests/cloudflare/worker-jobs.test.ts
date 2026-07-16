@@ -1,17 +1,25 @@
 import {
+  AUTOMATION_RUN_DRAIN_JOB_NAME,
+  createAutomationRunDrainJob,
   createDocumentDeliveryOutboxDrainJob,
   type EmailNotificationService,
   createJobRegistry,
+  createRegistry,
   deterministicIds,
+  D1DocumentStore,
   D1EventStore,
+  D1ProjectionStore,
+  DocumentService,
   DocumentDeliveryOutboxService,
   DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME,
+  defineDocType,
   fixedClock,
   InMemoryJobExecutionLog,
   InMemoryJobQueue,
   UserNotificationService,
   type JobMessage,
-  type JobQueue
+  type JobQueue,
+  type ModelRegistry
 } from "../../src";
 import {
   createCloudFrappeWorker,
@@ -437,6 +445,97 @@ describe("CloudFrappe Worker jobs", () => {
         }
       }
     ]);
+  });
+
+  it("drains durable automation runs through the Worker queue path", async () => {
+    const registry = automationRegistry();
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: undefined as unknown as RpcDurableObjectNamespace<AggregateCoordinatorRpc>
+    };
+    env.AGGREGATES = executingNamespace(
+      registry,
+      env,
+      deterministicIds(["target-create", "source-create", "source-update", "automation-enqueue", "target-update"])
+    );
+    const worker = createCloudFrappeWorker<typeof env>({
+      registry,
+      actor: () => owner,
+      jobs: {
+        registry: createJobRegistry<CloudFrappeRuntimeServices>({
+          jobs: [createAutomationRunDrainJob<CloudFrappeRuntimeServices>()]
+        }),
+        queue: () => new InMemoryJobQueue()
+      }
+    });
+    const fetch = worker.fetch!;
+
+    const target = await fetch(cfRequest("http://localhost/api/resource/Target", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Target One" })
+    }), env, fakeExecutionContext());
+    const source = await fetch(cfRequest("http://localhost/api/resource/Source", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Source One", target: "Target One", status: "Open" })
+    }), env, fakeExecutionContext());
+    const update = await fetch(cfRequest("http://localhost/api/resource/Source/Source%20One", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "Done", expectedVersion: 1 })
+    }), env, fakeExecutionContext());
+
+    expect(target.status).toBe(201);
+    expect(source.status).toBe(201);
+    expect(update.status).toBe(200);
+    const projections = new D1ProjectionStore(env.DB);
+    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({
+      data: { status: "pending", sourceDoctype: "Source", sourceDocumentName: "Source One" }
+    });
+
+    const queueMessage = {
+      id: "msg_automation_001",
+      timestamp: new Date(now),
+      body: {
+        tenantId: "acme",
+        jobName: AUTOMATION_RUN_DRAIN_JOB_NAME,
+        payload: { limit: 5, claimId: "claim-automation" },
+        runId: "job_automation_001",
+        idempotencyKey: "automation-runs:job_automation_001",
+        enqueuedAt: now,
+        metadata: {}
+      },
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn()
+    } as unknown as Message<JobMessage>;
+
+    await worker.queue?.(
+      {
+        queue: "jobs",
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+        messages: [queueMessage],
+        retryAll: vi.fn(),
+        ackAll: vi.fn()
+      },
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(queueMessage.ack).toHaveBeenCalledOnce();
+    expect(queueMessage.retry).not.toHaveBeenCalled();
+    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({
+      data: { status: "delivered", claimId: "claim-automation" }
+    });
+    await expect(projections.get("acme", "Target", "Target One")).resolves.toMatchObject({
+      version: 2,
+      data: {
+        title: "Target One",
+        mirrored_status: "Done",
+        source_name: "Source One"
+      }
+    });
   });
 
   it("retries failed durable outbox records through later Worker queue drains", async () => {
@@ -876,6 +975,83 @@ function queueMessageForOutboxDrain(messageId: string, claimId: string): Message
   } as unknown as Message<JobMessage>;
 }
 
+function automationRegistry(): ModelRegistry {
+  const Target = defineDocType({
+    name: "Target",
+    naming: { kind: "field", field: "title" },
+    fields: [
+      { name: "title", type: "text", required: true },
+      { name: "mirrored_status", type: "text" },
+      { name: "source_name", type: "text" }
+    ],
+    permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+  });
+  const Source = defineDocType({
+    name: "Source",
+    naming: { kind: "field", field: "title" },
+    fields: [
+      { name: "title", type: "text", required: true },
+      { name: "target", type: "link", linkTo: "Target" },
+      { name: "status", type: "select", options: ["Open", "Done"] }
+    ],
+    automationRules: [{
+      name: "Mirror Status",
+      events: ["DocumentUpdated"],
+      changedFields: ["status"],
+      actions: [{
+        kind: "updateDocument",
+        target: { doctype: "Target", name: { kind: "field", field: "target" } },
+        patch: {
+          mirrored_status: { kind: "field", field: "status" },
+          source_name: { kind: "documentName" }
+        }
+      }]
+    }],
+    permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
+  });
+  return createRegistry({ doctypes: [Target, Source] });
+}
+
+function executingNamespace(
+  registry: ModelRegistry,
+  env: { readonly DB: D1Database },
+  ids: ReturnType<typeof deterministicIds>
+): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
+  const documents = new DocumentService({
+    registry,
+    store: new D1DocumentStore(env.DB),
+    clock: fixedClock(now),
+    ids
+  });
+  return {
+    idFromName(name: string) {
+      return name as unknown as DurableObjectId;
+    },
+    get() {
+      const stub = {
+        async transact(command: any) {
+          switch (command.kind) {
+            case "create":
+              return documents.create(command);
+            case "update":
+              return documents.update(command);
+            default:
+              throw new Error(`Unsupported test aggregate command '${String(command.kind)}'`);
+          }
+        },
+        async tryTransact(command: any) {
+          try {
+            return { ok: true, snapshot: await stub.transact(command) };
+          } catch (error) {
+            return { ok: false, failure: { name: command.name ?? "", error: String(error) } };
+          }
+        }
+      };
+      return stub as AggregateCoordinatorRpc;
+    }
+  };
+}
+
 function fakeNamespace(): RpcDurableObjectNamespace<AggregateCoordinatorRpc> {
   return {
     idFromName(name: string) {
@@ -937,6 +1113,24 @@ function fakeD1(): D1Database {
     readonly payload_json: string;
     readonly metadata_json: string;
   }> = [];
+  const documents = new Map<string, {
+    readonly tenant_id: string;
+    readonly doctype: string;
+    readonly name: string;
+    readonly version: number;
+    readonly docstatus: string;
+    readonly data_json: string;
+    readonly created_at: string;
+    readonly updated_at: string;
+  }>();
+  const automationRuns = new Map<string, {
+    readonly tenant_id: string;
+    readonly run_id: string;
+    readonly status: string;
+    readonly available_at: string | null;
+    readonly enqueued_at: string;
+    readonly updated_at: string;
+  }>();
   return {
     prepare(sql: string) {
       return {
@@ -946,6 +1140,24 @@ function fakeD1(): D1Database {
           return this;
         },
         async all() {
+          if (sql.includes("FROM cf_frappe_automation_runs")) {
+            const tenantId = String(this.params[0] ?? "");
+            const nowValue = String(this.params[1] ?? "");
+            const limit = Number(this.params[2] ?? 50);
+            const due = [...automationRuns.values()]
+              .filter((run) => run.tenant_id === tenantId)
+              .filter((run) => ["pending", "failed", "claimed"].includes(run.status))
+              .filter((run) => run.available_at !== null && run.available_at <= nowValue)
+              .sort((left, right) =>
+                left.enqueued_at.localeCompare(right.enqueued_at) || left.run_id.localeCompare(right.run_id)
+              )
+              .slice(0, limit);
+            return {
+              results: due
+                .map((run) => documents.get(`${run.tenant_id}:__AutomationRuns:${run.run_id}`))
+                .filter((document) => document !== undefined)
+            };
+          }
           if (sql.includes("FROM cf_frappe_events")) {
             const stream = String(this.params[0] ?? "");
             const maxSequence = sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
@@ -968,8 +1180,14 @@ function fakeD1(): D1Database {
             return {
               version: events
                 .filter((event) => event.stream === stream)
-                .reduce((version, event) => Math.max(version, event.sequence), 0)
+              .reduce((version, event) => Math.max(version, event.sequence), 0)
             };
+          }
+          if (sql.includes("FROM cf_frappe_documents")) {
+            const tenantId = String(this.params[0] ?? "");
+            const doctype = String(this.params[1] ?? "");
+            const name = String(this.params[2] ?? "");
+            return documents.get(`${tenantId}:${doctype}:${name}`) ?? null;
           }
           return null;
         },
@@ -1000,6 +1218,30 @@ function fakeD1(): D1Database {
               occurred_at: String(occurredAt),
               payload_json: String(payloadJson),
               metadata_json: String(metadataJson)
+            });
+          }
+          if (sql.includes("INSERT INTO cf_frappe_documents")) {
+            const [tenantId, doctype, name, version, docstatus, dataJson, createdAt, updatedAt] = this.params;
+            documents.set(`${tenantId}:${doctype}:${name}`, {
+              tenant_id: String(tenantId),
+              doctype: String(doctype),
+              name: String(name),
+              version: Number(version),
+              docstatus: String(docstatus),
+              data_json: String(dataJson),
+              created_at: String(createdAt),
+              updated_at: String(updatedAt)
+            });
+          }
+          if (sql.includes("INSERT INTO cf_frappe_automation_runs")) {
+            const [tenantId, runId, status, availableAt, enqueuedAt, updatedAt] = this.params;
+            automationRuns.set(`${tenantId}:${runId}`, {
+              tenant_id: String(tenantId),
+              run_id: String(runId),
+              status: String(status),
+              available_at: availableAt === null ? null : String(availableAt),
+              enqueued_at: String(enqueuedAt),
+              updated_at: String(updatedAt)
             });
           }
           return { success: true };

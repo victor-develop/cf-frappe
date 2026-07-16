@@ -188,6 +188,11 @@ export function documentTimelineEventChanges(
     case "DocumentDeliveryOutboxClaimed":
     case "DocumentDeliveryOutboxDelivered":
     case "DocumentDeliveryOutboxFailed":
+    case "AutomationRunEnqueued":
+    case "AutomationRunClaimed":
+    case "AutomationRunDelivered":
+    case "AutomationRunFailed":
+    case "AutomationRunDeadLettered":
       return [];
   }
   return [];
@@ -329,6 +334,16 @@ export function documentTimelineSummary(payload: DocumentEventPayload): string {
       return `Delivered document delivery ${payload.outboxId}`;
     case "DocumentDeliveryOutboxFailed":
       return `Document delivery failed ${payload.outboxId}`;
+    case "AutomationRunEnqueued":
+      return `Queued automation run ${payload.runId}`;
+    case "AutomationRunClaimed":
+      return `Claimed automation run ${payload.runId}`;
+    case "AutomationRunDelivered":
+      return `Delivered automation run ${payload.runId}`;
+    case "AutomationRunFailed":
+      return `Automation run failed ${payload.runId}`;
+    case "AutomationRunDeadLettered":
+      return `Automation run dead-lettered ${payload.runId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":

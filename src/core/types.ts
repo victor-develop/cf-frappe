@@ -220,6 +220,52 @@ export interface NotificationRuleDefinition {
   readonly excludeActor?: boolean;
 }
 
+export type AutomationRuleEventKind =
+  | "DocumentCreated"
+  | "DocumentUpdated"
+  | "DocumentSubmitted"
+  | "DocumentCancelled"
+  | "WorkflowTransitioned"
+  | "DomainCommandApplied";
+
+export type AutomationValueExpression =
+  | {
+      readonly kind: "literal";
+      readonly value: JsonValue;
+    }
+  | {
+      readonly kind: "field";
+      readonly field: string;
+    }
+  | {
+      readonly kind: "documentName";
+    }
+  | {
+      readonly kind: "actor";
+    };
+
+export interface AutomationDocumentTargetDefinition {
+  readonly doctype: DocTypeName;
+  readonly name: AutomationValueExpression;
+}
+
+export interface AutomationUpdateDocumentActionDefinition {
+  readonly kind: "updateDocument";
+  readonly target: AutomationDocumentTargetDefinition;
+  readonly patch: Readonly<Record<string, AutomationValueExpression>>;
+}
+
+export type AutomationActionDefinition = AutomationUpdateDocumentActionDefinition;
+
+export interface AutomationRuleDefinition {
+  readonly name: string;
+  readonly enabled?: boolean;
+  readonly events: readonly AutomationRuleEventKind[];
+  readonly changedFields?: readonly string[];
+  readonly condition?: ListFilterExpression;
+  readonly actions: readonly AutomationActionDefinition[];
+}
+
 export interface DomainCommandContext {
   readonly actor: Actor;
   readonly document: DocumentSnapshot;
@@ -262,6 +308,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly permissions?: readonly PermissionRule[];
   readonly workflow?: WorkflowDefinition;
   readonly assignmentRules?: readonly AssignmentRuleDefinition[];
+  readonly automationRules?: readonly AutomationRuleDefinition[];
   readonly commands?: readonly DomainCommandDefinition[];
   readonly naming?: NamingStrategy;
   readonly allowUnknownFields?: boolean;

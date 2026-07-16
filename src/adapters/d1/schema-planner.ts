@@ -28,6 +28,7 @@ export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
 export const D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID = "0003_cf_frappe_job_execution_messages";
 export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
 export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_rollbacks";
+export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -206,6 +207,28 @@ export const D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS: readonly PlannedSqlStatem
   }
 ];
 
+export const D1_AUTOMATION_RUN_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_automation_runs",
+    sql:
+      "CREATE TABLE IF NOT EXISTS cf_frappe_automation_runs (" +
+      "tenant_id TEXT NOT NULL, " +
+      "run_id TEXT NOT NULL, " +
+      "status TEXT NOT NULL, " +
+      "available_at TEXT, " +
+      "enqueued_at TEXT NOT NULL, " +
+      "updated_at TEXT NOT NULL, " +
+      "PRIMARY KEY (tenant_id, run_id)" +
+      ");"
+  },
+  {
+    name: "index_cf_frappe_automation_runs_claim",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_automation_runs_claim " +
+      "ON cf_frappe_automation_runs(tenant_id, status, available_at, enqueued_at, run_id);"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -281,6 +304,11 @@ export function planD1Migrations(
           id: D1_DATA_PATCH_ROLLBACK_MIGRATION_ID,
           label: "cf-frappe data patch rollback journal",
           statements: D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_AUTOMATION_RUN_MIGRATION_ID,
+          label: "cf-frappe automation run claim index",
+          statements: D1_AUTOMATION_RUN_SCHEMA_STATEMENTS
         })
       ]
     : [];

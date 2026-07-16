@@ -36,6 +36,7 @@ import type { CalendarDefinition } from "../../core/calendar.js";
 import type { ClientScriptDefinition, ClientScriptScope } from "../../core/client-script.js";
 import type { WorkspaceDefinition, WorkspaceShortcutKind } from "../../core/workspace.js";
 import type {
+  AssignedDocumentsResult,
   DocumentAssignments,
   DocumentFollowers,
   DocumentTags,
@@ -119,10 +120,12 @@ export interface DeskLayoutOptions {
   readonly activeKanban?: string;
   readonly activeCalendar?: string;
   readonly activeSearch?: boolean;
+  readonly activeAssignments?: boolean;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
   readonly showFiles?: boolean;
   readonly showNotifications?: boolean;
+  readonly showAssignments?: boolean;
   readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
@@ -228,6 +231,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
     )
     .join("");
   const navigation = `${workspaceNav ? `<p class="nav-heading">Workspaces</p>${workspaceNav}` : ""}
+      ${options.showAssignments ? `<p class="nav-heading">Work</p><a class="nav-link${options.activeAssignments ? " is-active" : ""}" href="/desk/assigned-to-me">Assigned to Me</a>` : ""}
       <p class="nav-heading">Search</p><a class="nav-link${options.activeSearch ? " is-active" : ""}" href="/desk/search">Global Search</a>
       ${nav ? `<p class="nav-heading">DocTypes</p>${nav}` : ""}
       ${reportNav ? `<p class="nav-heading">Reports</p>${reportNav}` : ""}
@@ -278,7 +282,8 @@ export function renderDeskHome(
   workspaces: readonly WorkspaceDefinition[] = [],
   dashboards: readonly DashboardDefinition[] = [],
   kanbans: readonly KanbanDefinition[] = [],
-  calendars: readonly CalendarDefinition[] = []
+  calendars: readonly CalendarDefinition[] = [],
+  options: { readonly showAssignments?: boolean } = {}
 ): string {
   const workspaceCards = workspaces
     .map(
@@ -289,6 +294,15 @@ export function renderDeskHome(
     )
     .join("");
   const startCards = [
+    ...(options.showAssignments
+      ? [{
+          href: "/desk/assigned-to-me",
+          label: "Assigned to Me",
+          kind: "Work",
+          meta: "Assignments",
+          description: ""
+        }]
+      : []),
     ...doctypes.map((doctype) => ({
       href: `/desk/${encodeURIComponent(doctype.name)}`,
       label: labelFor(doctype),
@@ -511,6 +525,51 @@ function renderNotificationActions(notification: UserNotificationInbox["notifica
     return "";
   }
   return `<form class="inline-action" method="post">${read}${dismiss}</form>`;
+}
+
+export function renderAssignedToMePage(
+  result: AssignedDocumentsResult,
+  doctypes: readonly DocTypeDefinition[]
+): string {
+  const rows = result.data
+    .map((item) => `<tr>
+      ${renderTableCell("Document", `<a href="${escapeHtml(item.route)}">${escapeHtml(item.label)}</a>`)}
+      ${renderTableCell("DocType", escapeHtml(item.doctype))}
+      ${renderTableCell("Status", `<span class="status-pill">${escapeHtml(item.docstatus)}</span>`)}
+      ${renderTableCell("Assignees", escapeHtml(item.assignees.join(", ")))}
+      ${renderTableCell("Version", `<span class="version-pill">v${String(item.version)}</span>`)}
+      ${renderTableCell("Updated", `<time datetime="${escapeHtml(item.updatedAt)}">${escapeHtml(item.updatedAt)}</time>`)}
+    </tr>`)
+    .join("");
+  const recordCount = `${String(result.data.length)} of ${String(result.total)} assigned`;
+  return `<form class="panel form list-filters" method="get" action="/desk/assigned-to-me">
+    <div class="fields">
+      <label class="field"><span>DocType</span><select name="doctype">${renderAssignedDoctypeOptions(doctypes, result.filters.doctype)}</select></label>
+      <label class="field"><span>Limit</span><input name="limit" type="number" min="1" max="200" value="${String(result.limit)}"></label>
+    </div>
+    <div class="actions"><a class="button" href="/desk/assigned-to-me">Clear</a><button class="button primary" type="submit">Filter</button></div>
+  </form>
+  <section class="toolbar list-toolbar">
+    <div class="toolbar-main"><span class="record-count">Assigned to ${escapeHtml(result.assignee)}</span></div>
+    <div class="toolbar-aside"><span class="record-count">${recordCount}</span></div>
+  </section>
+  <section class="panel list-table-panel">
+    <div class="table-wrap">
+      <table class="responsive-table">
+        <thead><tr><th>Document</th><th>DocType</th><th>Status</th><th>Assignees</th><th>Version</th><th>Updated</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">Nothing assigned to you.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderAssignedDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string | undefined): string {
+  return [
+    `<option value=""${selectedDoctype === undefined ? " selected" : ""}>Any DocType</option>`,
+    ...doctypes.map((doctype) =>
+      `<option value="${escapeHtml(doctype.name)}"${doctype.name === selectedDoctype ? " selected" : ""}>${escapeHtml(labelFor(doctype))}</option>`
+    )
+  ].join("");
 }
 
 export function renderFileManager(

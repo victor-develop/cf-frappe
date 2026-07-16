@@ -17,6 +17,7 @@ import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
+import { automationRunIndexUpsertStatement } from "./automation-run-index.js";
 
 export class D1DocumentStore implements DocumentStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}
@@ -46,8 +47,8 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
     try {
       await this.db.batch([
         ...insertEventStatements(this.db, saved),
-        ...[projection.snapshot, ...(projection.auxiliarySnapshots ?? [])].map((snapshot) =>
-          documentUpsertStatement(this.db, snapshot)
+        ...[projection.snapshot, ...(projection.auxiliarySnapshots ?? [])].flatMap((snapshot) =>
+          documentProjectionStatements(this.db, snapshot)
         )
       ]);
     } catch (error) {
@@ -78,6 +79,13 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
   async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
     return readD1AuditDocumentEvents(this.db, query);
   }
+}
+
+function documentProjectionStatements(db: D1Database, snapshot: DocumentSnapshot): D1PreparedStatement[] {
+  return [
+    documentUpsertStatement(db, snapshot),
+    automationRunIndexUpsertStatement(db, snapshot)
+  ].filter((statement): statement is D1PreparedStatement => statement !== undefined);
 }
 
 function documentUpsertStatement(db: D1Database, snapshot: DocumentSnapshot): D1PreparedStatement {

@@ -8,10 +8,12 @@ import type {
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
+import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
+import { listD1AutomationRunClaimCandidateSnapshots } from "./automation-run-index.js";
 import { d1ProjectionListQuery } from "./projection-query.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
 
-export class D1ProjectionStore implements ProjectionStore {
+export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimStore {
   constructor(private readonly db: D1Database) {}
 
   async get(
@@ -82,5 +84,13 @@ export class D1ProjectionStore implements ProjectionStore {
       offset: listQuery.offset,
       total: Number(((count.results ?? [])[0] as { total?: number } | undefined)?.total ?? 0)
     };
+  }
+
+  async listAutomationRunClaimCandidates(query: {
+    readonly tenantId: TenantId;
+    readonly now: string;
+    readonly limit: number;
+  }): Promise<readonly DocumentSnapshot[]> {
+    return listD1AutomationRunClaimCandidateSnapshots(this.db, query);
   }
 }

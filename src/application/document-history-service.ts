@@ -1,12 +1,14 @@
 import type {
   Actor,
   DocStatus,
+  DocTypeDefinition,
   DocTypeName,
   DocumentName,
   DocumentSnapshot,
   TenantId
 } from "../core/types.js";
-import { foldDocument } from "../core/events.js";
+import { DEFAULT_TENANT_ID } from "../core/types.js";
+import { foldDocument, foldDocumentAssignments } from "../core/events.js";
 import { documentStream } from "../core/streams.js";
 import type { EventStore } from "../ports/event-store.js";
 import {
@@ -25,7 +27,22 @@ import {
   type DocumentTimelineChange,
   type DocumentTimelineEntry
 } from "./document-history-policy.js";
+import {
+  assignedDocumentMatchesAssignee,
+  compareAssignedDocumentSummaries,
+  normalizeAssignedDocumentsAssignee,
+  normalizeAssignedDocumentsDoctype,
+  normalizeAssignedDocumentsLimit,
+  type AssignedDocumentSummary,
+  type AssignedDocumentsResult
+} from "./assigned-documents-policy.js";
+import { labelForLinkedDocument } from "./document-query-policy.js";
 import type { QueryService } from "./query-service.js";
+
+export type {
+  AssignedDocumentSummary,
+  AssignedDocumentsResult
+} from "./assigned-documents-policy.js";
 
 export type {
   DocumentAssignments,
@@ -37,14 +54,23 @@ export type {
 
 export interface DocumentHistoryServiceOptions {
   readonly events: Pick<EventStore, "readStream">;
-  readonly queries: Pick<QueryService, "getDocument">;
+  readonly queries: DocumentHistoryQueries;
   readonly maxDiffBaselineEvents?: number;
 }
+
+type DocumentHistoryQueries = Pick<QueryService, "getDocument" | "getEffectiveMeta" | "listDocuments" | "listEffectiveDoctypes">;
 
 export interface GetDocumentTimelineOptions {
   readonly tenantId?: TenantId;
   readonly limit?: number;
   readonly beforeSequence?: number;
+}
+
+export interface ListAssignedDocumentsOptions {
+  readonly tenantId?: TenantId;
+  readonly assignee?: string;
+  readonly doctype?: string;
+  readonly limit?: number;
 }
 
 export interface DocumentTimeline {
@@ -61,7 +87,7 @@ export interface DocumentTimeline {
 
 export class DocumentHistoryService {
   private readonly events: Pick<EventStore, "readStream">;
-  private readonly queries: Pick<QueryService, "getDocument">;
+  private readonly queries: DocumentHistoryQueries;
   private readonly maxDiffBaselineEvents: number;
 
   constructor(options: DocumentHistoryServiceOptions) {
@@ -114,6 +140,32 @@ export class DocumentHistoryService {
     return documentHistoryAssignmentsResult(document, events);
   }
 
+  async listAssignedDocuments(
+    actor: Actor,
+    options: ListAssignedDocumentsOptions = {}
+  ): Promise<AssignedDocumentsResult> {
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const assignee = normalizeAssignedDocumentsAssignee(options.assignee, actor.id);
+    const doctypeFilter = normalizeAssignedDocumentsDoctype(options.doctype);
+    const limit = normalizeAssignedDocumentsLimit(options.limit);
+    const doctypes = await this.assignedDocumentDoctypes(actor, tenantId, doctypeFilter);
+    const data: AssignedDocumentSummary[] = [];
+    for (const doctype of doctypes) {
+      await this.collectAssignedDocuments(actor, doctype, tenantId, assignee, data);
+    }
+    const sorted = data.sort(compareAssignedDocumentSummaries);
+    return {
+      tenantId,
+      assignee,
+      limit,
+      total: sorted.length,
+      data: sorted.slice(0, limit),
+      filters: {
+        ...(doctypeFilter === undefined ? {} : { doctype: doctypeFilter })
+      }
+    };
+  }
+
   async getTags(
     actor: Actor,
     doctypeName: string,
@@ -152,4 +204,76 @@ export class DocumentHistoryService {
     const events = await this.events.readStream(stream, { maxSequence: baselineEventCount });
     return foldDocument(events);
   }
+
+  private async assignedDocumentDoctypes(
+    actor: Actor,
+    tenantId: TenantId,
+    doctypeName: string | undefined
+  ): Promise<readonly DocTypeDefinition[]> {
+    if (doctypeName !== undefined) {
+      return [await this.queries.getEffectiveMeta(actor, doctypeName, tenantId)];
+    }
+    return this.queries.listEffectiveDoctypes(actor, tenantId);
+  }
+
+  private async collectAssignedDocuments(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    tenantId: TenantId,
+    assignee: string,
+    results: AssignedDocumentSummary[]
+  ): Promise<void> {
+    const pageSize = 100;
+    for (let offset = 0; ;) {
+      const page = await this.queries.listDocuments(actor, doctype.name, {
+        tenantId,
+        filters: [],
+        orderBy: "updatedAt",
+        order: "desc",
+        limit: pageSize,
+        maxLimit: pageSize,
+        offset
+      });
+      for (const document of page.data) {
+        if (document.docstatus === "deleted") {
+          continue;
+        }
+        const assignees = await this.currentAssignees(document);
+        if (!assignedDocumentMatchesAssignee(assignees, assignee)) {
+          continue;
+        }
+        results.push(assignedDocumentSummary(doctype, document, assignees));
+      }
+      offset += page.limit;
+      if (offset >= page.total) {
+        return;
+      }
+    }
+  }
+
+  private async currentAssignees(document: DocumentSnapshot): Promise<readonly string[]> {
+    const events = await this.events.readStream(documentStream(document.tenantId, document.doctype, document.name), {
+      maxSequence: document.version,
+      payloadKinds: ["DocumentAssigned", "DocumentUnassigned"]
+    });
+    return foldDocumentAssignments(events);
+  }
+}
+
+function assignedDocumentSummary(
+  doctype: DocTypeDefinition,
+  document: DocumentSnapshot,
+  assignees: readonly string[]
+): AssignedDocumentSummary {
+  return {
+    tenantId: document.tenantId,
+    doctype: document.doctype,
+    name: document.name,
+    label: labelForLinkedDocument(document, doctype),
+    route: `/desk/${encodeURIComponent(document.doctype)}/${encodeURIComponent(document.name)}`,
+    version: document.version,
+    docstatus: document.docstatus,
+    updatedAt: document.updatedAt,
+    assignees
+  };
 }
