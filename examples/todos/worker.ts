@@ -1,10 +1,10 @@
-import type { Actor } from "../../src";
+import { SYSTEM_MANAGER_ROLE, type Actor } from "../../src";
 import { createAggregateCoordinatorClass, createCloudFrappeWorker } from "../../src/cloudflare";
 import { todoRegistry } from "./models";
 
-const readOnlyDemoActor: Actor = {
-  id: "demo",
-  roles: ["Guest"],
+const localDemoActor: Actor = {
+  id: "demo-admin",
+  roles: [SYSTEM_MANAGER_ROLE, "Task Manager", "User"],
   tenantId: "default"
 };
 
@@ -14,5 +14,5 @@ export class ExampleAggregateCoordinator extends createAggregateCoordinatorClass
 
 export default createCloudFrappeWorker({
   registry: todoRegistry,
-  actor: () => readOnlyDemoActor
+  actor: () => localDemoActor
 });

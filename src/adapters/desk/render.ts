@@ -1897,8 +1897,9 @@ function userProfileFieldLabel(field: (typeof USER_PROFILE_FIELDS)[number]): str
 
 export function renderRoleAdmin(
   state: RoleCatalogState,
-  options: { readonly error?: string } = {}
+  options: { readonly error?: string; readonly knownRoles?: readonly string[] } = {}
 ): string {
+  const catalogRoleNames = new Set(state.roles.map((role) => role.name));
   const rows = state.roles
     .map((role) => {
       const action = role.enabled ? "disable" : "enable";
@@ -1921,6 +1922,17 @@ export function renderRoleAdmin(
       </tr>`;
     })
     .join("");
+  const knownRows = (options.knownRoles ?? [])
+    .filter((role) => !catalogRoleNames.has(role))
+    .map((role) => `<tr>
+      ${renderTableCell("Role", escapeHtml(role))}
+      ${renderTableCell("Description", "Referenced by app metadata or the current actor")}
+      ${renderTableCell("Status", "known")}
+      ${renderTableCell("Role Version", "not cataloged")}
+      ${renderTableCell("Actions", `<span class="muted">Create this role to manage description or status.</span>`)}
+    </tr>`)
+    .join("");
+  const allRows = `${rows}${knownRows}`;
   return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
   <form class="panel form" method="post" action="/desk/admin/roles">
     <input type="hidden" name="expectedVersion" value="${String(state.version)}">
@@ -1936,7 +1948,7 @@ export function renderRoleAdmin(
     <div class="table-wrap">
       <table class="responsive-table">
         <thead><tr><th>Role</th><th>Description</th><th>Status</th><th>Role Version</th><th>Actions</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">No roles configured.</td></tr>`}</tbody>
+        <tbody>${allRows || `<tr><td colspan="5" class="empty">No roles configured.</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;

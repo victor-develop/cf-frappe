@@ -85,6 +85,7 @@ import { FrameworkError, badRequest, conflict } from "../../core/errors.js";
 import { isListFilterOperator } from "../../core/list-view.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
+import { normalizeRoleName } from "../../core/roles.js";
 import {
   isReportChartColor,
   isReportFilterGroup,
@@ -3043,7 +3044,10 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
 }
 
 async function deskRoleSuggestions(options: DeskAppOptions, actor: Actor): Promise<readonly string[]> {
-  const suggestions = new Set(actor.roles);
+  const suggestions = new Set<string>();
+  addRoleNames(suggestions, options.adminRoles ?? [SYSTEM_MANAGER_ROLE]);
+  addRoleNames(suggestions, actor.roles);
+  addRegistryRoleSuggestions(suggestions, options.registry);
   const roles = options.roles;
   if (roles === undefined) {
     return [...suggestions].sort((left, right) => left.localeCompare(right));
@@ -3061,6 +3065,78 @@ async function deskRoleSuggestions(options: DeskAppOptions, actor: Actor): Promi
     }
   }
   return [...suggestions].sort((left, right) => left.localeCompare(right));
+}
+
+function addRegistryRoleSuggestions(suggestions: Set<string>, registry: ModelRegistry): void {
+  for (const doctype of registry.list()) {
+    for (const rule of doctype.permissions ?? []) {
+      addRoleNames(suggestions, rule.roles);
+    }
+    for (const field of doctype.fields) {
+      for (const rule of field.permissions ?? []) {
+        addRoleNames(suggestions, rule.roles);
+      }
+    }
+    addRoleNames(suggestions, doctype.workflow?.transitions.flatMap((transition) => transition.roles ?? []));
+    for (const command of doctype.commands ?? []) {
+      addRoleNames(suggestions, command.roles);
+    }
+  }
+  for (const report of registry.listReports()) {
+    addRoleNames(suggestions, report.roles);
+  }
+  for (const dashboard of registry.listDashboards()) {
+    addRoleNames(suggestions, dashboard.roles);
+  }
+  for (const kanban of registry.listKanbans()) {
+    addRoleNames(suggestions, kanban.roles);
+  }
+  for (const calendar of registry.listCalendars()) {
+    addRoleNames(suggestions, calendar.roles);
+  }
+  for (const webForm of registry.listWebForms()) {
+    addRoleNames(suggestions, webForm.roles);
+  }
+  for (const webView of registry.listWebViews()) {
+    addRoleNames(suggestions, webView.roles);
+  }
+  for (const webPage of registry.listWebPages()) {
+    addRoleNames(suggestions, webPage.roles);
+  }
+  for (const printFormat of registry.listPrintFormats()) {
+    addRoleNames(suggestions, printFormat.roles);
+  }
+  for (const letterhead of registry.listPrintLetterheads()) {
+    addRoleNames(suggestions, letterhead.roles);
+  }
+  for (const workspace of registry.listWorkspaces()) {
+    addRoleNames(suggestions, workspace.roles);
+    for (const section of workspace.sections) {
+      for (const shortcut of section.shortcuts) {
+        addRoleNames(suggestions, shortcut.roles);
+      }
+    }
+  }
+  try {
+    const websiteSettings = registry.getWebsiteSettings();
+    addRoleNames(suggestions, websiteSettings.roles);
+    for (const item of websiteSettings.navItems ?? []) {
+      addRoleNames(suggestions, item.roles);
+    }
+  } catch (error) {
+    if (!(error instanceof FrameworkError && error.status === 404)) {
+      throw error;
+    }
+  }
+}
+
+function addRoleNames(suggestions: Set<string>, roles: readonly string[] | undefined): void {
+  for (const role of roles ?? []) {
+    const normalized = normalizeRoleName(role);
+    if (normalized.length > 0) {
+      suggestions.add(normalized);
+    }
+  }
 }
 
 async function deskUserSuggestions(
@@ -3774,6 +3850,7 @@ async function renderDeskRolePage(
 ): Promise<Response> {
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
+  const knownRoles = await deskRoleSuggestions(options, actor);
   return html(
     renderDeskLayoutFor(options, {
       title: "Roles",
@@ -3781,7 +3858,10 @@ async function renderDeskRolePage(
       adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
-      body: renderRoleAdmin(state, error === undefined ? {} : { error })
+      body: renderRoleAdmin(state, {
+        knownRoles,
+        ...(error === undefined ? {} : { error })
+      })
     }),
     status
   );

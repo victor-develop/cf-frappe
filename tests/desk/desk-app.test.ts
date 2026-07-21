@@ -4329,7 +4329,9 @@ describe("Desk app", () => {
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain("Roles");
     expect(emptyHtml).toContain("Create Role");
-    expect(emptyHtml).toContain("No roles configured.");
+    expect(emptyHtml).toContain('<td data-label="Role">System Manager</td>');
+    expect(emptyHtml).toContain("not cataloged");
+    expect(emptyHtml).not.toContain("No roles configured.");
     expect(emptyHtml).toContain('name="expectedVersion" value="0"');
 
     const created = await app.request("/desk/admin/roles", {
@@ -6214,6 +6216,30 @@ describe("Desk app", () => {
     await expect(userAccounts.get(admin, "agent@example.com")).resolves.toMatchObject({
       roles: ["Support", "User"]
     });
+  });
+
+  it("shows metadata-discovered roles in the role admin catalog", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      roles: new RoleService({ events: services.store }),
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/roles");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<td data-label="Role">Guest</td>');
+    expect(html).toContain('<td data-label="Role">System Manager</td>');
+    expect(html).toContain('<td data-label="Role">Task Manager</td>');
+    expect(html).toContain('<td data-label="Role">User</td>');
+    expect(html).toContain("Referenced by app metadata or the current actor");
+    expect(html).toContain("Create this role to manage description or status.");
+    expect(html).not.toContain("No roles configured.");
   });
 
   it("syncs auth-provider accounts from the Desk account admin surface", async () => {
