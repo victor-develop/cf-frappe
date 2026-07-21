@@ -389,7 +389,8 @@ describe("document command policy", () => {
       input: { title: "Updated", ignored: "nope" },
       patch: { title: "Updated" },
       permissionAction: "update",
-      allowReadOnlyFields: false
+      allowReadOnlyFields: false,
+      bypassFieldPermissions: false
     });
   });
 
@@ -414,7 +415,8 @@ describe("document command policy", () => {
       input: { title: "Reviewed" },
       patch: { title: "Reviewed @ 2026-06-28T02:00:00.000Z" },
       permissionAction: "metadata",
-      allowReadOnlyFields: true
+      allowReadOnlyFields: true,
+      bypassFieldPermissions: false
     });
   });
 

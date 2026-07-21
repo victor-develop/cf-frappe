@@ -1,3 +1,5 @@
+import { domainEventPayloadKind } from "../core/domain-events.js";
+import { notFound } from "../core/errors.js";
 import { userAccountsStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
@@ -24,11 +26,13 @@ import {
   userPasswordResetRequestedPayload,
   providerSyncChangesState,
   replayUserAccountAppend,
+  USER_ACCOUNT_PAYLOAD_KINDS,
   userRolesChangedPayload,
   type UserAccountEventPayload
 } from "./user-account-events.js";
 import {
   foldUserAccount,
+  isUserAccountStatePayloadKind,
   publicUserAccount,
   userAccountActor,
   type UserAccount,
@@ -37,6 +41,7 @@ import {
   type UserAccountState
 } from "../core/user-accounts.js";
 import type { AccountRecoveryNotifier } from "../ports/account-recovery.js";
+import type { AuditEventStore } from "../ports/audit-event-store.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
@@ -192,8 +197,13 @@ export interface AuthenticatedUserAccount {
   readonly account: UserAccount;
 }
 
+export interface UserAccountList {
+  readonly tenantId: TenantId;
+  readonly accounts: readonly UserAccount[];
+}
+
 export class UserAccountService {
-  private readonly events: EventStore;
+  private readonly events: EventStore & Partial<AuditEventStore>;
   private readonly passwords: PasswordHasher;
   private readonly tokenSecrets: PasswordHasher;
   private readonly recovery: AccountRecoveryNotifier | undefined;
@@ -259,6 +269,39 @@ export class UserAccountService {
     const resolvedTenantId = resolveUserAccountActorTenant(actor, tenantId);
     const state = await this.existingStateFor(resolvedTenantId, normalizeRequiredUserAccountText(userId, "User id"));
     return publicUserAccount(state);
+  }
+
+  async list(actor: Actor, tenantId?: TenantId): Promise<UserAccountList> {
+    ensureUserAccountAdmin(actor, this.adminRoles);
+    const resolvedTenantId = resolveUserAccountActorTenant(actor, tenantId);
+    const searchEvents = this.events.searchEvents;
+    if (searchEvents === undefined) {
+      throw notFound("User account catalog is not available");
+    }
+    const events = await searchEvents.call(this.events, {
+      tenantId: resolvedTenantId,
+      doctype: "__UserAccounts",
+      payloadKinds: USER_ACCOUNT_PAYLOAD_KINDS
+    });
+    const eventsByUser = new Map<string, DomainEvent<UserAccountEventPayload>[]>();
+    for (const event of events) {
+      if (!isUserAccountStatePayloadKind(domainEventPayloadKind(event))) {
+        continue;
+      }
+      const accountEvent = event as DomainEvent<UserAccountEventPayload>;
+      const userEvents = eventsByUser.get(accountEvent.payload.userId) ?? [];
+      userEvents.push(accountEvent);
+      eventsByUser.set(accountEvent.payload.userId, userEvents);
+    }
+    const accounts = [...eventsByUser.entries()]
+      .map(([userId, userEvents]) => foldUserAccount(resolvedTenantId, userId, userEvents))
+      .filter((state) => state.exists)
+      .map(publicUserAccount)
+      .sort((left, right) => left.userId.localeCompare(right.userId));
+    return Object.freeze({
+      tenantId: resolvedTenantId,
+      accounts: Object.freeze(accounts)
+    });
   }
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): void {

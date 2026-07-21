@@ -1,5 +1,9 @@
 import { permissionDenied } from "../core/errors.js";
 import {
+  projectDocTypeForFieldAccess,
+  projectDocTypeForFieldQueries
+} from "./document-field-access-policy.js";
+import {
   assertReportDefinition,
   assertReportMatchesDocType,
   isCustomReport,
@@ -33,6 +37,8 @@ import {
   projectReportDocumentRow,
   projectReportRow,
   reportCsvHeader,
+  restrictedReportFieldReferences,
+  restrictedReportQueryFieldReferences,
   reportRowToCsv,
   resolveReportOrder,
   sortReportDocuments,
@@ -42,7 +48,6 @@ import {
   type ReportFilters,
   type ReportGroupResult,
   type ReportOrderControlResult,
-  type ReportReadAccessDecision,
   type ReportRow,
   type ReportSummaryValue
 } from "./report-policy.js";
@@ -354,7 +359,15 @@ export class ReportService {
   }
 
   private canAccess(actor: Actor, report: ReportDefinition): boolean {
-    return this.reportReadAccess(actor, report).status === "allow";
+    try {
+      this.readableReport(actor, report);
+      return true;
+    } catch (error) {
+      if (isReportAccessDenied(error)) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   private readableReport(actor: Actor, report: ReportDefinition): DocTypeDefinition {
@@ -364,13 +377,15 @@ export class ReportService {
       throw permissionDenied(decision.message);
     }
     assertReportDefinition(report);
-    assertReportMatchesDocType(report, doctype);
-    return doctype;
-  }
-
-  private reportReadAccess(actor: Actor, report: ReportDefinition): ReportReadAccessDecision {
-    const doctype = this.registry.get(report.doctype);
-    return planReportReadAccess({ actor, report, doctype });
+    const visibleDoctype = projectDocTypeForFieldAccess({ actor, doctype, action: "read" });
+    const queryableDoctype = projectDocTypeForFieldQueries({ actor, doctype });
+    const restrictedFields = restrictedReportFieldReferences({ report, sourceDoctype: doctype, visibleDoctype });
+    const restrictedQueryFields = restrictedReportQueryFieldReferences({ report, sourceDoctype: doctype, queryableDoctype });
+    if (restrictedFields.length > 0 || restrictedQueryFields.length > 0) {
+      throw permissionDenied(`Actor '${actor.id}' cannot read report '${report.name}'`);
+    }
+    assertReportMatchesDocType(report, visibleDoctype);
+    return visibleDoctype;
   }
 
   private async listAllReadableDocuments(actor: Actor, doctype: string): Promise<readonly DocumentSnapshot[]> {
@@ -407,4 +422,8 @@ export class ReportService {
     const documents = await this.listAllReadableDocuments(actor, report.doctype);
     return documents.filter((document) => matchesReportFilters(document, report, input, filterExpression));
   }
+}
+
+function isReportAccessDenied(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "PERMISSION_DENIED";
 }

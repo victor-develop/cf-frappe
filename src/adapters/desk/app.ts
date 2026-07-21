@@ -703,7 +703,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const dashboard = await files.dashboard(actor, fileDashboardQueryFromUrl(url));
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
+    const documentSuggestions = await deskDocumentSuggestions(
+      options,
+      actor,
+      dashboard.filters.attachedToDoctype ?? fileDashboardAttachedDoctype(dashboard)
+    );
     const reports = listReports(options, actor);
     return html(
       renderDeskLayoutFor(options, {
@@ -712,7 +717,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         doctypes,
         reports,
         showFiles: true,
-        body: renderFileManager(dashboard)
+        body: renderFileManager(dashboard, { doctypes, documentSuggestions })
       })
     );
   });
@@ -844,19 +849,12 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const url = new URL(c.req.url);
     const userId = url.searchParams.get("user") ?? actor.id;
+    const targetDoctype = url.searchParams.get("targetDoctype") ?? "";
     const state = await userPermissions.getUserPermissions(actor, userId);
-    const doctypes = options.queries.listDoctypes(actor);
-    const reports = listReports(options, actor);
-    return html(
-      renderDeskLayoutFor(options, {
-        title: "User Permissions",
-        activeAdmin: "user-permissions",
-        adminLinks: adminLinksFor(options, actor),
-        doctypes,
-        reports,
-        body: renderUserPermissionAdmin(state)
-      })
-    );
+    return renderDeskUserPermissionPage(options, actor, state, 200, undefined, {
+      userId,
+      ...(targetDoctype ? { targetDoctype } : {})
+    });
   });
 
   app.get("/desk/admin/users", async (c) => {
@@ -894,7 +892,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     customFields.authorizeAdministration(actor);
     const url = new URL(c.req.url);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await customFields.list(actor, selectedDoctype) : undefined;
     return renderDeskCustomFieldPage(options, actor, selectedDoctype, state);
@@ -905,7 +903,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     fieldProperties.authorizeAdministration(actor);
     const url = new URL(c.req.url);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const doctype = selectedDoctype ? await options.queries.getEffectiveMeta(actor, selectedDoctype) : undefined;
     const selectedField = url.searchParams.get("field")?.trim() || doctype?.fields[0]?.name || "";
@@ -918,7 +916,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     workflows.authorizeAdministration(actor);
     const url = new URL(c.req.url);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const state = selectedDoctype ? await workflows.list(actor, selectedDoctype) : undefined;
     return renderDeskWorkflowPage(options, actor, selectedDoctype, state);
@@ -929,7 +927,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     notificationRules.authorizeAdministration(actor);
     const url = new URL(c.req.url);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const selectedRule = url.searchParams.get("rule")?.trim() || undefined;
     const state = selectedDoctype ? await notificationRules.list(actor, selectedDoctype) : undefined;
@@ -941,7 +939,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     assignmentRules.authorizeAdministration(actor);
     const url = new URL(c.req.url);
-    const doctypes = options.queries.listDoctypes(actor);
+    const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
     const selectedRule = url.searchParams.get("rule")?.trim() || undefined;
     const state = selectedDoctype ? await assignmentRules.list(actor, selectedDoctype) : undefined;
@@ -1313,33 +1311,43 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/admin/user-permissions", async (c) => {
     const userPermissions = requireUserPermissions(options);
     const actor = await options.actor(c.req.raw);
-    const form = await parseDeskUserPermission(c.req.raw);
-    await userPermissions.allow({
-      actor,
-      userId: form.userId,
-      targetDoctype: form.targetDoctype,
-      targetName: form.targetName,
-      ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
-      ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
-      metadata: requestMetadata(c.req.raw)
-    });
-    return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+    let form: ParsedDeskUserPermission | undefined;
+    try {
+      form = await parseDeskUserPermission(c.req.raw);
+      await userPermissions.allow({
+        actor,
+        userId: form.userId,
+        targetDoctype: form.targetDoctype,
+        targetName: form.targetName,
+        ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserPermissionFailure(options, actor, userPermissions, form, error);
+    }
   });
 
   app.post("/desk/admin/user-permissions/revoke", async (c) => {
     const userPermissions = requireUserPermissions(options);
     const actor = await options.actor(c.req.raw);
-    const form = await parseDeskUserPermission(c.req.raw);
-    await userPermissions.revoke({
-      actor,
-      userId: form.userId,
-      targetDoctype: form.targetDoctype,
-      targetName: form.targetName,
-      ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
-      ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
-      metadata: requestMetadata(c.req.raw)
-    });
-    return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+    let form: ParsedDeskUserPermission | undefined;
+    try {
+      form = await parseDeskUserPermission(c.req.raw);
+      await userPermissions.revoke({
+        actor,
+        userId: form.userId,
+        targetDoctype: form.targetDoctype,
+        targetName: form.targetName,
+        ...(form.applicableDoctypes.length > 0 ? { applicableDoctypes: form.applicableDoctypes } : {}),
+        ...(form.expectedVersion !== undefined ? { expectedVersion: form.expectedVersion } : {}),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(`/desk/admin/user-permissions?user=${encodeURIComponent(form.userId)}`, 303);
+    } catch (error) {
+      return renderDeskUserPermissionFailure(options, actor, userPermissions, form, error);
+    }
   });
 
   app.post("/desk/admin/users", async (c) => {
@@ -1361,7 +1369,23 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
     } catch (error) {
-      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+      return renderDeskUserAccountFailure(
+        options,
+        actor,
+        userAccounts,
+        form?.userId ?? "",
+        error,
+        form === undefined
+          ? {}
+          : {
+              createDraft: {
+                userId: form.userId,
+                ...(form.email === undefined ? {} : { email: form.email }),
+                roles: form.roles,
+                ...(form.enabled === undefined ? {} : { enabled: form.enabled })
+              }
+            }
+      );
     }
   });
 
@@ -1401,7 +1425,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
     } catch (error) {
-      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+      return renderDeskUserAccountFailure(
+        options,
+        actor,
+        userAccounts,
+        form?.userId ?? "",
+        error,
+        form === undefined ? {} : { roleDraft: { roles: form.roles } }
+      );
     }
   });
 
@@ -1426,7 +1457,26 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(`/desk/admin/users?user=${encodeURIComponent(form.userId)}`, 303);
     } catch (error) {
-      return renderDeskUserAccountFailure(options, actor, userAccounts, form?.userId ?? "", error);
+      return renderDeskUserAccountFailure(
+        options,
+        actor,
+        userAccounts,
+        form?.userId ?? "",
+        error,
+        form === undefined
+          ? {}
+          : {
+              providerSyncDraft: {
+                userId: form.userId,
+                provider: form.provider,
+                subject: form.subject,
+                ...(form.email === undefined ? {} : { email: form.email }),
+                roles: form.roles,
+                ...(form.enabled === undefined ? {} : { enabled: form.enabled }),
+                ...(form.emailVerified === undefined ? {} : { emailVerified: form.emailVerified })
+              }
+            }
+      );
     }
   });
 
@@ -1580,7 +1630,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(customFieldAdminHref(form.doctype), 303);
     } catch (error) {
-      return renderDeskCustomFieldFailure(options, actor, customFields, form?.doctype ?? "", error);
+      return renderDeskCustomFieldFailure(options, actor, customFields, form?.doctype ?? "", error, form?.field);
     }
   });
 
@@ -1620,7 +1670,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(fieldPropertyAdminHref(form.doctype, form.fieldName), 303);
     } catch (error) {
-      return renderDeskFieldPropertyFailure(options, actor, fieldProperties, form?.doctype ?? "", form?.fieldName ?? "", error);
+      return renderDeskFieldPropertyFailure(
+        options,
+        actor,
+        fieldProperties,
+        form?.doctype ?? "",
+        form?.fieldName ?? "",
+        error,
+        form?.overrides
+      );
     }
   });
 
@@ -1659,7 +1717,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(workflowAdminHref(form.doctype), 303);
     } catch (error) {
-      return renderDeskWorkflowFailure(options, actor, workflows, form?.doctype ?? "", error);
+      return renderDeskWorkflowFailure(options, actor, workflows, form?.doctype ?? "", error, form?.workflow);
     }
   });
 
@@ -1697,7 +1755,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(notificationRuleAdminHref(form.doctype, form.rule.name), 303);
     } catch (error) {
-      return renderDeskNotificationRuleFailure(options, actor, notificationRules, form?.doctype ?? "", error);
+      return renderDeskNotificationRuleFailure(
+        options,
+        actor,
+        notificationRules,
+        form?.doctype ?? "",
+        error,
+        form?.rule
+      );
     }
   });
 
@@ -1778,7 +1843,14 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       });
       return c.redirect(assignmentRuleAdminHref(form.doctype, form.rule.name), 303);
     } catch (error) {
-      return renderDeskAssignmentRuleFailure(options, actor, assignmentRules, form?.doctype ?? "", error);
+      return renderDeskAssignmentRuleFailure(
+        options,
+        actor,
+        assignmentRules,
+        form?.doctype ?? "",
+        error,
+        form?.rule
+      );
     }
   });
 
@@ -2102,12 +2174,16 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.get("/desk/:doctype/import-template.csv", async (c) => {
     const actor = await options.actor(c.req.raw);
-    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    if (!canImportDocuments(actor, doctype)) {
-      throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot import ${doctype.name}`, {
+    const readableDoctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    if (!canImportDocuments(actor, readableDoctype)) {
+      throw new FrameworkError("PERMISSION_DENIED", `Actor '${actor.id}' cannot import ${readableDoctype.name}`, {
         status: 403
       });
     }
+    const mode = deskCsvImportMode(c.req.query("mode")) ?? "create";
+    const doctype = mode === "create"
+      ? await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"))
+      : await options.queries.getEffectiveUpdateMeta(actor, c.req.param("doctype"));
     const template = documentImportTemplate(doctype);
     writeCsvDownloadHeaders(c, template);
     return c.body(template.body);
@@ -2291,7 +2367,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const url = new URL(c.req.url);
     const doctype = await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveCreateFormView(actor, doctype.name);
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "create");
     const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
     const doctypes = await listDeskDoctypes(options, actor);
     const reports = listReports(options, actor);
@@ -2319,7 +2395,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveCreateFormView(actor, doctype.name);
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "create");
     try {
       const snapshot = await options.documents.create({
         actor,
@@ -2577,7 +2653,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "create");
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       const snapshot = await options.documents.duplicate({
@@ -2599,7 +2675,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "create");
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       const snapshot = await options.documents.amend({
@@ -2621,7 +2697,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "update");
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
       await options.documents.update({
@@ -2643,7 +2719,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
     const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
-    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+    const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "update");
     try {
       const commandName = c.req.param("command");
       const commandDefinition = doctype.commands?.find((item) => item.name === commandName);
@@ -2866,7 +2942,7 @@ async function renderDeskError(
   const formView = mode === "create"
     ? await options.queries.getEffectiveCreateFormView(actor, doctype.name)
     : await options.queries.getEffectiveFormView(actor, doctype.name);
-  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, mode === "create" ? "create" : "read");
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const canUpdate = document ? await options.queries.canActOnDocument(actor, doctype, "update", document) : false;
@@ -2964,6 +3040,76 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
       ? []
       : [{ id: "job-schedules", label: "Job Schedules", href: "/desk/admin/jobs/schedules" }])
   ];
+}
+
+async function deskRoleSuggestions(options: DeskAppOptions, actor: Actor): Promise<readonly string[]> {
+  const suggestions = new Set(actor.roles);
+  const roles = options.roles;
+  if (roles === undefined) {
+    return [...suggestions].sort((left, right) => left.localeCompare(right));
+  }
+  try {
+    const state = await roles.list(actor);
+    for (const role of state.roles) {
+      if (role.enabled) {
+        suggestions.add(role.name);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof FrameworkError && (error.status === 403 || error.status === 404))) {
+      throw error;
+    }
+  }
+  return [...suggestions].sort((left, right) => left.localeCompare(right));
+}
+
+async function deskUserSuggestions(
+  options: DeskAppOptions,
+  actor: Actor,
+  staleUsers: readonly string[] = []
+): Promise<readonly string[]> {
+  const suggestions = new Set([actor.id, ...staleUsers].map((user) => user.trim()).filter(Boolean));
+  const userAccounts = options.userAccounts;
+  if (userAccounts === undefined) {
+    return [...suggestions].sort((left, right) => left.localeCompare(right));
+  }
+  try {
+    const state = await userAccounts.list(actor);
+    for (const account of state.accounts) {
+      if (account.enabled) {
+        suggestions.add(account.userId);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof FrameworkError && (error.status === 403 || error.status === 404))) {
+      throw error;
+    }
+  }
+  return [...suggestions].sort((left, right) => left.localeCompare(right));
+}
+
+async function deskDocumentSuggestions(
+  options: DeskAppOptions,
+  actor: Actor,
+  doctype: string
+): Promise<readonly DocumentSnapshot[]> {
+  const trimmed = doctype.trim();
+  if (!trimmed) {
+    return [];
+  }
+  try {
+    const result = await options.queries.listDocuments(actor, trimmed, { limit: 50 });
+    return result.data;
+  } catch (error) {
+    if (error instanceof FrameworkError && (error.status === 403 || error.status === 404)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function fileDashboardAttachedDoctype(dashboard: FileDashboard): string {
+  return dashboard.files.find((file) => file.attachedTo !== undefined)?.attachedTo?.doctype ?? "";
 }
 
 function listWorkspaces(options: DeskAppOptions, actor: Actor): readonly WorkspaceDefinition[] {
@@ -3341,7 +3487,12 @@ async function renderDeskFileFailure(
   const dashboardQuery = safeFileDashboardQueryFromUrl(new URL(request.url));
   const dashboard = await files.dashboard(actor, dashboardQuery)
     .catch(() => emptyFileDashboard(dashboardQuery, files.maxUploadBytes));
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const documentSuggestions = await deskDocumentSuggestions(
+    options,
+    actor,
+    dashboard.filters.attachedToDoctype ?? fileDashboardAttachedDoctype(dashboard)
+  );
   const reports = listReports(options, actor);
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -3351,9 +3502,63 @@ async function renderDeskFileFailure(
       doctypes,
       reports,
       showFiles: true,
-      body: renderFileManager(dashboard, { error: message })
+      body: renderFileManager(dashboard, { doctypes, documentSuggestions, error: message })
     }),
     error instanceof FrameworkError ? error.status : 500
+  );
+}
+
+async function renderDeskUserPermissionPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  state: Awaited<ReturnType<UserPermissionService["getUserPermissions"]>>,
+  status = 200,
+  error?: string,
+  draft?: Partial<ParsedDeskUserPermission>
+): Promise<Response> {
+  const doctypes = await listDeskDoctypes(options, actor);
+  const userSuggestions = await deskUserSuggestions(options, actor, [state.userId, draft?.userId ?? ""]);
+  const documentSuggestions = await deskDocumentSuggestions(options, actor, draft?.targetDoctype ?? "");
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "User Permissions",
+      activeAdmin: "user-permissions",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderUserPermissionAdmin(state, {
+        doctypes,
+        userSuggestions,
+        documentSuggestions,
+        ...(draft === undefined ? {} : { draft }),
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskUserPermissionFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  userPermissions: UserPermissionService,
+  form: ParsedDeskUserPermission | undefined,
+  error: unknown
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const userId = form?.userId || actor.id;
+  const state = await userPermissions.getUserPermissions(actor, userId);
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskUserPermissionPage(
+    options,
+    actor,
+    state,
+    error instanceof FrameworkError ? error.status : 500,
+    message,
+    form
   );
 }
 
@@ -3368,7 +3573,7 @@ async function renderDeskDataPatchPage(
     | { readonly kind: "rollback"; readonly plan: DataPatchRollbackPlan },
   message?: string
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3509,8 +3714,9 @@ async function renderDeskUserAccountPage(
   state: Parameters<typeof renderUserAccountAdmin>[0],
   status = 200
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
+  const roleSuggestions = await deskRoleSuggestions(options, actor);
   const profile = state.account && options.userProfiles
     ? await options.userProfiles.get(actor, state.account.userId).catch(() => undefined)
     : undefined;
@@ -3523,6 +3729,7 @@ async function renderDeskUserAccountPage(
       reports,
       body: renderUserAccountAdmin({
         ...state,
+        roleSuggestions,
         ...(profile === undefined ? {} : { profile })
       })
     }),
@@ -3535,7 +3742,8 @@ async function renderDeskUserAccountFailure(
   actor: Actor,
   userAccounts: UserAccountService,
   selectedUserId: string,
-  error: unknown
+  error: unknown,
+  draft: Partial<Parameters<typeof renderUserAccountAdmin>[0]> = {}
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
@@ -3550,6 +3758,7 @@ async function renderDeskUserAccountFailure(
     {
       selectedUserId,
       ...(account === undefined ? {} : { account }),
+      ...draft,
       error: message
     },
     error instanceof FrameworkError ? error.status : 500
@@ -3563,7 +3772,7 @@ async function renderDeskRolePage(
   status = 200,
   error?: string
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3598,9 +3807,11 @@ async function renderDeskCustomFieldPage(
   selectedDoctype: string,
   state: Awaited<ReturnType<CustomFieldService["list"]>> | undefined,
   status = 200,
-  error?: string
+  error?: string,
+  draftField?: FieldDefinition
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3612,6 +3823,8 @@ async function renderDeskCustomFieldPage(
       body: renderCustomFieldAdmin({
         doctypes,
         selectedDoctype,
+        ...(doctype === undefined ? {} : { doctype }),
+        ...(draftField === undefined ? {} : { draftField }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3625,12 +3838,13 @@ async function renderDeskCustomFieldFailure(
   actor: Actor,
   customFields: CustomFieldService,
   selectedDoctype: string,
-  error: unknown
+  error: unknown,
+  draftField?: FieldDefinition
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
   }
-  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
   let state: Awaited<ReturnType<CustomFieldService["list"]>> | undefined;
   try {
     state = fallbackDoctype ? await customFields.list(actor, fallbackDoctype) : undefined;
@@ -3646,7 +3860,8 @@ async function renderDeskCustomFieldFailure(
     fallbackDoctype,
     state,
     error instanceof FrameworkError ? error.status : 500,
-    message
+    message,
+    draftField
   );
 }
 
@@ -3658,9 +3873,11 @@ async function renderDeskFieldPropertyPage(
   doctype: DocTypeDefinition | undefined,
   state: Awaited<ReturnType<FieldPropertyService["list"]>> | undefined,
   status = 200,
-  error?: string
+  error?: string,
+  draftOverrides?: FieldPropertyOverrides
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const selectedEffectiveDoctype = doctype ?? doctypes.find((item) => item.name === selectedDoctype);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3673,7 +3890,8 @@ async function renderDeskFieldPropertyPage(
         doctypes,
         selectedDoctype,
         selectedField,
-        ...(doctype === undefined ? {} : { doctype }),
+        ...(selectedEffectiveDoctype === undefined ? {} : { doctype: selectedEffectiveDoctype }),
+        ...(draftOverrides === undefined ? {} : { draftOverrides }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3688,12 +3906,13 @@ async function renderDeskFieldPropertyFailure(
   fieldProperties: FieldPropertyService,
   selectedDoctype: string,
   selectedField: string,
-  error: unknown
+  error: unknown,
+  draftOverrides?: FieldPropertyOverrides
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
   }
-  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
   let doctype: DocTypeDefinition | undefined;
   let state: Awaited<ReturnType<FieldPropertyService["list"]>> | undefined;
   try {
@@ -3714,7 +3933,8 @@ async function renderDeskFieldPropertyFailure(
     doctype,
     state,
     error instanceof FrameworkError ? error.status : 500,
-    message
+    message,
+    draftOverrides
   );
 }
 
@@ -3724,9 +3944,12 @@ async function renderDeskWorkflowPage(
   selectedDoctype: string,
   state: Awaited<ReturnType<WorkflowService["list"]>> | undefined,
   status = 200,
-  error?: string
+  error?: string,
+  draftWorkflow?: WorkflowDefinition
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
+  const roleSuggestions = await deskRoleSuggestions(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3738,6 +3961,9 @@ async function renderDeskWorkflowPage(
       body: renderWorkflowAdmin({
         doctypes,
         selectedDoctype,
+        ...(doctype === undefined ? {} : { doctype }),
+        roleSuggestions,
+        ...(draftWorkflow === undefined ? {} : { draftWorkflow }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3751,12 +3977,13 @@ async function renderDeskWorkflowFailure(
   actor: Actor,
   workflows: WorkflowService,
   selectedDoctype: string,
-  error: unknown
+  error: unknown,
+  draftWorkflow?: WorkflowDefinition
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
   }
-  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
   let state: Awaited<ReturnType<WorkflowService["list"]>> | undefined;
   try {
     state = fallbackDoctype ? await workflows.list(actor, fallbackDoctype) : undefined;
@@ -3772,7 +3999,8 @@ async function renderDeskWorkflowFailure(
     fallbackDoctype,
     state,
     error instanceof FrameworkError ? error.status : 500,
-    message
+    message,
+    draftWorkflow
   );
 }
 
@@ -3783,9 +4011,12 @@ async function renderDeskNotificationRulePage(
   state: Awaited<ReturnType<NotificationRuleService["list"]>> | undefined,
   status = 200,
   error?: string,
-  selectedRuleName?: string
+  selectedRuleName?: string,
+  draftRule?: NotificationRuleDefinition
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
+  const userSuggestions = await deskUserSuggestions(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3797,7 +4028,10 @@ async function renderDeskNotificationRulePage(
       body: renderNotificationRuleAdmin({
         doctypes,
         selectedDoctype,
+        ...(doctype === undefined ? {} : { doctype }),
+        userSuggestions,
         ...(selectedRuleName === undefined ? {} : { selectedRuleName }),
+        ...(draftRule === undefined ? {} : { draftRule }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3811,12 +4045,13 @@ async function renderDeskNotificationRuleFailure(
   actor: Actor,
   notificationRules: NotificationRuleService,
   selectedDoctype: string,
-  error: unknown
+  error: unknown,
+  draftRule?: NotificationRuleDefinition
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
   }
-  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
   let state: Awaited<ReturnType<NotificationRuleService["list"]>> | undefined;
   try {
     state = fallbackDoctype ? await notificationRules.list(actor, fallbackDoctype) : undefined;
@@ -3832,7 +4067,9 @@ async function renderDeskNotificationRuleFailure(
     fallbackDoctype,
     state,
     error instanceof FrameworkError ? error.status : 500,
-    message
+    message,
+    draftRule?.name,
+    draftRule
   );
 }
 
@@ -3876,9 +4113,12 @@ async function renderDeskAssignmentRulePage(
   state: Awaited<ReturnType<AssignmentRuleService["list"]>> | undefined,
   status = 200,
   error?: string,
-  selectedRuleName?: string
+  selectedRuleName?: string,
+  draftRule?: AssignmentRuleDefinition
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
+  const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
+  const userSuggestions = await deskUserSuggestions(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
@@ -3890,7 +4130,10 @@ async function renderDeskAssignmentRulePage(
       body: renderAssignmentRuleAdmin({
         doctypes,
         selectedDoctype,
+        ...(doctype === undefined ? {} : { doctype }),
+        userSuggestions,
         ...(selectedRuleName === undefined ? {} : { selectedRuleName }),
+        ...(draftRule === undefined ? {} : { draftRule }),
         ...(state === undefined ? {} : { state }),
         ...(error === undefined ? {} : { error })
       })
@@ -3904,12 +4147,13 @@ async function renderDeskAssignmentRuleFailure(
   actor: Actor,
   assignmentRules: AssignmentRuleService,
   selectedDoctype: string,
-  error: unknown
+  error: unknown,
+  draftRule?: AssignmentRuleDefinition
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
   }
-  const fallbackDoctype = selectedDoctype || options.queries.listDoctypes(actor)[0]?.name || "";
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
   let state: Awaited<ReturnType<AssignmentRuleService["list"]>> | undefined;
   try {
     state = fallbackDoctype ? await assignmentRules.list(actor, fallbackDoctype) : undefined;
@@ -3925,7 +4169,9 @@ async function renderDeskAssignmentRuleFailure(
     fallbackDoctype,
     state,
     error instanceof FrameworkError ? error.status : 500,
-    message
+    message,
+    draftRule?.name,
+    draftRule
   );
 }
 
@@ -4005,7 +4251,7 @@ async function renderDeskDocumentPage(
   const printFormats = listPrintFormats(options, actor, doctype.name);
   const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
   const document = await options.queries.getDocument(actor, doctype.name, name);
-  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView);
+  const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "read");
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
   const workflowActions = workflowActionsFor(actor, doctype, document);
@@ -4284,10 +4530,11 @@ async function tableDefinitionsForForm(
   options: DeskAppOptions,
   actor: Actor,
   doctype: DocTypeDefinition,
-  formView: ResolvedFormView
+  formView: ResolvedFormView,
+  action: "read" | "create" | "update"
 ): Promise<FormTableDefinitions> {
   const nestedEntries = await Promise.all(
-    formView.fields.map((field) => tableDefinitionEntriesForField(options, actor, field, field.name, [doctype.name]))
+    formView.fields.map((field) => tableDefinitionEntriesForField(options, actor, field, field.name, [doctype.name], action))
   );
   const entries = nestedEntries.flat();
   return Object.fromEntries(entries) as FormTableDefinitions;
@@ -4298,12 +4545,13 @@ async function tableDefinitionEntriesForField(
   actor: Actor,
   field: FieldDefinition,
   path: string,
-  visitedDoctypes: readonly string[]
+  visitedDoctypes: readonly string[],
+  action: "read" | "create" | "update"
 ): Promise<readonly (readonly [string, DocTypeDefinition])[]> {
   if (field.type !== "table" || !field.tableOf) {
     return [];
   }
-  const child = await options.queries.resolveEffectiveDocType(actor, field.tableOf);
+  const child = await options.queries.resolveEffectiveChildDocType(actor, field.tableOf, action);
   if (visitedDoctypes.includes(child.name)) {
     return [[path, child] as const];
   }
@@ -4312,7 +4560,7 @@ async function tableDefinitionEntriesForField(
       tableDefinitionEntriesForField(options, actor, childField, `${path}.${childField.name}`, [
         ...visitedDoctypes,
         child.name
-      ])
+      ], action)
     )
   );
   return [[path, child] as const, ...nested.flat()];
@@ -5286,7 +5534,7 @@ async function parseDeskWorkflow(request: Request): Promise<ParsedDeskWorkflow> 
       ...(stateField === undefined ? {} : { stateField }),
       initialState: requiredSearchParamValue(form, "initialState", "Initial state"),
       states: workflowStatesFormValue(form.get("states")),
-      transitions: workflowTransitionsFormValue(form.get("transitions"))
+      transitions: workflowTransitionsFormValue(form)
     },
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
@@ -5303,7 +5551,7 @@ async function parseDeskWorkflowClear(request: Request): Promise<ParsedDeskWorkf
 async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNotificationRule> {
   const form = await readUrlEncodedDeskForm(request);
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
-  const channels = notificationRuleChannelsFormValue(form.get("channels"));
+  const channels = notificationRuleChannelsFormValue(form);
   const condition = notificationRuleConditionFormValue(form);
   const enabled = optionalBooleanSearchParamValue(form, "enabled", "Notification rule enabled");
   const excludeActor = optionalBooleanSearchParamValue(form, "excludeActor", "Notification rule exclude actor");
@@ -5313,9 +5561,9 @@ async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNo
     rule: {
       name: requiredSearchParamValue(form, "name", "Notification rule name"),
       ...(enabled === undefined ? {} : { enabled }),
-      events: notificationRuleEventsFormValue(form.get("events")),
-      recipients: notificationRuleRecipientsFormValue(form.get("recipients")),
-      ...(channels.length === 0 ? {} : { channels }),
+      events: notificationRuleEventsFormValue(form),
+      recipients: notificationRuleRecipientsFormValue(form),
+      ...(channels === undefined ? {} : { channels }),
       ...(condition === undefined ? {} : { condition }),
       ...(subject === undefined ? {} : { subject }),
       ...(excludeActor === undefined ? {} : { excludeActor })
@@ -5343,8 +5591,8 @@ async function parseDeskAssignmentRule(request: Request): Promise<ParsedDeskAssi
     rule: {
       name: requiredSearchParamValue(form, "name", "Assignment rule name"),
       ...(enabled === undefined ? {} : { enabled }),
-      events: assignmentRuleEventsFormValue(form.get("events")),
-      assignees: assignmentRuleAssigneesFormValue(form.get("assignees")),
+      events: assignmentRuleEventsFormValue(form),
+      assignees: assignmentRuleAssigneesFormValue(form),
       ...(condition === undefined ? {} : { condition }),
       ...(excludeActor === undefined ? {} : { excludeActor })
     },
@@ -5413,14 +5661,20 @@ function workflowStatesFormValue(value: string | null): readonly string[] {
     .filter(Boolean);
 }
 
-function workflowTransitionsFormValue(value: string | null): readonly WorkflowTransition[] {
-  if (value === null) {
-    return [];
+function workflowTransitionsFormValue(form: URLSearchParams): readonly WorkflowTransition[] {
+  const rows = workflowTransitionRowsFormValue(form);
+  if (rows !== undefined) {
+    return rows;
   }
-  return value
+  return workflowTransitionLinesFormValue(form.getAll("transitions"));
+}
+
+function workflowTransitionLinesFormValue(values: readonly string[]): readonly WorkflowTransition[] {
+  return values
+    .flatMap((value) => value
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
+      .filter(Boolean))
     .map((line) => {
       const [action = "", from = "", to = "", roles = "", eventType = ""] = line.split("|").map((part) => part.trim());
       return {
@@ -5433,12 +5687,44 @@ function workflowTransitionsFormValue(value: string | null): readonly WorkflowTr
     });
 }
 
-function notificationRuleEventsFormValue(value: FormDataEntryValue | null): readonly NotificationRuleEventKind[] {
-  return lineListFormValue(value) as readonly NotificationRuleEventKind[];
+function workflowTransitionRowsFormValue(form: URLSearchParams): readonly WorkflowTransition[] | undefined {
+  const actions = form.getAll("transitionAction");
+  const fromStates = form.getAll("transitionFrom");
+  const toStates = form.getAll("transitionTo");
+  const roles = form.getAll("transitionRoles");
+  const eventTypes = form.getAll("transitionEventType");
+  const length = Math.max(actions.length, fromStates.length, toStates.length, roles.length, eventTypes.length);
+  const rows: WorkflowTransition[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const action = (actions[index] ?? "").trim();
+    const from = (fromStates[index] ?? "").trim();
+    const to = (toStates[index] ?? "").trim();
+    const roleList = (roles[index] ?? "").trim();
+    const eventType = (eventTypes[index] ?? "").trim();
+    if (!action && !from && !to && !roleList && !eventType) {
+      continue;
+    }
+    if (!action || !from || !to) {
+      throw new FrameworkError("BAD_REQUEST", "Workflow transition rows require action, from, and to", { status: 400 });
+    }
+    rows.push({
+      action,
+      from,
+      to,
+      ...optionalWorkflowRoles(roleList),
+      ...(eventType === "" ? {} : { eventType })
+    });
+  }
+  return rows.length === 0 ? undefined : rows;
 }
 
-function notificationRuleChannelsFormValue(value: FormDataEntryValue | null): readonly NotificationRuleChannel[] {
-  return lineListFormValue(value) as readonly NotificationRuleChannel[];
+function notificationRuleEventsFormValue(form: URLSearchParams): readonly NotificationRuleEventKind[] {
+  return lineListFormValues(form, "events") as readonly NotificationRuleEventKind[];
+}
+
+function notificationRuleChannelsFormValue(form: URLSearchParams): readonly NotificationRuleChannel[] | undefined {
+  const channels = lineListFormValues(form, "channels") as readonly NotificationRuleChannel[];
+  return channels.length === 0 ? undefined : channels;
 }
 
 function notificationRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
@@ -5452,10 +5738,12 @@ function notificationRuleConditionFormValue(form: URLSearchParams): ListFilterEx
   throw new FrameworkError("BAD_REQUEST", "Notification rule condition must be a JSON object", { status: 400 });
 }
 
-function notificationRuleRecipientsFormValue(
-  value: FormDataEntryValue | null
-): readonly NotificationRuleRecipientDefinition[] {
-  return lineListFormValue(value).map((line) => {
+function notificationRuleRecipientsFormValue(form: URLSearchParams): readonly NotificationRuleRecipientDefinition[] {
+  return notificationRuleRecipientRowsFormValue(form) ?? notificationRuleRecipientLinesFormValue(lineListFormValues(form, "recipients"));
+}
+
+function notificationRuleRecipientLinesFormValue(lines: readonly string[]): readonly NotificationRuleRecipientDefinition[] {
+  return lines.map((line) => {
     if (line === "documentOwner") {
       return { kind: "documentOwner" };
     }
@@ -5476,8 +5764,42 @@ function notificationRuleRecipientsFormValue(
   });
 }
 
-function assignmentRuleEventsFormValue(value: FormDataEntryValue | null): readonly AssignmentRuleEventKind[] {
-  return lineListFormValue(value) as readonly AssignmentRuleEventKind[];
+function notificationRuleRecipientRowsFormValue(form: URLSearchParams): readonly NotificationRuleRecipientDefinition[] | undefined {
+  const kinds = form.getAll("recipientKind");
+  const fields = form.getAll("recipientField");
+  const users = form.getAll("recipientUser");
+  const length = Math.max(kinds.length, fields.length, users.length);
+  const rows: NotificationRuleRecipientDefinition[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const kind = (kinds[index] ?? "").trim();
+    const field = (fields[index] ?? "").trim();
+    const user = (users[index] ?? "").trim();
+    if (!kind && !field && !user) {
+      continue;
+    }
+    if (kind === "documentOwner") {
+      rows.push({ kind: "documentOwner" });
+      continue;
+    }
+    if (kind === "field" && field) {
+      rows.push({ kind: "field", field });
+      continue;
+    }
+    if (kind === "user" && user) {
+      rows.push({ kind: "user", userId: user });
+      continue;
+    }
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      "Notification rule recipient rows require a kind and matching field or user",
+      { status: 400 }
+    );
+  }
+  return rows.length === 0 ? undefined : rows;
+}
+
+function assignmentRuleEventsFormValue(form: URLSearchParams): readonly AssignmentRuleEventKind[] {
+  return lineListFormValues(form, "events") as readonly AssignmentRuleEventKind[];
 }
 
 function assignmentRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
@@ -5524,10 +5846,12 @@ function hiddenDependsOnFormValue(form: URLSearchParams): ListFilterExpression |
   throw new FrameworkError("BAD_REQUEST", "Hidden depends on must be a JSON object", { status: 400 });
 }
 
-function assignmentRuleAssigneesFormValue(
-  value: FormDataEntryValue | null
-): readonly AssignmentRuleAssigneeDefinition[] {
-  return lineListFormValue(value).map((line) => {
+function assignmentRuleAssigneesFormValue(form: URLSearchParams): readonly AssignmentRuleAssigneeDefinition[] {
+  return assignmentRuleAssigneeRowsFormValue(form) ?? assignmentRuleAssigneeLinesFormValue(lineListFormValues(form, "assignees"));
+}
+
+function assignmentRuleAssigneeLinesFormValue(lines: readonly string[]): readonly AssignmentRuleAssigneeDefinition[] {
+  return lines.map((line) => {
     const separator = line.indexOf(":");
     const kind = separator === -1 ? "" : line.slice(0, separator).trim();
     const target = separator === -1 ? "" : line.slice(separator + 1).trim();
@@ -5545,12 +5869,39 @@ function assignmentRuleAssigneesFormValue(
   });
 }
 
-function lineListFormValue(value: FormDataEntryValue | null): readonly string[] {
-  if (typeof value !== "string") {
-    return [];
+function assignmentRuleAssigneeRowsFormValue(form: URLSearchParams): readonly AssignmentRuleAssigneeDefinition[] | undefined {
+  const kinds = form.getAll("assigneeKind");
+  const fields = form.getAll("assigneeField");
+  const users = form.getAll("assigneeUser");
+  const length = Math.max(kinds.length, fields.length, users.length);
+  const rows: AssignmentRuleAssigneeDefinition[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const kind = (kinds[index] ?? "").trim();
+    const field = (fields[index] ?? "").trim();
+    const user = (users[index] ?? "").trim();
+    if (!kind && !field && !user) {
+      continue;
+    }
+    if (kind === "field" && field) {
+      rows.push({ kind: "field", field });
+      continue;
+    }
+    if (kind === "user" && user) {
+      rows.push({ kind: "user", userId: user });
+      continue;
+    }
+    throw new FrameworkError(
+      "BAD_REQUEST",
+      "Assignment rule assignee rows require a kind and matching field or user",
+      { status: 400 }
+    );
   }
-  return value
-    .split(/[\n,]/)
+  return rows.length === 0 ? undefined : rows;
+}
+
+function lineListFormValues(form: URLSearchParams, key: string): readonly string[] {
+  return form.getAll(key)
+    .flatMap((value) => value.split(/[\n,]/))
     .map((item) => item.trim())
     .filter(Boolean);
 }

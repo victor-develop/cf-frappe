@@ -119,6 +119,7 @@ export interface DocumentUpdateValidationIssueGroups {
   readonly originIssues?: readonly ValidationIssue[] | undefined;
   readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
+  readonly fieldPermissionIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
 }
@@ -132,6 +133,7 @@ export function documentUpdateValidationIssues(
     ...(groups.originIssues ?? []),
     ...(groups.workflowStateIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
+    ...(groups.fieldPermissionIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])
   ];
@@ -139,6 +141,7 @@ export function documentUpdateValidationIssues(
 
 export interface DocumentCreateValidationIssueGroups {
   readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
+  readonly fieldPermissionIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
 }
@@ -148,6 +151,7 @@ export function documentCreateValidationIssues(
 ): readonly ValidationIssue[] {
   return [
     ...(groups.workflowStateIssues ?? []),
+    ...(groups.fieldPermissionIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])
   ];
@@ -157,6 +161,7 @@ export interface DocumentDomainCommandValidationIssueGroups {
   readonly originIssues?: readonly ValidationIssue[] | undefined;
   readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
+  readonly fieldPermissionIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
   readonly linkIssues?: readonly ValidationIssue[] | undefined;
 }
@@ -168,6 +173,7 @@ export function documentDomainCommandValidationIssues(
     ...(groups.originIssues ?? []),
     ...(groups.workflowStateIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
+    ...(groups.fieldPermissionIssues ?? []),
     ...(groups.validationIssues ?? []),
     ...(groups.linkIssues ?? [])
   ];
@@ -276,6 +282,7 @@ export interface DomainCommandPolicyPlan {
   readonly patch: DocumentData;
   readonly permissionAction: PermissionAction;
   readonly allowReadOnlyFields: boolean;
+  readonly bypassFieldPermissions: boolean;
 }
 
 export function canExecuteDomainCommandForRoles(
@@ -337,7 +344,8 @@ export function planDomainCommandPolicy(input: {
     input: commandInput,
     patch: compactData(patch),
     permissionAction: input.definition.permissionAction ?? "update",
-    allowReadOnlyFields: input.definition.allowReadOnlyFields ?? false
+    allowReadOnlyFields: input.definition.allowReadOnlyFields ?? false,
+    bypassFieldPermissions: input.definition.bypassFieldPermissions ?? false
   };
 }
 

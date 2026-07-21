@@ -21,7 +21,7 @@ export * from "./document-import-policy.js";
 
 export interface DocumentImportServiceOptions {
   readonly documents: Pick<DocumentCommandExecutor, "create" | "update">;
-  readonly queries: Pick<QueryService, "getEffectiveMeta">;
+  readonly queries: Pick<QueryService, "getEffectiveCreateMeta" | "getEffectiveUpdateMeta">;
   readonly maxRows?: number;
 }
 
@@ -35,7 +35,7 @@ export interface ImportDocumentsCsvCommand {
 
 export class DocumentImportService {
   private readonly documents: Pick<DocumentCommandExecutor, "create" | "update">;
-  private readonly queries: Pick<QueryService, "getEffectiveMeta">;
+  private readonly queries: Pick<QueryService, "getEffectiveCreateMeta" | "getEffectiveUpdateMeta">;
   private readonly maxRows: number;
 
   constructor(options: DocumentImportServiceOptions) {
@@ -48,7 +48,9 @@ export class DocumentImportService {
     const mode = command.mode ?? "create";
     const parsed = parseCsv(command.csv);
     assertImportRowLimit(parsed.rows.length, this.maxRows);
-    const doctype = await this.queries.getEffectiveMeta(command.actor, command.doctype);
+    const doctype = mode === "create"
+      ? await this.queries.getEffectiveCreateMeta(command.actor, command.doctype)
+      : await this.queries.getEffectiveUpdateMeta(command.actor, command.doctype);
     validateImportHeaders(doctype, parsed.headers);
 
     const succeeded: DocumentImportSuccess[] = [];

@@ -91,6 +91,40 @@ describe("UserAccountService", () => {
     ]);
   });
 
+  it("lists folded accounts for administrators and keeps disabled accounts visible to callers", async () => {
+    const events = new InMemoryEventStore();
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["create-enabled", "create-disabled"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+
+    await userAccounts.create({
+      actor: admin,
+      userId: "enabled@example.com",
+      password: "secret-123",
+      roles: ["User"],
+      enabled: true
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "disabled@example.com",
+      password: "secret-123",
+      roles: ["User"],
+      enabled: false
+    });
+
+    await expect(userAccounts.list(admin)).resolves.toMatchObject({
+      tenantId: "acme",
+      accounts: [
+        { userId: "disabled@example.com", enabled: false },
+        { userId: "enabled@example.com", enabled: true }
+      ]
+    });
+    await expect(userAccounts.list(owner)).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
   it("changes roles, password, and enabled state through optimistic account events", async () => {
     const events = new InMemoryEventStore();
     const userAccounts = new UserAccountService({

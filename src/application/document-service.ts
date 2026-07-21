@@ -133,6 +133,11 @@ import {
   workflowStateCreateIssues,
   workflowStateMutationIssues
 } from "./document-field-policy.js";
+import {
+  fieldPermissionIssues,
+  projectDocumentMergePlanForFieldAccess,
+  redactDocumentSnapshot
+} from "./document-field-access-policy.js";
 import { documentStream, namingSeriesStream } from "../core/streams.js";
 import {
   type UserPermissionProvider
@@ -151,6 +156,7 @@ import type { DocumentCommit, DocumentStore } from "../ports/document-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
+  SYSTEM_MANAGER_ROLE,
   type Actor,
   type DocStatus,
   type DocTypeDefinition,
@@ -576,8 +582,29 @@ export class DocumentService implements DocumentCommandExecutor {
       withFetchedFields,
       relatedDocType
     );
+    const userSuppliedData = stripInternalTableFields(
+      doctype,
+      compactData(command.data),
+      relatedDocType
+    );
+    const draft = draftDocumentSnapshot({
+      tenantId,
+      doctype,
+      name: command.name ?? "",
+      version: 0,
+      data,
+      now
+    });
     const issues = documentCreateValidationIssues({
       workflowStateIssues: workflowStateCreateIssues(doctype, data),
+      fieldPermissionIssues: fieldPermissionIssues({
+        actor: command.actor,
+        action: "create",
+        doctype,
+        data: userSuppliedData,
+        relatedDocType,
+        document: draft
+      }),
       validationIssues: await this.validate(doctype, data, relatedDocType),
       linkIssues: await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType)
     });
@@ -657,7 +684,7 @@ export class DocumentService implements DocumentCommandExecutor {
             };
           }
         );
-        return this.finishAfterCommit(doctype, commit, requireSavedEvent(commit.events, event.id));
+        return this.finishAfterCommit(command.actor, doctype, commit, requireSavedEvent(commit.events, event.id), relatedDocType);
       } catch (error) {
         if (
           nameResolution.namingSeriesWrite !== undefined &&
@@ -710,20 +737,53 @@ export class DocumentService implements DocumentCommandExecutor {
     });
 
     const patch = await this.runBeforeValidate(doctype, compactData(command.patch), existing);
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, patch, relatedDocType);
     const normalizedPatch = preserveReadOnlyTableValues(doctype, patch, existing, relatedDocType);
     const unset = normalizeUnsetFields(command.unset);
+    const preflightDraft = {
+      ...existing,
+      data: applyDocumentDataChange(existing.data, normalizedPatch, unset),
+      version: existing.version + 1
+    };
+    const fieldAccessIssues = fieldPermissionIssues({
+      actor: command.actor,
+      action: "update",
+      doctype,
+      data: patchWithoutInternalFields,
+      relatedDocType,
+      document: preflightDraft,
+      unset
+    });
+    if (fieldAccessIssues.length > 0) {
+      throw validationFailed(fieldAccessIssues);
+    }
     const draft = applyDocumentDataChange(base.data, normalizedPatch, unset);
     const plan = planDocumentFieldMerge({
       base: mergeSnapshotFromDocument(base),
       remote: mergeSnapshotFromDocument(existing),
       draft
     });
+    const responsePlan = projectDocumentMergePlanForFieldAccess({
+      actor: command.actor,
+      doctype,
+      document: existing,
+      plan,
+      relatedDocType
+    });
     const disposition = documentMergeDisposition(plan);
     if (disposition === "conflict") {
-      return { status: "conflict", plan, document: existing };
+      return {
+        status: "conflict",
+        plan: responsePlan,
+        document: await this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType)
+      };
     }
     if (disposition === "noop") {
-      return { status: "noop", plan, document: existing };
+      return {
+        status: "noop",
+        plan: responsePlan,
+        document: await this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType)
+      };
     }
 
     const document = await this.applyDocumentUpdate({
@@ -738,7 +798,7 @@ export class DocumentService implements DocumentCommandExecutor {
       tenantId,
       unset: plan.unset
     });
-    return { status: "applied", plan, document };
+    return { status: "applied", plan: responsePlan, document };
   }
 
   private async applyDocumentUpdate(options: {
@@ -794,6 +854,11 @@ export class DocumentService implements DocumentCommandExecutor {
       options.relatedDocType
     );
     const data = applyDocumentDataChange(options.existing.data, normalizedPatch, unset);
+    const draft = {
+      ...options.existing,
+      data,
+      version: options.existing.version + 1
+    };
     const readOnlyIssues = readonlyIssues(
       options.doctype,
       patchWithoutInternalFields,
@@ -801,6 +866,15 @@ export class DocumentService implements DocumentCommandExecutor {
       data,
       unset
     );
+    const fieldAccessIssues = fieldPermissionIssues({
+      actor: options.command.actor,
+      action: "update",
+      doctype: options.doctype,
+      data: patchWithoutInternalFields,
+      relatedDocType: options.relatedDocType,
+      document: draft,
+      unset
+    });
     const validationIssues = await this.validate(
       options.doctype,
       normalizedPatch,
@@ -821,6 +895,7 @@ export class DocumentService implements DocumentCommandExecutor {
       originIssues,
       workflowStateIssues: workflowStateMutationIssues(options.doctype, fetchedPatchWithoutInternalFields, unset),
       readOnlyIssues,
+      fieldPermissionIssues: fieldAccessIssues,
       validationIssues,
       linkIssues
     });
@@ -899,7 +974,7 @@ export class DocumentService implements DocumentCommandExecutor {
       }
     );
     const saved = requireSavedEvent(commit.events, event.id);
-    return this.finishAfterCommit(options.doctype, commit, saved);
+    return this.finishAfterCommit(options.command.actor, options.doctype, commit, saved, options.relatedDocType);
   }
 
   async duplicate(command: DuplicateDocumentCommand): Promise<DocumentSnapshot> {
@@ -910,10 +985,11 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureSharedDocumentActionAccess(command.actor, doctype, "read", existing, "duplicate");
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
+    const readableExisting = await this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType);
     const plan = planDocumentCopyPolicy({
       action: "duplicate",
       doctype,
-      existing,
+      existing: readableExisting,
       data: command.data,
       metadata: command.metadata,
       relatedDocType
@@ -938,10 +1014,11 @@ export class DocumentService implements DocumentCommandExecutor {
     await this.ensureUserPermissionAccess(command.actor, doctype, existing);
     ensureExpectedVersion(existing, command.expectedVersion);
     ensureDocumentStatus(existing, ["cancelled"], "amend");
+    const readableExisting = await this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType);
     const plan = planDocumentCopyPolicy({
       action: "amend",
       doctype,
-      existing,
+      existing: readableExisting,
       data: command.data,
       metadata: command.metadata,
       relatedDocType
@@ -959,7 +1036,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const workflow = requireWorkflowDefinition(doctype);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
@@ -1007,7 +1084,7 @@ export class DocumentService implements DocumentCommandExecutor {
         };
       }
     );
-    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
+    return this.finishAfterCommit(command.actor, doctype, commit, requireFirstSavedEvent(commit.events), relatedDocType);
   }
 
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
@@ -1056,15 +1133,31 @@ export class DocumentService implements DocumentCommandExecutor {
       relatedDocType
     );
     const data = applyDocumentDataChange(existing.data, patchWithReadOnlyValues, []);
+    const draft = {
+      ...existing,
+      data,
+      version: existing.version + 1
+    };
     const readOnlyIssues = commandPlan.allowReadOnlyFields
       ? []
       : readonlyIssues(doctype, patchWithoutInternalFields, relatedDocType, data);
+    const fieldAccessIssues = commandPlan.bypassFieldPermissions && command.actor.roles.includes(SYSTEM_MANAGER_ROLE)
+      ? []
+      : fieldPermissionIssues({
+          actor: command.actor,
+          action: "update",
+          doctype,
+          data: patchWithoutInternalFields,
+          relatedDocType,
+          document: draft
+        });
     const validationIssues = await this.validate(doctype, patchWithReadOnlyValues, relatedDocType, existing);
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
     const issues = documentDomainCommandValidationIssues({
       originIssues,
       workflowStateIssues: workflowStateMutationIssues(doctype, fetchedPatchWithoutInternalFields),
       readOnlyIssues,
+      fieldPermissionIssues: fieldAccessIssues,
       validationIssues,
       linkIssues
     });
@@ -1104,12 +1197,12 @@ export class DocumentService implements DocumentCommandExecutor {
         };
       }
     );
-    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
+    return this.finishAfterCommit(command.actor, doctype, commit, requireFirstSavedEvent(commit.events), relatedDocType);
   }
 
   async comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "comment", existing, "comment on");
@@ -1127,12 +1220,12 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   async recordActivity(command: RecordDocumentActivityCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "activity", existing, "record activity on");
@@ -1150,7 +1243,7 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   async assign(command: AssignDocumentCommand): Promise<DocumentSnapshot> {
@@ -1197,7 +1290,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async share(command: ShareDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
     const access = await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing);
@@ -1223,7 +1316,7 @@ export class DocumentService implements DocumentCommandExecutor {
       grant: plan.grant
     });
     if (documentCollaborationPlanDisposition(plan) === "noop") {
-      return existing;
+      return this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType);
     }
     const now = this.clock.now();
     const event = this.newEvent(documentCollaborationEventCommand({
@@ -1236,12 +1329,12 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   async revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, command.name);
     await this.ensureSharedDocumentActionAccess(command.actor, doctype, "share", existing, "revoke shares for");
@@ -1259,7 +1352,7 @@ export class DocumentService implements DocumentCommandExecutor {
       userId: command.userId
     });
     if (documentCollaborationPlanDisposition(plan) === "noop") {
-      return existing;
+      return this.redactDocumentForActor(command.actor, doctype, existing, relatedDocType);
     }
     const now = this.clock.now();
     const event = this.newEvent(documentCollaborationEventCommand({
@@ -1272,12 +1365,12 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   async delete(command: DeleteDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "delete", existing);
@@ -1313,7 +1406,7 @@ export class DocumentService implements DocumentCommandExecutor {
       }
     );
     const saved = requireSavedEvent(commit.events, event.id);
-    return this.finishAfterCommit(doctype, commit, saved);
+    return this.finishAfterCommit(command.actor, doctype, commit, saved, relatedDocType);
   }
 
   async bulkDelete(command: BulkDeleteDocumentsCommand): Promise<BulkDeleteDocumentsResult> {
@@ -1340,7 +1433,7 @@ export class DocumentService implements DocumentCommandExecutor {
 
   async submit(command: SubmitDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "submit", existing);
@@ -1354,13 +1447,14 @@ export class DocumentService implements DocumentCommandExecutor {
       tenantId,
       stream,
       existing,
-      plan
+      plan,
+      relatedDocType
     });
   }
 
   async cancel(command: CancelDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
-    const doctype = await this.doctypeFor(command.actor, command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "cancel", existing);
@@ -1374,7 +1468,8 @@ export class DocumentService implements DocumentCommandExecutor {
       tenantId,
       stream,
       existing,
-      plan
+      plan,
+      relatedDocType
     });
   }
 
@@ -1420,7 +1515,7 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly action: CollaborationCollectionAction;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
-    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     this.ensureDocumentActionAccess(options.command.actor, doctype, "assign", existing);
@@ -1433,7 +1528,7 @@ export class DocumentService implements DocumentCommandExecutor {
       action: options.action
     });
     if (documentCollaborationPlanDisposition(plan) === "noop") {
-      return existing;
+      return this.redactDocumentForActor(options.command.actor, doctype, existing, relatedDocType);
     }
     const now = this.clock.now();
     const event = this.newEvent(documentCollaborationEventCommand({
@@ -1446,7 +1541,7 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: options.command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(options.command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   private async changeTag(options: {
@@ -1454,7 +1549,7 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly action: CollaborationCollectionAction;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
-    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     this.ensureDocumentActionAccess(options.command.actor, doctype, "tag", existing);
@@ -1467,7 +1562,7 @@ export class DocumentService implements DocumentCommandExecutor {
       action: options.action
     });
     if (documentCollaborationPlanDisposition(plan) === "noop") {
-      return existing;
+      return this.redactDocumentForActor(options.command.actor, doctype, existing, relatedDocType);
     }
     const now = this.clock.now();
     const event = this.newEvent(documentCollaborationEventCommand({
@@ -1480,7 +1575,7 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: options.command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(options.command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   private async changeFollower(options: {
@@ -1488,7 +1583,7 @@ export class DocumentService implements DocumentCommandExecutor {
     readonly action: CollaborationCollectionAction;
   }): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(options.command.actor, options.command.tenantId);
-    const doctype = await this.doctypeFor(options.command.actor, options.command.doctype, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(options.command.actor, options.command.doctype, tenantId);
     const stream = documentStream(tenantId, doctype.name, options.command.name);
     const { snapshot: existing, events } = await this.requireExistingEventStream(stream, doctype, options.command.name);
     this.ensureDocumentActionAccess(options.command.actor, doctype, "follow", existing);
@@ -1502,7 +1597,7 @@ export class DocumentService implements DocumentCommandExecutor {
       action: options.action
     });
     if (documentCollaborationPlanDisposition(plan) === "noop") {
-      return existing;
+      return this.redactDocumentForActor(options.command.actor, doctype, existing, relatedDocType);
     }
     const now = this.clock.now();
     const event = this.newEvent(documentCollaborationEventCommand({
@@ -1515,25 +1610,28 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: options.command.metadata ?? {}
     }));
-    return this.commitDocumentEvent(doctype, existing, stream, event);
+    return this.commitDocumentEvent(options.command.actor, doctype, existing, stream, event, relatedDocType);
   }
 
   private async commitDocumentEvent(
+    actor: Actor,
     doctype: DocTypeDefinition,
     existing: DocumentSnapshot,
     stream: string,
-    event: NewDomainEvent
+    event: NewDomainEvent,
+    relatedDocType?: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
     const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
       return snapshotFromCommittedDocumentEvent(existing, saved);
     });
-    return this.finishAfterCommit(doctype, commit, requireFirstSavedEvent(commit.events));
+    return this.finishAfterCommit(actor, doctype, commit, requireFirstSavedEvent(commit.events), relatedDocType);
   }
 
   private async changeDocStatus(options: {
     readonly command: SubmitDocumentCommand | CancelDocumentCommand;
     readonly doctype: DocTypeDefinition;
+    readonly relatedDocType: RelatedDocTypeResolver;
     readonly tenantId: string;
     readonly stream: string;
     readonly existing: DocumentSnapshot;
@@ -1569,15 +1667,41 @@ export class DocumentService implements DocumentCommandExecutor {
         };
       }
     );
-    return this.finishAfterCommit(options.doctype, commit, requireFirstSavedEvent(commit.events));
+    return this.finishAfterCommit(
+      options.command.actor,
+      options.doctype,
+      commit,
+      requireFirstSavedEvent(commit.events),
+      options.relatedDocType
+    );
   }
 
   private async finishAfterCommit(
+    actor: Actor,
     doctype: DocTypeDefinition,
     commit: DocumentCommit,
-    saved: DomainEvent
+    saved: DomainEvent,
+    relatedDocType?: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
-    return await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
+    const snapshot = await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
+    return this.redactDocumentForActor(actor, doctype, snapshot, relatedDocType);
+  }
+
+  private async redactDocumentForActor(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    document: DocumentSnapshot,
+    relatedDocType?: RelatedDocTypeResolver
+  ): Promise<DocumentSnapshot> {
+    const resolver = relatedDocType ?? (await resolveTenantDocTypeContext(doctype, (name) =>
+      this.doctypeFor(actor, name, document.tenantId)
+    )).relatedDocType;
+    return redactDocumentSnapshot({
+      actor,
+      doctype,
+      document,
+      relatedDocType: resolver
+    });
   }
 
   private planAutomationRuns(
@@ -1957,4 +2081,24 @@ export class DocumentService implements DocumentCommandExecutor {
       }))
     };
   }
+}
+
+function draftDocumentSnapshot(input: {
+  readonly tenantId: string;
+  readonly doctype: DocTypeDefinition;
+  readonly name: string;
+  readonly version: number;
+  readonly data: DocumentData;
+  readonly now: string;
+}): DocumentSnapshot {
+  return {
+    tenantId: input.tenantId,
+    doctype: input.doctype.name,
+    name: input.name,
+    version: input.version,
+    docstatus: "draft",
+    data: input.data,
+    createdAt: input.now,
+    updatedAt: input.now
+  };
 }

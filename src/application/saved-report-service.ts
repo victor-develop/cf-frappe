@@ -1,4 +1,8 @@
 import { notFound, permissionDenied } from "../core/errors.js";
+import {
+  projectDocTypeForFieldAccess,
+  projectDocTypeForFieldQueries
+} from "./document-field-access-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedReportsStream } from "../core/streams.js";
 import {
@@ -42,6 +46,10 @@ import type {
   ReportRunResult
 } from "./report-service.js";
 import { ReportService } from "./report-service.js";
+import {
+  restrictedReportFieldReferences,
+  restrictedReportQueryFieldReferences
+} from "./report-policy.js";
 
 export type { SavedReportEventPayload } from "./saved-report-events.js";
 export type { SavedReport, SavedReportDefinition } from "./saved-report-events.js";
@@ -104,13 +112,13 @@ export class SavedReportService {
   async list(actor: Actor, doctypeName: string, tenantId = resolveTenant(actor)): Promise<readonly SavedReport[]> {
     const doctype = this.readableDoctype(actor, doctypeName);
     const reports = await this.readAll(tenantId, doctype, actor.id);
-    return sortedSavedReports(reports);
+    return sortedSavedReports(this.readableSavedReports(actor, doctype, reports));
   }
 
   async get(actor: Actor, doctypeName: string, id: string, tenantId = resolveTenant(actor)): Promise<SavedReport> {
     const doctype = this.readableDoctype(actor, doctypeName);
     const decision = planSavedReportLookup(
-      findSavedReport(await this.readAll(tenantId, doctype, actor.id), id),
+      findSavedReport(this.readableSavedReports(actor, doctype, await this.readAll(tenantId, doctype, actor.id)), id),
       id
     );
     if (decision.status === "missing") {
@@ -133,9 +141,31 @@ export class SavedReportService {
       throw notFound(decision.message);
     }
     const label = normalizeSavedReportLabel(command.label);
-    const definition = normalizeSavedReportDefinition(doctype, label, command.definition);
+    const definition = normalizeSavedReportDefinition(
+      projectDocTypeForFieldAccess({ actor: command.actor, doctype, action: "read", tenantId }),
+      label,
+      command.definition
+    );
     const id = command.id ?? this.ids.next("report_");
     const now = this.clock.now();
+    const report = savedReportToReportDefinition({
+      tenantId,
+      doctype: doctype.name,
+      id,
+      label,
+      ownerId: command.actor.id,
+      definition,
+      createdAt: now,
+      updatedAt: now
+    });
+    const restrictedQueryFields = restrictedReportQueryFieldReferences({
+      report,
+      sourceDoctype: doctype,
+      queryableDoctype: projectDocTypeForFieldQueries({ actor: command.actor, doctype })
+    });
+    if (restrictedQueryFields.length > 0) {
+      throw permissionDenied(`Actor '${command.actor.id}' cannot save report '${label}'`);
+    }
     const event = savedReportEvent({
       id: this.ids.next("evt_"),
       tenantId,
@@ -233,8 +263,24 @@ export class SavedReportService {
     });
     return savedReportsForOwner(foldSavedReports(tenantId, doctype, events), ownerId);
   }
+
+  private readableSavedReports(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    reports: readonly SavedReport[]
+  ): readonly SavedReport[] {
+    return reports.filter((report) => savedReportIsReadable(actor, doctype, report));
+  }
 }
 
 function resolveTenant(actor: Actor, explicitTenantId?: TenantId): TenantId {
   return explicitTenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+function savedReportIsReadable(actor: Actor, doctype: DocTypeDefinition, saved: SavedReport): boolean {
+  const report = savedReportToReportDefinition(saved);
+  const visibleDoctype = projectDocTypeForFieldAccess({ actor, doctype, action: "read", tenantId: saved.tenantId });
+  const queryableDoctype = projectDocTypeForFieldQueries({ actor, doctype });
+  return restrictedReportFieldReferences({ report, sourceDoctype: doctype, visibleDoctype }).length === 0 &&
+    restrictedReportQueryFieldReferences({ report, sourceDoctype: doctype, queryableDoctype }).length === 0;
 }

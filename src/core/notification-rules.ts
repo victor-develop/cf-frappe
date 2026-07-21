@@ -37,6 +37,11 @@ export const NOTIFICATION_RULE_EVENT_KINDS = Object.freeze([
   "DomainCommandApplied"
 ] as const satisfies readonly NotificationRuleEventKind[]);
 
+export const NOTIFICATION_RULE_CHANNELS = Object.freeze([
+  "inbox",
+  "email"
+] as const satisfies readonly NotificationRuleChannel[]);
+
 export type NotificationRuleStatePayloadKind = "NotificationRuleSaved" | "NotificationRuleCleared";
 
 export type NotificationRuleStateEventPayload =
@@ -289,7 +294,7 @@ function normalizeChannels(values: readonly NotificationRuleChannel[] | undefine
   const channels: NotificationRuleChannel[] = [];
   const seen = new Set<string>();
   for (const value of values) {
-    if (value !== "inbox" && value !== "email") {
+    if (!(NOTIFICATION_RULE_CHANNELS as readonly string[]).includes(value)) {
       throw invalid(`Notification rule channel '${String(value)}' is not supported`);
     }
     if (seen.has(value)) {
@@ -444,8 +449,12 @@ function requireField(doctype: DocTypeDefinition, fieldName: string): FieldDefin
   return field;
 }
 
+export function isNotificationRuleRecipientField(field: FieldDefinition): boolean {
+  return ["text", "longText", "select", "link", "json"].includes(field.type);
+}
+
 function assertRecipientField(field: FieldDefinition): void {
-  if (!["text", "longText", "select", "link", "json"].includes(field.type)) {
+  if (!isNotificationRuleRecipientField(field)) {
     throw invalid(`Notification rule recipient field '${field.name}' must store user ids`);
   }
 }

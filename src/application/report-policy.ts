@@ -10,6 +10,7 @@ import type {
   ReportFilterDefinition,
   ReportFilterOperator,
   ReportFilterValue,
+  ReportFormulaDefinition,
   ReportFormulaOperand,
   ReportGroupDefinition,
   ReportOrder,
@@ -130,6 +131,79 @@ export function planReportReadAccess(command: {
     };
   }
   return { status: "allow" };
+}
+
+export function restrictedReportFieldReferences(input: {
+  readonly report: ReportDefinition;
+  readonly sourceDoctype: DocTypeDefinition;
+  readonly visibleDoctype: DocTypeDefinition;
+}): readonly string[] {
+  const sourceFields = new Set(input.sourceDoctype.fields.map((field) => field.name));
+  const visibleFields = new Set(input.visibleDoctype.fields.map((field) => field.name));
+  const referenced = new Set<string>();
+
+  for (const column of input.report.columns) {
+    if (column.formula !== undefined) {
+      collectReportFormulaReferences(column.formula, referenced);
+    } else {
+      referenced.add(column.field ?? column.name);
+    }
+  }
+  for (const filter of input.report.filters ?? []) {
+    referenced.add(filter.field);
+  }
+  for (const summary of input.report.summaries ?? []) {
+    if (summary.field !== undefined) {
+      referenced.add(summary.field);
+    }
+  }
+  for (const group of input.report.groups ?? []) {
+    referenced.add(group.field);
+    for (const summary of group.summaries) {
+      if (summary.field !== undefined) {
+        referenced.add(summary.field);
+      }
+    }
+  }
+
+  return [...referenced].filter((field) => sourceFields.has(field) && !visibleFields.has(field)).sort();
+}
+
+export function restrictedReportQueryFieldReferences(input: {
+  readonly report: ReportDefinition;
+  readonly sourceDoctype: DocTypeDefinition;
+  readonly queryableDoctype: DocTypeDefinition;
+}): readonly string[] {
+  const sourceFields = new Set(input.sourceDoctype.fields.map((field) => field.name));
+  const queryableFields = new Set(input.queryableDoctype.fields.map((field) => field.name));
+  const referenced = new Set<string>();
+
+  for (const filter of input.report.filters ?? []) {
+    referenced.add(filter.field);
+  }
+  for (const summary of input.report.summaries ?? []) {
+    if (summary.field !== undefined) {
+      referenced.add(summary.field);
+    }
+  }
+  for (const group of input.report.groups ?? []) {
+    referenced.add(group.field);
+    for (const summary of group.summaries) {
+      if (summary.field !== undefined) {
+        referenced.add(summary.field);
+      }
+    }
+  }
+  const orderColumn = input.report.orderBy === undefined
+    ? undefined
+    : input.report.columns.find((column) => column.name === input.report.orderBy);
+  if (orderColumn?.formula !== undefined) {
+    collectReportFormulaReferences(orderColumn.formula, referenced);
+  } else if (orderColumn !== undefined) {
+    referenced.add(orderColumn.field ?? orderColumn.name);
+  }
+
+  return [...referenced].filter((field) => sourceFields.has(field) && !queryableFields.has(field)).sort();
 }
 
 export function customReportProviderName(report: ReportDefinition): string | undefined {
@@ -618,6 +692,21 @@ function exactDrilldownFilterForGroup(
   return filters.find((filter) =>
     filter.field === group.field && (filter.operator ?? "eq") === "eq"
   );
+}
+
+function collectReportFormulaReferences(formula: ReportFormulaDefinition, referenced: Set<string>): void {
+  collectReportFormulaOperandReferences(formula.left, referenced);
+  collectReportFormulaOperandReferences(formula.right, referenced);
+}
+
+function collectReportFormulaOperandReferences(operand: ReportFormulaOperand, referenced: Set<string>): void {
+  if (typeof operand === "string") {
+    referenced.add(operand);
+    return;
+  }
+  if (typeof operand === "object") {
+    collectReportFormulaReferences(operand, referenced);
+  }
 }
 
 export function resolvedReportFilterType(

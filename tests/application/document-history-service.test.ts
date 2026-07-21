@@ -311,6 +311,12 @@ describe("DocumentHistoryService", () => {
           throw new Error("not used");
         },
         getEffectiveMeta: async () => noteDocType,
+        readableFieldNames: async () => {
+          throw new Error("not used");
+        },
+        redactDocument: async () => {
+          throw new Error("not used");
+        },
         listEffectiveDoctypes: async () => [noteDocType],
         listDocuments: async (_actor, _doctype, options = {}) => {
           const offset = options.offset ?? 0;

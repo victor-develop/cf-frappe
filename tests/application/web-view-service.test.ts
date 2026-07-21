@@ -407,6 +407,61 @@ describe("WebViewService", () => {
       code: "WEB_VIEW_INVALID"
     });
   });
+
+  it("hides Web Views that reference fields denied by field-level read permissions", async () => {
+    const FieldAclPost = defineDocType({
+      name: "Field ACL Post",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "route", type: "text" },
+        { name: "published", type: "boolean", defaultValue: false },
+        {
+          name: "secret_summary",
+          type: "longText",
+          permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+        }
+      ],
+      permissions: [
+        { roles: ["Guest"], actions: ["read"] },
+        { roles: ["User"], actions: ["read", "create"] }
+      ]
+    });
+    const registry = createRegistry({
+      doctypes: [FieldAclPost],
+      webViews: [
+        defineWebView({
+          name: "Field ACL Blog",
+          doctype: "Field ACL Post",
+          routeField: "route",
+          titleField: "title",
+          publishedField: "published",
+          fields: [{ field: "secret_summary" }],
+          roles: ["Guest"]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webViews = new WebViewService({ registry, queries });
+
+    await documents.create({
+      actor: owner,
+      doctype: "Field ACL Post",
+      data: {
+        title: "Published ACL Post",
+        route: "published-acl-post",
+        published: true,
+        secret_summary: "Guest must not see this"
+      }
+    });
+
+    await expect(webViews.listWebViews(guest)).resolves.toEqual([]);
+    await expect(webViews.getWebView(guest, "Field ACL Blog")).rejects.toMatchObject({
+      code: "WEB_VIEW_INVALID"
+    });
+  });
 });
 
 function hideSummaryForTenant(

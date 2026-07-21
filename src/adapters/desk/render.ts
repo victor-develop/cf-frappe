@@ -5,6 +5,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type FieldPropertyOverrides,
   type FieldType,
   type GlobalSearchResult,
   type ListFilterControlDefinition,
@@ -17,9 +18,18 @@ import {
   type ListFilterGroupMatch,
   type ListFilterInputType,
   type ListFilterOperator,
+  type AssignmentRuleDefinition,
+  type AssignmentRuleAssigneeDefinition,
+  type AssignmentRuleEventKind,
+  type NotificationRuleDefinition,
+  type NotificationRuleChannel,
+  type NotificationRuleEventKind,
+  type NotificationRuleRecipientDefinition,
   type ResolvedFormSection,
   type ResolvedFormView,
-  type ResolvedListView
+  type ResolvedListView,
+  type WorkflowDefinition,
+  type WorkflowTransition
 } from "../../core/types.js";
 import { isListFilterGroup } from "../../core/list-view.js";
 import {
@@ -45,7 +55,7 @@ import type {
 import type { DocumentImportMode, DocumentImportResult } from "../../application/document-import-service.js";
 import type { CustomFieldState } from "../../core/custom-fields.js";
 import type { FieldPropertyOverrideState } from "../../core/field-property-overrides.js";
-import type { WorkflowDefinitionState } from "../../core/workflow.js";
+import { isWorkflowStateField, type WorkflowDefinitionState } from "../../core/workflow.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type { KanbanCardResult, KanbanRunResult } from "../../application/kanban-service.js";
@@ -78,6 +88,12 @@ import { USER_PROFILE_FIELDS, type UserProfileState } from "../../core/user-prof
 import type { UserPermissionState } from "../../core/user-permissions.js";
 import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import { DESK_CLIENT_SCRIPT_PATH } from "./client.js";
+import { ASSIGNMENT_RULE_EVENT_KINDS, isAssignmentRuleAssigneeField } from "../../core/assignment-rules.js";
+import {
+  isNotificationRuleRecipientField,
+  NOTIFICATION_RULE_CHANNELS,
+  NOTIFICATION_RULE_EVENT_KINDS
+} from "../../core/notification-rules.js";
 import {
   deskReportFieldLabel,
   deskReportSumSummaryLabel,
@@ -85,6 +101,22 @@ import {
   isDeskGroupableReportField,
   isDeskNumericReportField
 } from "./report-builder.js";
+import {
+  documentOptions,
+  doctypeOptions,
+  fetchFromOptions,
+  fieldOptions,
+  stringOptions
+} from "./meta-options.js";
+import {
+  renderDocTypeDatalistControl,
+  renderDocTypeSelectControl,
+  renderDocumentReferencePickerControls,
+  renderFetchFromControl,
+  renderFieldSelectControl,
+  renderRoleMultiSelectorControl,
+  renderUserSelectorControl
+} from "./meta-controls.js";
 
 export const DESK_QUICK_FILTER_OPERATOR_QUERY_PREFIX = "quick_filter_operator:";
 export const DESK_QUICK_FILTER_VALUE_QUERY_PREFIX = "quick_filter_value:";
@@ -169,6 +201,9 @@ export interface NotificationRuleAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
   readonly selectedRuleName?: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly userSuggestions?: readonly string[];
+  readonly draftRule?: NotificationRuleDefinition;
   readonly state?: NotificationRuleState;
   readonly error?: string;
 }
@@ -177,6 +212,9 @@ export interface AssignmentRuleAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
   readonly selectedRuleName?: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly userSuggestions?: readonly string[];
+  readonly draftRule?: AssignmentRuleDefinition;
   readonly state?: AssignmentRuleState;
   readonly error?: string;
 }
@@ -572,9 +610,15 @@ function renderAssignedDoctypeOptions(doctypes: readonly DocTypeDefinition[], se
   ].join("");
 }
 
+interface FileManagerRenderOptions {
+  readonly error?: string;
+  readonly doctypes?: readonly DocTypeDefinition[];
+  readonly documentSuggestions?: readonly DocumentSnapshot[];
+}
+
 export function renderFileManager(
   dashboard: FileDashboard,
-  options: { readonly error?: string } = {}
+  options: FileManagerRenderOptions = {}
 ): string {
   const bulkFileActionFormId = "bulk-file-action";
   const hasBulkDelete = dashboard.files.some((file) => file.deletable);
@@ -582,6 +626,30 @@ export function renderFileManager(
   const hasBulkActions = hasBulkDelete || hasBulkMetadata;
   const uploadError = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
   const uploadMode = dashboard.directUpload ? ' data-upload-mode="direct"' : "";
+  const uploadReferenceControls = renderDocumentReferencePickerControls({
+    doctypeName: "attached_to_doctype",
+    documentName: "attached_to_name",
+    doctypeLabel: "Attached To DocType",
+    documentLabel: "Attached To Name",
+    selectedDoctype: dashboard.filters.attachedToDoctype ?? "",
+    selectedDocumentName: dashboard.filters.attachedToName ?? "",
+    doctypes: doctypeOptions(options.doctypes ?? [], dashboard.filters.attachedToDoctype ?? ""),
+    documents: documentOptions(options.documentSuggestions ?? [], dashboard.filters.attachedToName ?? ""),
+    doctypeDatalistId: "file-upload-attached-doctype-options",
+    documentDatalistId: "file-upload-attached-name-options"
+  });
+  const filterReferenceControls = renderDocumentReferencePickerControls({
+    doctypeName: "attached_to_doctype",
+    documentName: "attached_to_name",
+    doctypeLabel: "Attached To DocType",
+    documentLabel: "Attached To Name",
+    selectedDoctype: dashboard.filters.attachedToDoctype ?? "",
+    selectedDocumentName: dashboard.filters.attachedToName ?? "",
+    doctypes: doctypeOptions(options.doctypes ?? [], dashboard.filters.attachedToDoctype ?? ""),
+    documents: documentOptions(options.documentSuggestions ?? [], dashboard.filters.attachedToName ?? ""),
+    doctypeDatalistId: "file-filter-attached-doctype-options",
+    documentDatalistId: "file-filter-attached-name-options"
+  });
   const uploadForm = dashboard.canUpload
     ? `<form class="panel form file-upload" method="post" action="/desk/files" enctype="multipart/form-data" data-max-file-bytes="${String(dashboard.maxUploadBytes)}"${uploadMode}>
         <div class="form-head">
@@ -590,8 +658,7 @@ export function renderFileManager(
         ${uploadError}
         <div class="fields">
           <label class="field"><span>File</span><input name="file" type="file" required></label>
-          <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
-          <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+          ${uploadReferenceControls}
           <label class="field checkbox-field"><span>Private</span><input name="is_private" type="checkbox" value="1" checked></label>
         </div>
         <div class="actions"><button class="button primary" type="submit">Upload</button></div>
@@ -610,15 +677,14 @@ export function renderFileManager(
         ${renderTableCell("Attached To", escapeHtml(attachedTo))}
         ${renderTableCell("Uploaded By", escapeHtml(file.uploadedBy))}
         ${renderTableCell("Uploaded At", `<time datetime="${escapeHtml(file.uploadedAt)}">${escapeHtml(file.uploadedAt)}</time>`)}
-        ${renderTableCell("Action", `${file.editable ? renderFileMetadataAction(file) : ""}${file.deletable ? renderFileDeleteAction(file) : ""}`)}
+        ${renderTableCell("Action", `${file.editable ? renderFileMetadataAction(file, options) : ""}${file.deletable ? renderFileDeleteAction(file) : ""}`)}
       </tr>`;
     })
     .join("");
   return `${uploadForm}
   <form class="panel form list-filters" method="get" action="/desk/files">
     <div class="fields">
-      <label class="field"><span>Attached To DocType</span><input name="attached_to_doctype" value="${escapeHtml(dashboard.filters.attachedToDoctype ?? "")}"></label>
-      <label class="field"><span>Attached To Name</span><input name="attached_to_name" value="${escapeHtml(dashboard.filters.attachedToName ?? "")}"></label>
+      ${filterReferenceControls}
       <label class="field"><span>Filename</span><input name="filename" value="${escapeHtml(dashboard.filters.filename ?? "")}"></label>
       <label class="field"><span>Content Type</span><input name="content_type" value="${escapeHtml(dashboard.filters.contentType ?? "")}"></label>
       <label class="field"><span>Uploaded By</span><input name="uploaded_by" value="${escapeHtml(dashboard.filters.uploadedBy ?? "")}"></label>
@@ -631,7 +697,7 @@ export function renderFileManager(
   </form>
   <section class="toolbar">
     ${hasBulkActions ? `<form id="${bulkFileActionFormId}" method="post" action="/desk/files/bulk-delete"></form>` : ""}
-    ${hasBulkMetadata ? renderBulkFileMetadataControls(bulkFileActionFormId) : ""}
+    ${hasBulkMetadata ? renderBulkFileMetadataControls(bulkFileActionFormId, options) : ""}
     ${hasBulkDelete ? `<button class="button danger" type="submit" form="${bulkFileActionFormId}" formaction="/desk/files/bulk-delete">Delete selected</button>` : ""}
     ${hasBulkMetadata ? `<button class="button" type="submit" form="${bulkFileActionFormId}" formaction="/desk/files/bulk-metadata">Update selected metadata</button>` : ""}
   </section>
@@ -721,12 +787,29 @@ export function renderDocumentPresencePanel(
   </section>`;
 }
 
-function renderFileMetadataAction(file: FileDashboard["files"][number]): string {
+function renderFileMetadataAction(
+  file: FileDashboard["files"][number],
+  options: FileManagerRenderOptions
+): string {
+  const attachedToDoctype = file.attachedTo?.doctype ?? "";
+  const attachedToName = file.attachedTo?.name ?? "";
+  const referenceControls = renderDocumentReferencePickerControls({
+    doctypeName: "attached_to_doctype",
+    documentName: "attached_to_name",
+    doctypeLabel: "Attached To DocType",
+    documentLabel: "Attached To Name",
+    selectedDoctype: attachedToDoctype,
+    selectedDocumentName: attachedToName,
+    doctypes: doctypeOptions(options.doctypes ?? [], attachedToDoctype),
+    documents: documentOptions(options.documentSuggestions ?? [], attachedToName),
+    doctypeDatalistId: `file-metadata-${file.name}-doctype-options`,
+    documentDatalistId: `file-metadata-${file.name}-document-options`,
+    className: "field compact-field"
+  });
   return `<form class="inline-action file-metadata-action" method="post" action="/desk/files/${encodeURIComponent(file.name)}/metadata">
     <input type="hidden" name="expectedVersion" value="${String(file.expectedVersion)}">
     <input aria-label="Filename" name="filename" value="${escapeHtml(file.filename)}">
-    <input aria-label="Attached To DocType" name="attached_to_doctype" value="${escapeHtml(file.attachedTo?.doctype ?? "")}">
-    <input aria-label="Attached To Name" name="attached_to_name" value="${escapeHtml(file.attachedTo?.name ?? "")}">
+    ${referenceControls}
     <label class="inline-checkbox"><span>Private</span><input name="is_private" type="checkbox" value="1"${file.isPrivate ? " checked" : ""}></label>
     <button class="button" type="submit">Save</button>
   </form>`;
@@ -737,14 +820,25 @@ function renderFileBulkSelection(file: FileDashboard["files"][number], formId: s
     <input form="${formId}" name="expectedVersion:${escapeHtml(file.name)}" value="${String(file.expectedVersion)}" type="hidden">`;
 }
 
-function renderBulkFileMetadataControls(formId: string): string {
+function renderBulkFileMetadataControls(formId: string, options: FileManagerRenderOptions): string {
+  const referenceControls = renderDocumentReferencePickerControls({
+    doctypeName: "bulk_attached_to_doctype",
+    documentName: "bulk_attached_to_name",
+    doctypeLabel: "Attach To DocType",
+    documentLabel: "Attach To Name",
+    doctypes: doctypeOptions(options.doctypes ?? []),
+    documents: documentOptions(options.documentSuggestions ?? []),
+    doctypeDatalistId: "bulk-file-attached-doctype-options",
+    documentDatalistId: "bulk-file-attached-name-options",
+    className: "field compact-field",
+    form: formId
+  });
   return `<label class="field compact-field"><span>Privacy</span><select form="${formId}" name="bulk_is_private">
       <option value="">Keep privacy</option>
       <option value="1">Private</option>
       <option value="0">Public</option>
     </select></label>
-    <label class="field compact-field"><span>Attach To DocType</span><input form="${formId}" name="bulk_attached_to_doctype"></label>
-    <label class="field compact-field"><span>Attach To Name</span><input form="${formId}" name="bulk_attached_to_name"></label>
+    ${referenceControls}
     <label class="inline-checkbox"><span>Clear attachment</span><input form="${formId}" name="bulk_clear_attachment" type="checkbox" value="1"></label>`;
 }
 
@@ -1491,7 +1585,33 @@ function renderReportBuilderFormulaOperatorControl(prefix: string, label: string
       </select></label>`;
 }
 
-export function renderUserPermissionAdmin(state: UserPermissionState): string {
+interface UserPermissionDraft {
+  readonly userId?: string;
+  readonly targetDoctype?: string;
+  readonly targetName?: string;
+  readonly applicableDoctypes?: readonly string[];
+}
+
+interface UserPermissionAdminRenderOptions {
+  readonly doctypes?: readonly DocTypeDefinition[];
+  readonly userSuggestions?: readonly string[];
+  readonly documentSuggestions?: readonly DocumentSnapshot[];
+  readonly draft?: UserPermissionDraft;
+  readonly error?: string;
+}
+
+export function renderUserPermissionAdmin(
+  state: UserPermissionState,
+  options: UserPermissionAdminRenderOptions = {}
+): string {
+  const draft = options.draft;
+  const selectedUserId = draft?.userId ?? state.userId;
+  const targetDoctype = draft?.targetDoctype ?? "";
+  const targetName = draft?.targetName ?? "";
+  const applicableDoctypes = (draft?.applicableDoctypes ?? []).join(", ");
+  const userOptions = stringOptions([...(options.userSuggestions ?? []), selectedUserId], selectedUserId);
+  const targetDoctypeOptions = doctypeOptions(options.doctypes ?? [], targetDoctype);
+  const targetDocumentOptions = documentOptions(options.documentSuggestions ?? [], targetName);
   const rows = state.grants
     .map((grant) => {
       const applicable = (grant.applicableDoctypes ?? []).join(", ");
@@ -1514,17 +1634,40 @@ export function renderUserPermissionAdmin(state: UserPermissionState): string {
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/user-permissions">
     <div class="fields cols-1">
-      <label class="field"><span>User</span><input name="user" type="email" value="${escapeHtml(state.userId)}"></label>
+      ${renderUserSelectorControl({
+        label: "User",
+        name: "user",
+        value: selectedUserId,
+        options: userOptions,
+        datalistId: "user-permission-user-suggestions"
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
+  ${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
   <form class="panel form" method="post" action="/desk/admin/user-permissions">
-    <input type="hidden" name="user" value="${escapeHtml(state.userId)}">
+    <input type="hidden" name="user" value="${escapeHtml(selectedUserId)}">
     <input type="hidden" name="expectedVersion" value="${String(state.version)}">
     <div class="fields">
-      <label class="field"><span>Target DocType</span><input name="targetDoctype" value=""></label>
-      <label class="field"><span>Target Name</span><input name="targetName" value=""></label>
-      <label class="field"><span>Applicable DocTypes</span><input name="applicableDoctypes" value=""></label>
+      ${renderDocumentReferencePickerControls({
+        doctypeName: "targetDoctype",
+        documentName: "targetName",
+        doctypeLabel: "Target DocType",
+        documentLabel: "Target Name",
+        selectedDoctype: targetDoctype,
+        selectedDocumentName: targetName,
+        doctypes: targetDoctypeOptions,
+        documents: targetDocumentOptions,
+        doctypeDatalistId: "user-permission-target-doctype-options",
+        documentDatalistId: "user-permission-target-name-options"
+      })}
+      ${renderDocTypeDatalistControl({
+        label: "Applicable DocTypes",
+        name: "applicableDoctypes",
+        value: applicableDoctypes,
+        options: doctypeOptions(options.doctypes ?? [], applicableDoctypes),
+        datalistId: "user-permission-applicable-doctype-options"
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Allow</button></div>
   </form>
@@ -1542,14 +1685,42 @@ export interface UserAccountAdminState {
   readonly selectedUserId: string;
   readonly account?: UserAccount;
   readonly profile?: UserProfileState;
+  readonly roleSuggestions?: readonly string[];
+  readonly createDraft?: {
+    readonly userId: string;
+    readonly email?: string;
+    readonly roles: readonly string[];
+    readonly enabled?: boolean;
+  };
+  readonly roleDraft?: {
+    readonly roles: readonly string[];
+  };
+  readonly providerSyncDraft?: {
+    readonly userId: string;
+    readonly provider: string;
+    readonly subject: string;
+    readonly email?: string;
+    readonly roles: readonly string[];
+    readonly enabled?: boolean;
+    readonly emailVerified?: boolean;
+  };
   readonly error?: string;
 }
 
 export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   const account = state.account;
   const selectedUserId = account?.userId ?? state.selectedUserId;
-  const createUserId = account ? "" : selectedUserId;
-  const providerSyncForm = renderUserAuthProviderSyncForm(account, selectedUserId);
+  const roleSuggestions = uniqueSortedStrings([
+    ...(state.roleSuggestions ?? []),
+    ...(account?.roles ?? []),
+    ...(state.createDraft?.roles ?? []),
+    ...(state.roleDraft?.roles ?? []),
+    ...(state.providerSyncDraft?.roles ?? [])
+  ]);
+  const createUserId = state.createDraft?.userId ?? (account ? "" : selectedUserId);
+  const createRoles = state.createDraft?.roles.join(", ") ?? "";
+  const createEmail = state.createDraft?.email ?? "";
+  const providerSyncForm = renderUserAuthProviderSyncForm(account, selectedUserId, roleSuggestions, state.providerSyncDraft);
   const rows = account
     ? `<tr>
         ${renderTableCell("User", escapeHtml(account.userId))}
@@ -1577,7 +1748,13 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
       <input type="hidden" name="expectedVersion" value="${String(account.version)}">
       <div class="form-head"><h2>Roles</h2></div>
       <div class="fields cols-1">
-        <label class="field"><span>Roles</span><input name="roles" value="${escapeHtml(account.roles.join(", "))}"></label>
+        ${renderRoleMultiSelectorControl({
+          label: "Roles",
+          name: "roles",
+          value: (state.roleDraft?.roles ?? account.roles).join(", "),
+          options: stringOptions(roleSuggestions, (state.roleDraft?.roles ?? account.roles).join(", ")),
+          datalistId: "user-account-change-role-suggestions"
+        })}
       </div>
       <div class="actions"><button class="button primary" type="submit">Save Roles</button></div>
     </form>
@@ -1600,10 +1777,16 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
     <div class="form-head"><h2>Create User</h2></div>
     <div class="fields">
       <label class="field"><span>User</span><input name="user" type="email" value="${escapeHtml(createUserId)}"></label>
-      <label class="field"><span>Email</span><input name="email" type="email"></label>
+      <label class="field"><span>Email</span><input name="email" type="email" value="${escapeHtml(createEmail)}"></label>
       <label class="field"><span>Password</span><input name="password" type="password" autocomplete="new-password"></label>
-      <label class="field"><span>Roles</span><input name="roles" value=""></label>
-      <label class="field"><span>Status</span><select name="enabled"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select></label>
+      ${renderRoleMultiSelectorControl({
+        label: "Roles",
+        name: "roles",
+        value: createRoles,
+        options: stringOptions(roleSuggestions, createRoles),
+        datalistId: "user-account-create-role-suggestions"
+      })}
+      <label class="field"><span>Status</span><select name="enabled">${renderUserAccountStatusOptions(state.createDraft?.enabled, "Enabled", "Disabled")}</select></label>
     </div>
     <div class="actions"><button class="button primary" type="submit">Create</button></div>
   </form>
@@ -1619,25 +1802,50 @@ export function renderUserAccountAdmin(state: UserAccountAdminState): string {
   ${accountTools}`;
 }
 
-function renderUserAuthProviderSyncForm(account: UserAccount | undefined, selectedUserId: string): string {
-  const userId = account?.userId ?? selectedUserId;
+function renderUserAuthProviderSyncForm(
+  account: UserAccount | undefined,
+  selectedUserId: string,
+  roleSuggestions: readonly string[],
+  draft: UserAccountAdminState["providerSyncDraft"] | undefined
+): string {
+  const userId = draft?.userId ?? account?.userId ?? selectedUserId;
   const expectedVersion = account?.version ?? 0;
-  const roles = account?.roles.join(", ") ?? "";
-  const email = account?.email ?? "";
+  const roles = draft?.roles.join(", ") ?? account?.roles.join(", ") ?? "";
+  const email = draft?.email ?? account?.email ?? "";
   return `<form class="panel form" method="post" action="/desk/admin/users/provider-sync">
     <input type="hidden" name="expectedVersion" value="${String(expectedVersion)}">
     <div class="form-head"><h2>Sync Auth Provider</h2><p>v${String(expectedVersion)}</p></div>
     <div class="fields">
       <label class="field"><span>User</span><input name="user" value="${escapeHtml(userId)}"></label>
-      <label class="field"><span>Provider</span><input name="provider" value=""></label>
-      <label class="field"><span>Subject</span><input name="subject" value=""></label>
+      <label class="field"><span>Provider</span><input name="provider" value="${escapeHtml(draft?.provider ?? "")}"></label>
+      <label class="field"><span>Subject</span><input name="subject" value="${escapeHtml(draft?.subject ?? "")}"></label>
       <label class="field"><span>Email</span><input name="email" type="email" value="${escapeHtml(email)}"></label>
-      <label class="field"><span>Roles</span><input name="roles" value="${escapeHtml(roles)}"></label>
-      <label class="field"><span>Status</span><select name="enabled"><option value="" selected>Keep</option><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
-      <label class="field"><span>Email Verified</span><select name="emailVerified"><option value="" selected>Keep</option><option value="true">Verified</option><option value="false">Unverified</option></select></label>
+      ${renderRoleMultiSelectorControl({
+        label: "Roles",
+        name: "roles",
+        value: roles,
+        options: stringOptions(roleSuggestions, roles),
+        datalistId: "user-account-provider-role-suggestions"
+      })}
+      <label class="field"><span>Status</span><select name="enabled">${renderUserAccountStatusOptions(draft?.enabled, "Enabled", "Disabled", "Keep")}</select></label>
+      <label class="field"><span>Email Verified</span><select name="emailVerified">${renderUserAccountStatusOptions(draft?.emailVerified, "Verified", "Unverified", "Keep")}</select></label>
     </div>
     <div class="actions"><button class="button primary" type="submit">Sync Provider</button></div>
   </form>`;
+}
+
+function renderUserAccountStatusOptions(
+  value: boolean | undefined,
+  trueLabel: string,
+  falseLabel: string,
+  emptyLabel?: string
+): string {
+  const selected = value === undefined ? "" : value ? "true" : "false";
+  return [
+    ...(emptyLabel === undefined ? [] : [`<option value=""${selected === "" ? " selected" : ""}>${escapeHtml(emptyLabel)}</option>`]),
+    `<option value="true"${selected === "true" ? " selected" : ""}>${escapeHtml(trueLabel)}</option>`,
+    `<option value="false"${selected === "false" ? " selected" : ""}>${escapeHtml(falseLabel)}</option>`
+  ].join("");
 }
 
 function renderUserProfileForm(account: UserAccount, profile: UserProfileState): string {
@@ -1737,12 +1945,18 @@ export function renderRoleAdmin(
 export interface CustomFieldAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly draftField?: FieldDefinition;
   readonly state?: CustomFieldState;
   readonly error?: string;
 }
 
 export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
   const version = state.state?.version ?? 0;
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
+  const draft = state.draftField;
+  const fetchFromChoices = fetchFromOptions(doctype, state.doctypes, draft?.fetchFrom ?? "");
+  const doctypeChoices = doctypeOptions(state.doctypes);
   const rows = state.state?.fields
     .map((entry) => {
       const field = entry.field;
@@ -1766,7 +1980,12 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/custom-fields">
     <div class="fields cols-1">
-      <label class="field"><span>DocType</span><select name="doctype">${renderCustomFieldDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
@@ -1776,35 +1995,53 @@ export function renderCustomFieldAdmin(state: CustomFieldAdminState): string {
     <input type="hidden" name="expectedVersion" value="${String(version)}">
     <div class="form-head"><h2>Add Custom Field</h2><p>v${String(version)}</p></div>
     <div class="fields">
-      <label class="field"><span>Field Name</span><input name="name"></label>
-      <label class="field"><span>Label</span><input name="label"></label>
-      <label class="field"><span>Description</span><input name="description"></label>
-      <label class="field"><span>Placeholder</span><input name="placeholder"></label>
-      <label class="field"><span>Type</span><select name="type">${renderCustomFieldTypeOptions()}</select></label>
-      <label class="field"><span>Options</span><input name="options"></label>
-      <label class="field"><span>Link To</span><input name="linkTo"></label>
-      <label class="field"><span>Table Of</span><input name="tableOf"></label>
-      <label class="field"><span>Fetch From</span><input name="fetchFrom" placeholder="link_field.source_field"></label>
-      <label class="field"><span>Minimum</span><input name="min" type="number" step="any"></label>
-      <label class="field"><span>Maximum</span><input name="max" type="number" step="any"></label>
-      <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4"></textarea></label>
-      <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4"></textarea></label>
-      <label class="field wide"><span>Hidden Depends On JSON</span><textarea name="hiddenDependsOn" rows="4"></textarea></label>
-      <label class="field"><span>Default JSON</span><textarea name="defaultValue"></textarea></label>
+      <label class="field"><span>Field Name</span><input name="name" value="${escapeHtml(draft?.name ?? "")}"></label>
+      <label class="field"><span>Label</span><input name="label" value="${escapeHtml(draft?.label ?? "")}"></label>
+      <label class="field"><span>Description</span><input name="description" value="${escapeHtml(draft?.description ?? "")}"></label>
+      <label class="field"><span>Placeholder</span><input name="placeholder" value="${escapeHtml(draft?.placeholder ?? "")}"></label>
+      <label class="field"><span>Type</span><select name="type">${renderCustomFieldTypeOptions(draft?.type)}</select></label>
+      <label class="field"><span>Options</span><input name="options" value="${escapeHtml((draft?.options ?? []).join(", "))}"></label>
+      ${renderDocTypeDatalistControl({
+        label: "Link To",
+        name: "linkTo",
+        value: draft?.linkTo ?? "",
+        options: doctypeChoices,
+        datalistId: "custom-field-doctype-options"
+      })}
+      ${renderDocTypeDatalistControl({
+        label: "Table Of",
+        name: "tableOf",
+        value: draft?.tableOf ?? "",
+        options: doctypeChoices,
+        datalistId: "custom-field-table-doctype-options"
+      })}
+      ${renderFetchFromControl({
+        label: "Fetch From",
+        name: "fetchFrom",
+        value: draft?.fetchFrom ?? "",
+        options: fetchFromChoices,
+        datalistId: "custom-field-fetch-from-options"
+      })}
+      <label class="field"><span>Minimum</span><input name="min" type="number" step="any" value="${escapeHtml(draft?.min === undefined ? "" : String(draft.min))}"></label>
+      <label class="field"><span>Maximum</span><input name="max" type="number" step="any" value="${escapeHtml(draft?.max === undefined ? "" : String(draft.max))}"></label>
+      <label class="field wide"><span>Mandatory Depends On JSON</span><textarea name="mandatoryDependsOn" rows="4">${escapeHtml(draft?.mandatoryDependsOn === undefined ? "" : JSON.stringify(draft.mandatoryDependsOn))}</textarea></label>
+      <label class="field wide"><span>Read Only Depends On JSON</span><textarea name="readOnlyDependsOn" rows="4">${escapeHtml(draft?.readOnlyDependsOn === undefined ? "" : JSON.stringify(draft.readOnlyDependsOn))}</textarea></label>
+      <label class="field wide"><span>Hidden Depends On JSON</span><textarea name="hiddenDependsOn" rows="4">${escapeHtml(draft?.hiddenDependsOn === undefined ? "" : JSON.stringify(draft.hiddenDependsOn))}</textarea></label>
+      <label class="field"><span>Default JSON</span><textarea name="defaultValue">${escapeHtml(draft?.defaultValue === undefined ? "" : JSON.stringify(draft.defaultValue))}</textarea></label>
     </div>
     <div class="choices">
-      ${renderCustomFieldCheckbox("required", "Required")}
-      ${renderCustomFieldCheckbox("readOnly", "Read Only")}
-      ${renderCustomFieldCheckbox("hidden", "Hidden")}
-      ${renderCustomFieldCheckbox("printHide", "Print Hide")}
-      ${renderCustomFieldCheckbox("printHideIfNoValue", "Print Hide If Empty")}
-      ${renderCustomFieldCheckbox("unique", "Unique")}
-      ${renderCustomFieldCheckbox("noCopy", "No Copy")}
-      ${renderCustomFieldCheckbox("allowOnSubmit", "Allow On Submit")}
-      ${renderCustomFieldCheckbox("fetchIfEmpty", "Fetch If Empty")}
-      ${renderCustomFieldCheckbox("inFormView", "Form View")}
-      ${renderCustomFieldCheckbox("inListView", "List View")}
-      ${renderCustomFieldCheckbox("inListFilter", "List Filter")}
+      ${renderCustomFieldCheckbox("required", "Required", draft?.required)}
+      ${renderCustomFieldCheckbox("readOnly", "Read Only", draft?.readOnly)}
+      ${renderCustomFieldCheckbox("hidden", "Hidden", draft?.hidden)}
+      ${renderCustomFieldCheckbox("printHide", "Print Hide", draft?.printHide)}
+      ${renderCustomFieldCheckbox("printHideIfNoValue", "Print Hide If Empty", draft?.printHideIfNoValue)}
+      ${renderCustomFieldCheckbox("unique", "Unique", draft?.unique)}
+      ${renderCustomFieldCheckbox("noCopy", "No Copy", draft?.noCopy)}
+      ${renderCustomFieldCheckbox("allowOnSubmit", "Allow On Submit", draft?.allowOnSubmit)}
+      ${renderCustomFieldCheckbox("fetchIfEmpty", "Fetch If Empty", draft?.fetchIfEmpty)}
+      ${renderCustomFieldCheckbox("inFormView", "Form View", draft?.inFormView)}
+      ${renderCustomFieldCheckbox("inListView", "List View", draft?.inListView)}
+      ${renderCustomFieldCheckbox("inListFilter", "List Filter", draft?.inListFilter)}
     </div>
     <div class="actions"><button class="button primary" type="submit">Save Field</button></div>
   </form>
@@ -1823,6 +2060,7 @@ export interface FieldPropertyAdminState {
   readonly selectedDoctype: string;
   readonly selectedField: string;
   readonly doctype?: DocTypeDefinition;
+  readonly draftOverrides?: FieldPropertyOverrides;
   readonly state?: FieldPropertyOverrideState;
   readonly error?: string;
 }
@@ -1832,7 +2070,8 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
   const selectedField = state.selectedField || doctype?.fields[0]?.name || "";
   const version = state.state?.version ?? 0;
   const current = state.state?.fields.find((entry) => entry.fieldName === selectedField);
-  const overrides = current?.overrides ?? {};
+  const overrides = state.draftOverrides ?? current?.overrides ?? {};
+  const fetchFromChoices = fetchFromOptions(doctype, state.doctypes, overrides.fetchFrom ?? "");
   const rows = state.state?.fields
     .map((entry) => `<tr>
       ${renderTableCell("Field", escapeHtml(entry.fieldName))}
@@ -1848,8 +2087,18 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/field-properties">
     <div class="fields">
-      <label class="field"><span>DocType</span><select name="doctype">${renderCustomFieldDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
-      <label class="field"><span>Field</span><select name="field">${renderFieldPropertyFieldOptions(doctype, selectedField)}</select></label>
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
+      ${renderFieldSelectControl({
+        label: "Field",
+        name: "field",
+        value: selectedField,
+        options: fieldOptions(doctype, selectedField)
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
@@ -1873,7 +2122,13 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
       <label class="field"><span>Print Hide If Empty</span><select name="printHideIfNoValue">${renderBooleanOverrideOptions(overrides.printHideIfNoValue)}</select></label>
       <label class="field"><span>No Copy</span><select name="noCopy">${renderBooleanOverrideOptions(overrides.noCopy)}</select></label>
       <label class="field"><span>Allow On Submit</span><select name="allowOnSubmit">${renderBooleanOverrideOptions(overrides.allowOnSubmit)}</select></label>
-      <label class="field"><span>Fetch From</span><input name="fetchFrom" value="${escapeHtml(overrides.fetchFrom ?? "")}" placeholder="link_field.source_field"></label>
+      ${renderFetchFromControl({
+        label: "Fetch From",
+        name: "fetchFrom",
+        value: overrides.fetchFrom ?? "",
+        options: fetchFromChoices,
+        datalistId: "field-property-fetch-from-options"
+      })}
       <label class="field"><span>Fetch If Empty</span><select name="fetchIfEmpty">${renderBooleanOverrideOptions(overrides.fetchIfEmpty)}</select></label>
       <label class="field"><span>Form View</span><select name="inFormView">${renderBooleanOverrideOptions(overrides.inFormView)}</select></label>
       <label class="field"><span>Global Search</span><select name="inGlobalSearch">${renderBooleanOverrideOptions(overrides.inGlobalSearch)}</select></label>
@@ -1902,15 +2157,25 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
 export interface WorkflowAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly roleSuggestions?: readonly string[];
+  readonly draftWorkflow?: WorkflowDefinition;
   readonly state?: WorkflowDefinitionState;
   readonly error?: string;
 }
 
 export function renderWorkflowAdmin(state: WorkflowAdminState): string {
   const version = state.state?.version ?? 0;
-  const workflow = state.state?.workflow;
+  const workflow = state.draftWorkflow ?? state.state?.workflow;
+  const savedWorkflow = state.state?.workflow;
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
   const states = workflow?.states.join("\n") ?? "";
   const transitions = workflow?.transitions.map(renderWorkflowTransitionLine).join("\n") ?? "";
+  const workflowStates = workflow?.states ?? [];
+  const roleSuggestions = uniqueSortedStrings([
+    ...(state.roleSuggestions ?? []),
+    ...(workflow?.transitions.flatMap((transition) => transition.roles ?? []) ?? [])
+  ]);
   const rows = workflow?.transitions
     .map((transition) => `<tr>
       ${renderTableCell("Action", escapeHtml(transition.action))}
@@ -1922,7 +2187,12 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/workflows">
     <div class="fields cols-1">
-      <label class="field"><span>DocType</span><select name="doctype">${renderWorkflowDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
@@ -1932,14 +2202,14 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
     <input type="hidden" name="expectedVersion" value="${String(version)}">
     <div class="form-head"><h2>Workflow Definition</h2><p>v${String(version)}</p></div>
     <div class="fields">
-      <label class="field"><span>State Field</span><input name="stateField" value="${escapeHtml(workflow?.stateField ?? "workflow_state")}"></label>
-      <label class="field"><span>Initial State</span><input name="initialState" value="${escapeHtml(workflow?.initialState ?? "")}"></label>
+      ${renderWorkflowStateFieldControl(doctype, workflow?.stateField ?? "workflow_state")}
+      ${renderWorkflowInitialStateControl(workflowStates, workflow?.initialState ?? "")}
       <label class="field"><span>States</span><textarea name="states">${escapeHtml(states)}</textarea></label>
-      <label class="field"><span>Transitions</span><textarea name="transitions">${escapeHtml(transitions)}</textarea></label>
     </div>
+    ${renderWorkflowTransitionControls(workflow?.transitions ?? [], workflowStates, roleSuggestions, transitions)}
     <div class="actions">
       <button class="button primary" type="submit">Save Workflow</button>
-      ${workflow ? `<button class="button danger" type="submit" formaction="/desk/admin/workflows/${encodeURIComponent(state.selectedDoctype)}/clear">Clear Override</button>` : ""}
+      ${savedWorkflow ? `<button class="button danger" type="submit" formaction="/desk/admin/workflows/${encodeURIComponent(state.selectedDoctype)}/clear">Clear Override</button>` : ""}
     </div>
   </form>
   <section class="panel">
@@ -1955,7 +2225,15 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
 export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): string {
   const version = state.state?.version ?? 0;
   const selectedRule = state.state?.rules.find((entry) => entry.rule.name === state.selectedRuleName);
-  const rule = selectedRule?.rule;
+  const rule = state.draftRule ?? selectedRule?.rule;
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
+  const userSuggestions = uniqueSortedStrings([
+    ...(state.userSuggestions ?? []),
+    ...(state.draftRule?.recipients.flatMap((recipient) => recipient.kind === "user" ? [recipient.userId] : []) ?? []),
+    ...((state.state?.rules ?? []).flatMap((entry) =>
+      entry.rule.recipients.flatMap((recipient) => recipient.kind === "user" ? [recipient.userId] : [])
+    ))
+  ]);
   const rows = state.state?.rules
     .map((entry) => `<tr>
       ${renderTableCell("Name", escapeHtml(entry.rule.name))}
@@ -1980,7 +2258,12 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/notification-rules">
     <div class="fields cols-1">
-      <label class="field"><span>DocType</span><select name="doctype">${renderNotificationRuleDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
@@ -1988,17 +2271,17 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
   <form class="panel form" method="post" action="/desk/admin/notification-rules">
     <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
     <input type="hidden" name="expectedVersion" value="${String(version)}">
-    <div class="form-head"><h2>${selectedRule === undefined ? "Notification Rule" : "Edit Notification Rule"}</h2><p>v${String(version)}</p></div>
+    <div class="form-head"><h2>${rule === undefined ? "Notification Rule" : "Edit Notification Rule"}</h2><p>v${String(version)}</p></div>
     <div class="fields">
       <label class="field"><span>Name</span><input name="name" value="${escapeHtml(rule?.name ?? "")}"></label>
       <label class="field"><span>Enabled</span><select name="enabled">${renderNotificationRuleBooleanOptions(rule?.enabled, "Enabled", "Disabled")}</select></label>
-      <label class="field"><span>Events</span><textarea name="events">${escapeHtml(rule?.events.join("\n") ?? "DocumentUpdated")}</textarea></label>
-      <label class="field"><span>Recipients</span><textarea name="recipients">${escapeHtml(rule?.recipients.map(notificationRuleRecipientLabel).join("\n") ?? "field:created_by")}</textarea></label>
-      <label class="field"><span>Channels</span><input name="channels" value="${escapeHtml(rule?.channels?.join(",") ?? "")}" placeholder="inbox"></label>
       <label class="field wide"><span>Condition JSON</span><textarea name="condition" rows="5">${escapeHtml(notificationRuleConditionValue(rule?.condition))}</textarea></label>
       <label class="field"><span>Subject</span><input name="subject" value="${escapeHtml(rule?.subject ?? "")}" placeholder="{{ actor }} updated {{ doctype }} {{ name }}"></label>
       <label class="field"><span>Exclude Actor</span><select name="excludeActor">${renderNotificationRuleBooleanOptions(rule?.excludeActor, "Yes", "No")}</select></label>
     </div>
+    ${renderNotificationRuleEventChoices(rule?.events ?? ["DocumentUpdated"])}
+    ${renderNotificationRuleChannelChoices(rule?.channels)}
+    ${renderNotificationRecipientControls(rule?.recipients ?? [{ kind: "field", field: "created_by" }], doctype, userSuggestions)}
     <div class="actions"><button class="button primary" type="submit">Save Rule</button></div>
   </form>
   <section class="panel">
@@ -2014,7 +2297,15 @@ export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): 
 export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): string {
   const version = state.state?.version ?? 0;
   const selectedRule = state.state?.rules.find((entry) => entry.rule.name === state.selectedRuleName);
-  const rule = selectedRule?.rule;
+  const rule = state.draftRule ?? selectedRule?.rule;
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
+  const userSuggestions = uniqueSortedStrings([
+    ...(state.userSuggestions ?? []),
+    ...(state.draftRule?.assignees.flatMap((assignee) => assignee.kind === "user" ? [assignee.userId] : []) ?? []),
+    ...((state.state?.rules ?? []).flatMap((entry) =>
+      entry.rule.assignees.flatMap((assignee) => assignee.kind === "user" ? [assignee.userId] : [])
+    ))
+  ]);
   const rows = state.state?.rules
     .map((entry) => `<tr>
       ${renderTableCell("Name", escapeHtml(entry.rule.name))}
@@ -2037,7 +2328,12 @@ export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): stri
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/assignment-rules">
     <div class="fields cols-1">
-      <label class="field"><span>DocType</span><select name="doctype">${renderNotificationRuleDoctypeOptions(state.doctypes, state.selectedDoctype)}</select></label>
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
     </div>
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
@@ -2045,15 +2341,15 @@ export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): stri
   <form class="panel form" method="post" action="/desk/admin/assignment-rules">
     <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
     <input type="hidden" name="expectedVersion" value="${String(version)}">
-    <div class="form-head"><h2>${selectedRule === undefined ? "Assignment Rule" : "Edit Assignment Rule"}</h2><p>v${String(version)}</p></div>
+    <div class="form-head"><h2>${rule === undefined ? "Assignment Rule" : "Edit Assignment Rule"}</h2><p>v${String(version)}</p></div>
     <div class="fields">
       <label class="field"><span>Name</span><input name="name" value="${escapeHtml(rule?.name ?? "")}"></label>
       <label class="field"><span>Enabled</span><select name="enabled">${renderNotificationRuleBooleanOptions(rule?.enabled, "Enabled", "Disabled")}</select></label>
-      <label class="field"><span>Events</span><textarea name="events">${escapeHtml(rule?.events.join("\n") ?? "DocumentCreated")}</textarea></label>
-      <label class="field"><span>Assignees</span><textarea name="assignees">${escapeHtml(rule?.assignees.map(assignmentRuleAssigneeLabel).join("\n") ?? "field:created_by")}</textarea></label>
       <label class="field wide"><span>Condition JSON</span><textarea name="condition" rows="5">${escapeHtml(notificationRuleConditionValue(rule?.condition))}</textarea></label>
       <label class="field"><span>Exclude Actor</span><select name="excludeActor">${renderNotificationRuleBooleanOptions(rule?.excludeActor, "Yes", "No")}</select></label>
     </div>
+    ${renderAssignmentRuleEventChoices(rule?.events ?? ["DocumentCreated"])}
+    ${renderAssignmentAssigneeControls(rule?.assignees ?? [{ kind: "field", field: "created_by" }], doctype, userSuggestions)}
     <div class="actions"><button class="button primary" type="submit">Save Rule</button></div>
   </form>
   <section class="panel">
@@ -2140,21 +2436,6 @@ function printNumberValue(value: number | undefined): string {
   return value === undefined ? "" : escapeHtml(String(value));
 }
 
-function renderCustomFieldDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
-  return doctypes
-    .map((doctype) => `<option value="${escapeHtml(doctype.name)}"${doctype.name === selectedDoctype ? " selected" : ""}>${escapeHtml(doctype.label ?? doctype.name)}</option>`)
-    .join("");
-}
-
-function renderFieldPropertyFieldOptions(doctype: DocTypeDefinition | undefined, selectedField: string): string {
-  return (doctype?.fields ?? [])
-    .map(
-      (field) =>
-        `<option value="${escapeHtml(field.name)}"${field.name === selectedField ? " selected" : ""}>${escapeHtml(field.label ?? field.name)}</option>`
-    )
-    .join("");
-}
-
 function renderBooleanOverrideOptions(value: boolean | undefined): string {
   return [
     `<option value=""${value === undefined ? " selected" : ""}>Inherit</option>`,
@@ -2189,14 +2470,6 @@ function renderFieldPropertyOverrides(overrides: FieldPropertyOverrideState["fie
     overrides.max === undefined ? "" : `max: ${String(overrides.max)}`,
     overrides.defaultValue === undefined ? "" : `default: ${JSON.stringify(overrides.defaultValue)}`
   ].filter(Boolean).join("; ");
-}
-
-function renderWorkflowDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
-  return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
-}
-
-function renderNotificationRuleDoctypeOptions(doctypes: readonly DocTypeDefinition[], selectedDoctype: string): string {
-  return renderCustomFieldDoctypeOptions(doctypes, selectedDoctype);
 }
 
 function renderNotificationRuleBooleanOptions(value: boolean | undefined, trueLabel: string, falseLabel: string): string {
@@ -2256,14 +2529,278 @@ function renderWorkflowTransitionLine(
   ].join(" | ");
 }
 
-function renderCustomFieldTypeOptions(): string {
-  return FIELD_TYPES
-    .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+function renderWorkflowStateFieldControl(doctype: DocTypeDefinition | undefined, selected: string): string {
+  const options = fieldOptions(doctype, selected, isWorkflowStateField);
+  if (options.length > 0) {
+    return renderFieldSelectControl({
+      label: "State Field",
+      name: "stateField",
+      value: selected,
+      options
+    });
+  }
+  return `<label class="field"><span>State Field</span><input name="stateField" value="${escapeHtml(selected)}"></label>`;
+}
+
+function renderWorkflowInitialStateControl(states: readonly string[], selected: string): string {
+  if (states.length === 0) {
+    return `<label class="field"><span>Initial State</span><input name="initialState" value="${escapeHtml(selected)}"></label>`;
+  }
+  return `<label class="field"><span>Initial State</span><select name="initialState">${renderStringOptions(states, selected, true)}</select></label>`;
+}
+
+function renderWorkflowTransitionControls(
+  transitions: readonly WorkflowTransition[],
+  states: readonly string[],
+  roleSuggestions: readonly string[],
+  legacyTransitions: string
+): string {
+  const rows = (transitions.length === 0 ? [undefined, undefined, undefined] : [...transitions, undefined])
+    .map((transition, index) => renderWorkflowTransitionControlRow(transition, index, states, roleSuggestions))
+    .join("");
+  return `<fieldset class="admin-row-builder workflow-transition-builder">
+    <legend>Transitions</legend>
+    <div class="admin-row-list">${rows}</div>
+    <details class="nested-disclosure">
+      <summary>Advanced transition lines</summary>
+      <label class="field wide"><span>Legacy Lines</span><textarea name="transitions" rows="4">${escapeHtml(legacyTransitions)}</textarea></label>
+    </details>
+  </fieldset>`;
+}
+
+function renderWorkflowTransitionControlRow(
+  transition: WorkflowTransition | undefined,
+  index: number,
+  states: readonly string[],
+  roleSuggestions: readonly string[]
+): string {
+  const action = transition?.action ?? "";
+  const from = transition?.from ?? "";
+  const to = transition?.to ?? "";
+  const roles = (transition?.roles ?? []).join(", ");
+  const eventType = transition?.eventType ?? "";
+  const stateOptionsFrom = states.length === 0
+    ? ""
+    : `<select name="transitionFrom">${renderStringOptions(states, from, true)}</select>`;
+  const stateOptionsTo = states.length === 0
+    ? ""
+    : `<select name="transitionTo">${renderStringOptions(states, to, true)}</select>`;
+  const fromControl = stateOptionsFrom || `<input name="transitionFrom" value="${escapeHtml(from)}">`;
+  const toControl = stateOptionsTo || `<input name="transitionTo" value="${escapeHtml(to)}">`;
+  return `<div class="admin-row" data-cf-frappe-workflow-transition-row>
+    <label class="field compact"><span>Action ${String(index + 1)}</span><input name="transitionAction" value="${escapeHtml(action)}"></label>
+    <label class="field compact"><span>From</span>${fromControl}</label>
+    <label class="field compact"><span>To</span>${toControl}</label>
+    ${renderRoleMultiSelectorControl({
+      label: "Roles",
+      name: "transitionRoles",
+      value: roles,
+      options: stringOptions(roleSuggestions, roles),
+      datalistId: index === 0 ? "workflow-role-suggestions" : `workflow-role-suggestions-${String(index)}`,
+      className: "field compact"
+    })}
+    <label class="field compact"><span>Event Type</span><input name="transitionEventType" value="${escapeHtml(eventType)}"></label>
+  </div>`;
+}
+
+function renderNotificationRuleEventChoices(selected: readonly NotificationRuleEventKind[]): string {
+  return renderChoiceFieldset(
+    "Events",
+    "events",
+    NOTIFICATION_RULE_EVENT_KINDS,
+    selected,
+    notificationRuleEventLabel
+  );
+}
+
+function renderAssignmentRuleEventChoices(selected: readonly AssignmentRuleEventKind[]): string {
+  return renderChoiceFieldset(
+    "Events",
+    "events",
+    ASSIGNMENT_RULE_EVENT_KINDS,
+    selected,
+    notificationRuleEventLabel
+  );
+}
+
+function renderNotificationRuleChannelChoices(selected: readonly NotificationRuleChannel[] | undefined): string {
+  return renderChoiceFieldset(
+    "Channels",
+    "channels",
+    NOTIFICATION_RULE_CHANNELS,
+    selected ?? [],
+    (channel) => channel === "inbox" ? "Inbox" : "Email"
+  );
+}
+
+function renderChoiceFieldset<T extends string>(
+  legend: string,
+  name: string,
+  values: readonly T[],
+  selected: readonly string[],
+  label: (value: T) => string
+): string {
+  const selectedSet = new Set(selected);
+  const choices = values
+    .map((value) => `<label class="choice">
+      <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${selectedSet.has(value) ? " checked" : ""}>
+      <span>${escapeHtml(label(value))}</span>
+    </label>`)
+    .join("");
+  return `<fieldset class="choice-grid">
+    <legend>${escapeHtml(legend)}</legend>
+    ${choices}
+  </fieldset>`;
+}
+
+function notificationRuleEventLabel(value: string): string {
+  return value.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+function renderNotificationRecipientControls(
+  recipients: readonly NotificationRuleRecipientDefinition[],
+  doctype: DocTypeDefinition | undefined,
+  userSuggestions: readonly string[]
+): string {
+  const rows = (recipients.length === 0 ? [{ kind: "field", field: "created_by" } as const] : [...recipients, undefined])
+    .map((recipient, index) => renderNotificationRecipientRow(recipient, index, doctype, userSuggestions))
+    .join("");
+  return `<fieldset class="admin-row-builder">
+    <legend>Recipients</legend>
+    <div class="admin-row-list">${rows}</div>
+  </fieldset>`;
+}
+
+function renderNotificationRecipientRow(
+  recipient: NotificationRuleRecipientDefinition | undefined,
+  index: number,
+  doctype: DocTypeDefinition | undefined,
+  userSuggestions: readonly string[]
+): string {
+  const kind = recipient?.kind ?? "";
+  const field = recipient?.kind === "field" ? recipient.field : "";
+  const user = recipient?.kind === "user" ? recipient.userId : "";
+  return `<div class="admin-row">
+    <label class="field compact"><span>Kind ${String(index + 1)}</span><select name="recipientKind">${renderNotificationRecipientKindOptions(kind)}</select></label>
+    ${renderFieldSelectControl({
+      label: "Field",
+      name: "recipientField",
+      value: field,
+      options: fieldOptions(doctype, field, isNotificationRuleRecipientField),
+      includeBlank: true,
+      className: "field compact"
+    })}
+    ${renderUserSelectorControl({
+      label: "User",
+      name: "recipientUser",
+      value: user,
+      options: stringOptions(userSuggestions, user),
+      datalistId: index === 0 ? "notification-rule-user-suggestions" : `notification-rule-user-suggestions-${String(index)}`,
+      className: "field compact"
+    })}
+  </div>`;
+}
+
+function renderNotificationRecipientKindOptions(selected: string): string {
+  const options: readonly { readonly value: string; readonly label: string }[] = [
+    { value: "", label: "" },
+    { value: "field", label: "Field" },
+    { value: "user", label: "User" },
+    { value: "documentOwner", label: "Document Owner" }
+  ];
+  return options
+    .map(({ value, label }) =>
+      `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`
+    )
     .join("");
 }
 
-function renderCustomFieldCheckbox(name: string, label: string): string {
-  return `<label class="choice"><input type="checkbox" name="${escapeHtml(name)}" value="1"><span>${escapeHtml(label)}</span></label>`;
+function renderAssignmentAssigneeControls(
+  assignees: readonly AssignmentRuleAssigneeDefinition[],
+  doctype: DocTypeDefinition | undefined,
+  userSuggestions: readonly string[]
+): string {
+  const rows = (assignees.length === 0 ? [{ kind: "field", field: "created_by" } as const] : [...assignees, undefined])
+    .map((assignee, index) => renderAssignmentAssigneeRow(assignee, index, doctype, userSuggestions))
+    .join("");
+  return `<fieldset class="admin-row-builder">
+    <legend>Assignees</legend>
+    <div class="admin-row-list">${rows}</div>
+  </fieldset>`;
+}
+
+function renderAssignmentAssigneeRow(
+  assignee: AssignmentRuleAssigneeDefinition | undefined,
+  index: number,
+  doctype: DocTypeDefinition | undefined,
+  userSuggestions: readonly string[]
+): string {
+  const kind = assignee?.kind ?? "";
+  const field = assignee?.kind === "field" ? assignee.field : "";
+  const user = assignee?.kind === "user" ? assignee.userId : "";
+  return `<div class="admin-row">
+    <label class="field compact"><span>Kind ${String(index + 1)}</span><select name="assigneeKind">${renderAssignmentAssigneeKindOptions(kind)}</select></label>
+    ${renderFieldSelectControl({
+      label: "Field",
+      name: "assigneeField",
+      value: field,
+      options: fieldOptions(doctype, field, isAssignmentRuleAssigneeField),
+      includeBlank: true,
+      className: "field compact"
+    })}
+    ${renderUserSelectorControl({
+      label: "User",
+      name: "assigneeUser",
+      value: user,
+      options: stringOptions(userSuggestions, user),
+      datalistId: index === 0 ? "assignment-rule-user-suggestions" : `assignment-rule-user-suggestions-${String(index)}`,
+      className: "field compact"
+    })}
+  </div>`;
+}
+
+function renderAssignmentAssigneeKindOptions(selected: string): string {
+  const options: readonly { readonly value: string; readonly label: string }[] = [
+    { value: "", label: "" },
+    { value: "field", label: "Field" },
+    { value: "user", label: "User" }
+  ];
+  return options
+    .map(({ value, label }) =>
+      `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`
+    )
+    .join("");
+}
+
+function renderStringOptions(values: readonly string[], selected: string, includeBlank = false): string {
+  const options = includeBlank ? [`<option value=""${selected === "" ? " selected" : ""}></option>`] : [];
+  const seen = new Set<string>();
+  if (selected && !values.includes(selected)) {
+    options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`);
+    seen.add(selected);
+  }
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    options.push(`<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(value)}</option>`);
+  }
+  return options.join("");
+}
+
+function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function renderCustomFieldTypeOptions(selected = ""): string {
+  return FIELD_TYPES
+    .map((type) => `<option value="${escapeHtml(type)}"${type === selected ? " selected" : ""}>${escapeHtml(type)}</option>`)
+    .join("");
+}
+
+function renderCustomFieldCheckbox(name: string, label: string, checked = false): string {
+  return `<label class="choice"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}><span>${escapeHtml(label)}</span></label>`;
 }
 
 function renderCustomFieldDetails(field: FieldDefinition): string {
@@ -5280,6 +5817,34 @@ tr:last-child td { border-bottom: 0; }
   align-items: center;
   gap: 8px;
   min-height: 44px;
+}
+.admin-row-builder {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.admin-row-builder legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.admin-row-list {
+  display: grid;
+  gap: 10px;
+}
+.admin-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfe;
 }
 .report-builder-filter {
   display: grid;

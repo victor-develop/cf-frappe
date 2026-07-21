@@ -178,6 +178,38 @@ export const app = defineApp({
 export const registry = createRegistryFromApps([app]);
 ```
 
+### Field-Level Permissions
+
+DocType permissions answer whether an actor can use a document. Field permissions answer whether an actor can see or write a particular field on that document.
+
+```ts
+export const EmployeeRecord = defineDocType({
+  name: "Employee Record",
+  fields: [
+    { name: "employee", type: "text", required: true },
+    {
+      name: "salary",
+      type: "number",
+      permissions: [
+        { roles: ["HR"], actions: ["read", "create", "update"] },
+        {
+          roles: ["Employee"],
+          actions: ["read"],
+          when: ({ actor, document }) => document?.data.employee === actor.id
+        }
+      ]
+    }
+  ],
+  permissions: [{ roles: ["Employee", "HR"], actions: ["read", "create", "update"] }]
+});
+```
+
+Field conditions receive `{ actor, action, doctype, field, tenantId, document, value }`. `document` and `value` are present when the check is document/value scoped; metadata-only checks intentionally do not execute the condition.
+
+Field permissions are enforced server-side. Read paths redact document data and project metadata. Create, update, merge, and domain commands reject unauthorized user-supplied fields. Query surfaces only allow filters, ordering, aggregates, saved filters, reports, dashboards, Kanban, Calendar, web views, print formats, and import templates to reference fields that are unconditionally readable for the actor role; conditionally readable fields can be displayed after a document is loaded, but cannot be queried to infer hidden values. `System Manager` bypasses field-level rules.
+
+Defaults, hooks, and `fetchFrom` are trusted server-side model code and may derive fields that were not directly submitted by the user. Custom report row providers are also trusted code; document-backed reports are field-filtered by the framework, while arbitrary custom provider rows must preserve their own data boundary. Audit search is an administrator boundary: the default audit role is `System Manager`, and any custom audit admin role should be treated as a field-permission-bypassing operator role.
+
 ### Production Setup
 
 cf-frappe apps are Cloudflare Workers projects. The generated starter includes the Worker entrypoint, D1 migration files, Durable Object binding, Queue bindings, R2 binding, and local development scripts.
@@ -224,7 +256,7 @@ The repository currently passes:
 - `npm run build`
 - `npm run check`
 
-Current verification: `235` Vitest files and `2787` tests passing.
+Current verification: `241` Vitest files and `2857` tests passing.
 
 ### TODO
 
@@ -408,6 +440,38 @@ export const app = defineApp({
 export const registry = createRegistryFromApps([app]);
 ```
 
+### 字段级权限
+
+DocType 权限决定一个 actor 能不能操作某类文档；字段级权限决定这个 actor 能不能读写文档里的某个字段。
+
+```ts
+export const EmployeeRecord = defineDocType({
+  name: "Employee Record",
+  fields: [
+    { name: "employee", type: "text", required: true },
+    {
+      name: "salary",
+      type: "number",
+      permissions: [
+        { roles: ["HR"], actions: ["read", "create", "update"] },
+        {
+          roles: ["Employee"],
+          actions: ["read"],
+          when: ({ actor, document }) => document?.data.employee === actor.id
+        }
+      ]
+    }
+  ],
+  permissions: [{ roles: ["Employee", "HR"], actions: ["read", "create", "update"] }]
+});
+```
+
+字段条件函数会拿到 `{ actor, action, doctype, field, tenantId, document, value }`。当检查发生在具体文档或字段值上时，`document` 和 `value` 会存在；纯 metadata 检查不会执行条件函数。
+
+字段级权限是服务端强制的。读路径会对 document data 脱敏，并按 actor 投影 metadata。create、update、merge 和 domain command 会拒绝用户提交的无权限字段。filter、排序、聚合、saved filter、report、dashboard、Kanban、Calendar、web view、print format 和 import template 只能引用该 actor role 无条件可读的字段；条件可读字段可以在文档加载后展示，但不能被拿来查询和推断隐藏值。`System Manager` 会绕过字段级规则。
+
+defaults、hooks 和 `fetchFrom` 属于受信任的服务端模型代码，可以派生用户没有直接提交的字段。custom report row provider 也是受信任扩展代码；框架会保护 document-backed report 的字段边界，但任意 custom provider row 需要由 provider 自己维护数据边界。audit search 是管理员边界：默认 audit 角色是 `System Manager`；如果配置自定义 audit admin role，应把它视为会绕过字段权限的高信任运维角色。
+
 ### 生产部署
 
 cf-frappe 应用就是 Cloudflare Workers 项目。生成的 starter 包含 Worker 入口、D1 migration、Durable Object binding、Queue binding、R2 binding 和本地开发脚本。
@@ -454,7 +518,7 @@ npm run dev
 - `npm run build`
 - `npm run check`
 
-当前验证结果：`235` 个 Vitest 文件，`2787` 个测试全部通过。
+当前验证结果：`241` 个 Vitest 文件，`2857` 个测试全部通过。
 
 ### TODO
 

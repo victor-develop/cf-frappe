@@ -1,11 +1,13 @@
 import { permissionDenied } from "../core/errors.js";
+import { FrameworkError } from "../core/errors.js";
+import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import {
   type DashboardCardDefinition,
   type DashboardCardSourceDefinition,
   type DashboardDefinition
 } from "../core/dashboard.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
+import type { Actor, DocTypeDefinition, DocumentSnapshot, JsonPrimitive, ListDocumentsFilter, ListFilterExpression } from "../core/types.js";
 import {
   dashboardCardResult,
   type DashboardReadAccessDecision,
@@ -153,16 +155,48 @@ export class DashboardService {
   private canAccessCard(actor: Actor, source: DashboardCardSourceDefinition): boolean {
     try {
       if (source.kind === "documentCount" || source.kind === "documentAggregate") {
-        this.queries.getMeta(actor, source.doctype);
+        assertDashboardDocumentSourceVisible(source, this.queries.getQueryMeta(actor, source.doctype));
         return true;
       }
       this.reports.getReport(actor, source.report);
       return true;
     } catch (error) {
-      if (isPermissionDeniedError(error)) {
+      if (isPermissionDeniedError(error) || isActorScopedDashboardInvalid(error)) {
         return false;
       }
       throw error;
     }
   }
+}
+
+function assertDashboardDocumentSourceVisible(
+  source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentCount" | "documentAggregate" }>,
+  queryableDoctype: DocTypeDefinition
+): void {
+  normalizeListFilters(queryableDoctype, source.filters ?? [], { errorCode: "DASHBOARD_INVALID" });
+  if (source.filterExpression !== undefined) {
+    normalizeListFilterExpression(queryableDoctype, source.filterExpression, { errorCode: "DASHBOARD_INVALID" });
+  }
+  if (source.kind !== "documentAggregate" || source.aggregate === "count") {
+    return;
+  }
+  const field = queryableDoctype.fields.find((candidate) => candidate.name === source.field);
+  if (field === undefined) {
+    throw new FrameworkError(
+      "DASHBOARD_INVALID",
+      `Dashboard aggregate field '${source.field ?? ""}' is not queryable on DocType '${source.doctype}'`,
+      { status: 400 }
+    );
+  }
+  if (field.type !== "integer" && field.type !== "number") {
+    throw new FrameworkError(
+      "DASHBOARD_INVALID",
+      `Dashboard aggregate field '${field.name}' must be an integer or number field`,
+      { status: 400 }
+    );
+  }
+}
+
+function isActorScopedDashboardInvalid(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "DASHBOARD_INVALID";
 }

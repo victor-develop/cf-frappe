@@ -4,6 +4,7 @@ import type {
   DocumentData,
   DocStatus,
   DomainCommandDefinition,
+  FieldPermissionRule,
   FieldDefinition,
   JsonValue,
   MutableDocumentData,
@@ -12,6 +13,7 @@ import type {
   ValidationIssue,
   WorkflowDefinition
 } from "./types.js";
+import { FIELD_PERMISSION_ACTIONS } from "./types.js";
 import { normalizeAssignmentRules } from "./assignment-rules.js";
 import { normalizeAutomationRules } from "./automation-rules.js";
 import { FrameworkError } from "./errors.js";
@@ -49,6 +51,7 @@ export function defineDocType<TData extends DocumentData>(
     assertMandatoryDependsOnDefinition(definition, field);
     assertReadOnlyDependsOnDefinition(definition, field);
     assertHiddenDependsOnDefinition(definition, field);
+    assertFieldPermissionRulesDefinition(definition, field);
     seen.add(field.name);
   }
   assertNamingStrategyDefinition(definition);
@@ -437,8 +440,77 @@ function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinitio
           hiddenDependsOn: freezeListFilterExpression(
             normalizeListFilterExpression(doctype, field.hiddenDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
           )
-        })
+        }),
+    ...(field.permissions === undefined ? {} : { permissions: freezeFieldPermissionRules(doctype, field) })
   });
+}
+
+function assertFieldPermissionRulesDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
+  if (field.permissions === undefined) {
+    return;
+  }
+  if (!Array.isArray(field.permissions)) {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} permissions must be an array`,
+      { status: 400 }
+    );
+  }
+  field.permissions.forEach((rule, index) => assertFieldPermissionRuleDefinition(doctype, field, rule, index));
+}
+
+function assertFieldPermissionRuleDefinition(
+  doctype: DocTypeDefinition,
+  field: FieldDefinition,
+  rule: FieldPermissionRule,
+  index: number
+): void {
+  if (!Array.isArray(rule.roles) || rule.roles.length === 0) {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} permission rule ${index + 1} must include at least one role`,
+      { status: 400 }
+    );
+  }
+  if (!Array.isArray(rule.actions) || rule.actions.length === 0) {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} permission rule ${index + 1} must include at least one action`,
+      { status: 400 }
+    );
+  }
+  for (const action of rule.actions) {
+    if (!FIELD_PERMISSION_ACTIONS.includes(action)) {
+      throw new FrameworkError(
+        "DOCTYPE_FIELD_INVALID",
+        `Field '${field.name}' on ${doctype.name} permission rule ${index + 1} has unsupported action '${String(action)}'`,
+        { status: 400 }
+      );
+    }
+  }
+  if (rule.when !== undefined && typeof rule.when !== "function") {
+    throw new FrameworkError(
+      "DOCTYPE_FIELD_INVALID",
+      `Field '${field.name}' on ${doctype.name} permission rule ${index + 1} condition must be a function`,
+      { status: 400 }
+    );
+  }
+}
+
+function freezeFieldPermissionRules(
+  doctype: DocTypeDefinition,
+  field: FieldDefinition
+): readonly FieldPermissionRule[] {
+  return Object.freeze(
+    (field.permissions ?? []).map((rule, index) => {
+      assertFieldPermissionRuleDefinition(doctype, field, rule, index);
+      return Object.freeze({
+        ...rule,
+        roles: Object.freeze([...rule.roles]),
+        actions: Object.freeze([...rule.actions])
+      });
+    })
+  );
 }
 
 function documentSnapshotForValidation(

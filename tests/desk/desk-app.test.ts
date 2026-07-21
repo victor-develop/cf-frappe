@@ -325,10 +325,15 @@ describe("Desk app", () => {
 
   function makeWorkflowDesk(actor = owner) {
     const services = createServices(["base-1", "base-2"]);
+    const roles = new RoleService({
+      events: services.store,
+      ids: deterministicIds(["role-1", "role-2"]),
+      clock: fixedClock(now)
+    });
     const workflows = new WorkflowService({
       registry: services.registry,
       events: services.store,
-      ids: deterministicIds(["workflow-1", "workflow-2"]),
+      ids: deterministicIds(["workflow-1", "workflow-2", "workflow-3"]),
       clock: fixedClock(now)
     });
     const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
@@ -359,11 +364,12 @@ describe("Desk app", () => {
       timeline: services.history,
       savedFilters: services.savedFilters,
       savedReports: services.savedReports,
+      roles,
       workflows,
       userPermissions: services.userPermissions,
       actor: () => actor
     });
-    return { app, services: { ...services, documents, queries, workflows } };
+    return { app, services: { ...services, documents, queries, roles, workflows } };
   }
 
   function makeFieldPropertyDesk(actor = owner) {
@@ -2648,8 +2654,9 @@ describe("Desk app", () => {
   });
 
   it("renders a Desk file manager for upload, metadata, download, and delete workflows", async () => {
-    const { app, storage } = makeFileDesk(owner, {
+    const { app, storage, documents } = makeFileDesk(owner, {
       ids: [
+        "note-create",
         "create",
         "create-other",
         "create-html",
@@ -2660,12 +2667,21 @@ describe("Desk app", () => {
         "request-delete",
         "delete"
       ],
-      fileIds: ["object", "other", "html"]
+      fileIds: ["object", "other", "html"],
+      doctypes: [fileDocType, noteDocType]
     });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "File Target" }) });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
     await expect(home.text()).resolves.toContain('href="/desk/files"');
+
+    const targetedManager = await app.request("/desk/files?attached_to_doctype=Note");
+    expect(targetedManager.status).toBe(200);
+    const targetedHtml = await targetedManager.text();
+    expect(targetedHtml).toContain('name="attached_to_doctype" list="file-upload-attached-doctype-options" value="Note"');
+    expect(targetedHtml).toContain('<datalist id="file-upload-attached-name-options">');
+    expect(targetedHtml).toContain('<option value="File Target">File Target</option>');
 
     const uploadForm = new FormData();
     uploadForm.append("file", new Blob(["hello"], { type: "text/plain" }), "hello.txt");
@@ -2703,6 +2719,9 @@ describe("Desk app", () => {
     expect(html).toContain("inline.html");
     expect(html).toContain('class="panel form file-upload"');
     expect(html).toContain('data-upload-mode="direct"');
+    expect(html).toContain('<datalist id="file-upload-attached-doctype-options">');
+    expect(html).toContain('<option value="Note">Note</option>');
+    expect(html).toContain('<datalist id="file-filter-attached-doctype-options">');
     expect(html).toContain("/desk/files/file_object/content");
     expect(html).toContain("/desk/files/file_object/preview");
     expect(html).toContain("/desk/files/file_html/content");
@@ -2717,6 +2736,7 @@ describe("Desk app", () => {
     expect(html).toContain('name="is_private"');
     expect(html).toContain('name="bulk_is_private"');
     expect(html).toContain('name="bulk_attached_to_doctype"');
+    expect(html).toContain('<datalist id="bulk-file-attached-doctype-options">');
     expect(html).toContain('formaction="/desk/files/bulk-metadata"');
     expect(html).toContain('formaction="/desk/files/bulk-delete"');
     expect(html).toContain('name="file" value="file_other"');
@@ -4220,16 +4240,22 @@ describe("Desk app", () => {
   });
 
   it("renders and mutates user permissions from the Desk admin surface", async () => {
-    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "Task Manager"] };
     const { app, services } = makeDesk(admin);
     await services.documents.create({ actor: owner, doctype: "Note", data: data({ title: "Permission Target" }) });
 
-    const empty = await app.request("/desk/admin/user-permissions?user=owner%40example.com");
+    const empty = await app.request("/desk/admin/user-permissions?user=owner%40example.com&targetDoctype=Note");
     expect(empty.status).toBe(200);
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain("User Permissions");
+    expect(emptyHtml).toContain('<datalist id="user-permission-user-suggestions">');
+    expect(emptyHtml).toContain('<option value="owner@example.com">owner@example.com</option>');
     expect(emptyHtml).toContain('name="targetDoctype"');
+    expect(emptyHtml).toContain('list="user-permission-target-doctype-options" value="Note"');
+    expect(emptyHtml).toContain('<datalist id="user-permission-target-name-options">');
+    expect(emptyHtml).toContain('<option value="Permission Target">Permission Target</option>');
     expect(emptyHtml).toContain('name="applicableDoctypes"');
+    expect(emptyHtml).toContain('list="user-permission-applicable-doctype-options"');
     expect(emptyHtml).toContain("No grants configured.");
 
     const granted = await app.request("/desk/admin/user-permissions", {
@@ -4258,6 +4284,22 @@ describe("Desk app", () => {
     expect(currentHtml).toContain("Permission Target");
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
     expect(currentHtml).toContain('action="/desk/admin/user-permissions/revoke"');
+
+    const stale = await app.request("/desk/admin/user-permissions", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: owner.id,
+        targetDoctype: "Note",
+        targetName: "Draft Target",
+        applicableDoctypes: "Note",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(stale.status).toBe(409);
+    const staleHtml = await stale.text();
+    expect(staleHtml).toContain("Expected user permissions for &#39;owner@example.com&#39; at version 0, found 1");
+    expect(staleHtml).toContain('name="targetName" list="user-permission-target-name-options" value="Draft Target"');
 
     const revoked = await app.request("/desk/admin/user-permissions/revoke", {
       method: "POST",
@@ -4492,6 +4534,8 @@ describe("Desk app", () => {
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
     expect(staleHtml).toContain("Expected custom fields for &#39;Note&#39; at version 0, found 1");
+    expect(staleHtml).toContain('name="name" value="reviewed_by"');
+    expect(staleHtml).toContain('<option value="text" selected>text</option>');
     expect(staleHtml).toContain("reviewed");
 
     const disabled = await app.request("/desk/admin/custom-fields/Note/reviewed/disable", {
@@ -4506,15 +4550,61 @@ describe("Desk app", () => {
     });
   });
 
+  it("renders custom field DocType and fetchFrom metadata suggestions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const services = createLinkedServices();
+    const customFields = new CustomFieldService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["custom-field-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      customFields,
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/custom-fields?doctype=Task");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('name="linkTo" list="custom-field-doctype-options"');
+    expect(html).toContain('name="tableOf" list="custom-field-table-doctype-options"');
+    expect(html).toContain('<datalist id="custom-field-doctype-options">');
+    expect(html).toContain('<datalist id="custom-field-table-doctype-options">');
+    expect(html).toContain('<option value="Project">Project</option>');
+    expect(html).toContain('<option value="Task">Task</option>');
+    expect(html).toContain('name="fetchFrom" list="custom-field-fetch-from-options"');
+    expect(html).toContain('<option value="project.title">project -&gt; title</option>');
+  });
+
   it("renders and mutates workflow definitions from the Desk admin surface", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
     const { app, services } = makeWorkflowDesk(admin);
+    await services.roles.create({
+      actor: admin,
+      role: "Reviewer",
+      enabled: true,
+      expectedVersion: 0
+    });
 
     const empty = await app.request("/desk/admin/workflows?doctype=Note");
     expect(empty.status).toBe(200);
     const emptyHtml = await empty.text();
     expect(emptyHtml).toContain("Workflows");
-    expect(emptyHtml).toContain('name="stateField" value="workflow_state"');
+    expect(emptyHtml).toContain('<select name="stateField">');
+    expect(emptyHtml).toContain('<option value="workflow_state" selected>workflow_state</option>');
+    expect(emptyHtml).not.toContain('<option value="count">count</option>');
+    expect(emptyHtml).toContain('<input name="initialState" value="">');
+    expect(emptyHtml).toContain('name="transitionAction" value=""');
+    expect(emptyHtml).toContain('name="transitionFrom"');
+    expect(emptyHtml).toContain('name="transitionTo"');
+    expect(emptyHtml).toContain('name="transitionRoles" type="text" list="workflow-role-suggestions" value=""');
+    expect(emptyHtml).toContain('<datalist id="workflow-role-suggestions">');
+    expect(emptyHtml).toContain('<option value="Reviewer">Reviewer</option>');
     expect(emptyHtml).toContain("No workflow override configured.");
 
     const created = await app.request("/desk/admin/workflows", {
@@ -4545,8 +4635,35 @@ describe("Desk app", () => {
     const currentHtml = await current.text();
     expect(currentHtml).toContain("approve");
     expect(currentHtml).toContain("NoteApproved");
+    expect(currentHtml).toContain('<select name="initialState"><option value=""></option><option value="Open" selected>Open</option>');
+    expect(currentHtml).toContain('<select name="transitionFrom"><option value=""></option><option value="Open" selected>Open</option>');
+    expect(currentHtml).toContain('<select name="transitionTo"><option value=""></option><option value="Open">Open</option><option value="Closed" selected>Closed</option>');
     expect(currentHtml).toContain('formaction="/desk/admin/workflows/Note/clear"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
+
+    const structured = await app.request("/desk/admin/workflows", {
+      method: "POST",
+      body: new URLSearchParams([
+        ["doctype", "Note"],
+        ["stateField", "workflow_state"],
+        ["initialState", "Open"],
+        ["states", "Open\nClosed"],
+        ["transitionAction", "review"],
+        ["transitionFrom", "Open"],
+        ["transitionTo", "Closed"],
+        ["transitionRoles", "Reviewer"],
+        ["transitionEventType", "NoteReviewed"],
+        ["expectedVersion", "1"]
+      ]),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(structured.status).toBe(303);
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({
+      version: 2,
+      workflow: {
+        transitions: [{ action: "review", from: "Open", to: "Closed", roles: ["Reviewer"], eventType: "NoteReviewed" }]
+      }
+    });
 
     const stale = await app.request("/desk/admin/workflows", {
       method: "POST",
@@ -4561,16 +4678,17 @@ describe("Desk app", () => {
     });
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
-    expect(staleHtml).toContain("Expected workflow definitions at version 0, found 1");
-    expect(staleHtml).toContain("approve");
+    expect(staleHtml).toContain("Expected workflow definitions at version 0, found 2");
+    expect(staleHtml).toContain('name="transitionAction" value="review"');
+    expect(staleHtml).toContain("review");
 
     const cleared = await app.request("/desk/admin/workflows/Note/clear", {
       method: "POST",
-      body: new URLSearchParams({ expectedVersion: "1" }),
+      body: new URLSearchParams({ expectedVersion: "2" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(cleared.status).toBe(303);
-    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({ version: 2 });
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({ version: 3 });
     expect((await services.workflows.list(admin, "Note")).workflow).toBeUndefined();
   });
 
@@ -4597,6 +4715,14 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Notification Rules");
     expect(emptyHtml).toContain('action="/desk/admin/notification-rules"');
     expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+    expect(emptyHtml).toContain('type="checkbox" name="events" value="DocumentUpdated" checked');
+    expect(emptyHtml).toContain('type="checkbox" name="channels" value="inbox"');
+    expect(emptyHtml).toContain('name="recipientKind"');
+    expect(emptyHtml).toContain('name="recipientField"');
+    expect(emptyHtml).toContain('<option value="created_by" selected>created_by</option>');
+    expect(emptyHtml).not.toContain('<option value="count">count</option>');
+    expect(emptyHtml).toContain('<datalist id="notification-rule-user-suggestions">');
+    expect(emptyHtml).toContain('<option value="admin@example.com">admin@example.com</option>');
     expect(emptyHtml).toContain("No notification rules configured.");
 
     const saved = await app.request("/desk/admin/notification-rules", {
@@ -4652,27 +4778,32 @@ describe("Desk app", () => {
     const editHtml = await edit.text();
     expect(editHtml).toContain("Edit Notification Rule");
     expect(editHtml).toContain('name="name" value="Managers on changes"');
-    expect(editHtml).toContain("<textarea name=\"events\">DocumentUpdated\nDocumentCommentAdded</textarea>");
-    expect(editHtml).toContain("<textarea name=\"recipients\">field:created_by</textarea>");
-    expect(editHtml).toContain('name="channels" value="inbox"');
+    expect(editHtml).toContain('type="checkbox" name="events" value="DocumentUpdated" checked');
+    expect(editHtml).toContain('type="checkbox" name="events" value="DocumentCommentAdded" checked');
+    expect(editHtml).toContain('<option value="field" selected>Field</option>');
+    expect(editHtml).toContain('<option value="created_by" selected>created_by</option>');
+    expect(editHtml).toContain('type="checkbox" name="channels" value="inbox" checked');
     expect(editHtml).toContain("&quot;field&quot;: &quot;priority&quot;");
     expect(editHtml).toContain('name="subject" value="{{ actor }} updated {{ doctype }} {{ name }}"');
     expect(editHtml).toContain('<option value="false" selected>No</option>');
 
     const updated = await app.request("/desk/admin/notification-rules", {
       method: "POST",
-      body: new URLSearchParams({
-        doctype: "Note",
-        name: "Managers on changes",
-        events: "DocumentAssigned",
-        recipients: "documentOwner",
-        channels: "inbox,email",
-        condition: "{\"field\":\"system.docstatus\",\"value\":\"draft\"}",
-        subject: "Assignment changed",
-        enabled: "false",
-        excludeActor: "true",
-        expectedVersion: "1"
-      }),
+      body: new URLSearchParams([
+        ["doctype", "Note"],
+        ["name", "Managers on changes"],
+        ["events", "DocumentAssigned"],
+        ["recipientKind", "documentOwner"],
+        ["recipientField", ""],
+        ["recipientUser", ""],
+        ["channels", "inbox"],
+        ["channels", "email"],
+        ["condition", "{\"field\":\"system.docstatus\",\"value\":\"draft\"}"],
+        ["subject", "Assignment changed"],
+        ["enabled", "false"],
+        ["excludeActor", "true"],
+        ["expectedVersion", "1"]
+      ]),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(updated.status).toBe(303);
@@ -4713,6 +4844,7 @@ describe("Desk app", () => {
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
     expect(staleHtml).toContain("Expected notification rules at version 1, found 2");
+    expect(staleHtml).toContain('name="name" value="Stale"');
     expect(staleHtml).toContain("Managers on changes");
 
     const malformedRecipient = await app.request("/desk/admin/notification-rules", {
@@ -4800,10 +4932,12 @@ describe("Desk app", () => {
     const edit = await app.request("/desk/admin/notification-rules?doctype=Note&rule=Sparse");
     expect(edit.status).toBe(200);
     const html = await edit.text();
-    expect(html).toContain('name="channels" value="" placeholder="inbox"');
+    expect(html).toContain('type="checkbox" name="channels" value="inbox"');
+    expect(html).not.toContain('type="checkbox" name="channels" value="inbox" checked');
     expect(html).toContain('<option value="" selected>Default</option>');
     expect(html).toContain("<textarea name=\"condition\" rows=\"5\"></textarea>");
-    expect(html).not.toContain('name="channels" value="inbox"');
+    expect(html).toContain('<datalist id="notification-rule-user-suggestions">');
+    expect(html).toContain('<option value="manager@example.com">manager@example.com</option>');
 
     const unchanged = await app.request("/desk/admin/notification-rules", {
       method: "POST",
@@ -4981,6 +5115,14 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain("Assignment Rules");
     expect(emptyHtml).toContain('action="/desk/admin/assignment-rules"');
     expect(emptyHtml).toContain('name="expectedVersion" value="0"');
+    expect(emptyHtml).toContain('type="checkbox" name="events" value="DocumentCreated" checked');
+    expect(emptyHtml).toContain('name="assigneeKind"');
+    expect(emptyHtml).toContain('name="assigneeField"');
+    expect(emptyHtml).toContain('<option value="created_by" selected>created_by</option>');
+    expect(emptyHtml).not.toContain('<option value="priority">priority</option>');
+    expect(emptyHtml).not.toContain('<option value="count">count</option>');
+    expect(emptyHtml).toContain('<datalist id="assignment-rule-user-suggestions">');
+    expect(emptyHtml).toContain('<option value="admin@example.com">admin@example.com</option>');
     expect(emptyHtml).toContain("No assignment rules configured.");
 
     const saved = await app.request("/desk/admin/assignment-rules", {
@@ -5037,23 +5179,29 @@ describe("Desk app", () => {
     const editHtml = await edit.text();
     expect(editHtml).toContain("Edit Assignment Rule");
     expect(editHtml).toContain('name="name" value="High priority triage"');
-    expect(editHtml).toContain("<textarea name=\"events\">DocumentCreated\nDocumentUpdated</textarea>");
-    expect(editHtml).toContain("<textarea name=\"assignees\">field:created_by\nuser:manager@example.com</textarea>");
+    expect(editHtml).toContain('type="checkbox" name="events" value="DocumentCreated" checked');
+    expect(editHtml).toContain('type="checkbox" name="events" value="DocumentUpdated" checked');
+    expect(editHtml).toContain('<option value="field" selected>Field</option>');
+    expect(editHtml).toContain('<option value="user" selected>User</option>');
+    expect(editHtml).toContain('<option value="created_by" selected>created_by</option>');
+    expect(editHtml).toContain('name="assigneeUser" type="email" list="assignment-rule-user-suggestions-1" value="manager@example.com"');
     expect(editHtml).toContain("&quot;field&quot;: &quot;priority&quot;");
     expect(editHtml).toContain('<option value="false" selected>No</option>');
 
     const updated = await app.request("/desk/admin/assignment-rules", {
       method: "POST",
-      body: new URLSearchParams({
-        doctype: "Note",
-        name: "High priority triage",
-        events: "DocumentSubmitted",
-        assignees: "user:manager@example.com",
-        condition: "{\"field\":\"system.docstatus\",\"value\":\"draft\"}",
-        enabled: "false",
-        excludeActor: "true",
-        expectedVersion: "1"
-      }),
+      body: new URLSearchParams([
+        ["doctype", "Note"],
+        ["name", "High priority triage"],
+        ["events", "DocumentSubmitted"],
+        ["assigneeKind", "user"],
+        ["assigneeField", ""],
+        ["assigneeUser", "manager@example.com"],
+        ["condition", "{\"field\":\"system.docstatus\",\"value\":\"draft\"}"],
+        ["enabled", "false"],
+        ["excludeActor", "true"],
+        ["expectedVersion", "1"]
+      ]),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(updated.status).toBe(303);
@@ -5091,6 +5239,7 @@ describe("Desk app", () => {
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
     expect(staleHtml).toContain("Expected assignment rules at version 1, found 2");
+    expect(staleHtml).toContain('name="name" value="Stale"');
     expect(staleHtml).toContain("High priority triage");
 
     const malformedAssignee = await app.request("/desk/admin/assignment-rules", {
@@ -5142,6 +5291,86 @@ describe("Desk app", () => {
     const missing = await disabled.request("/desk/admin/assignment-rules");
     expect(missing.status).toBe(404);
     await expect(missing.text()).resolves.toContain("Assignment rules are not enabled");
+  });
+
+  it("renders notification and assignment user selectors from enabled user accounts while preserving stale users", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"], tenantId: "acme" };
+    const services = createServices();
+    const userAccounts = new UserAccountService({
+      events: services.store,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["user-enabled", "user-disabled"]),
+      clock: fixedClock(now)
+    });
+    const notificationRules = new NotificationRuleService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["notification-rule-event-1"]),
+      clock: fixedClock(now)
+    });
+    const assignmentRules = new AssignmentRuleService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["assignment-rule-event-1"]),
+      clock: fixedClock(now)
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "enabled-user@example.com",
+      password: "secret-123",
+      roles: ["User"],
+      enabled: true
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "disabled-user@example.com",
+      password: "secret-123",
+      roles: ["User"],
+      enabled: false
+    });
+    await notificationRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Stale notification user",
+        events: ["DocumentUpdated"],
+        recipients: [{ kind: "user", userId: "stale-notification@example.com" }]
+      }
+    });
+    await assignmentRules.save({
+      actor: admin,
+      doctype: "Note",
+      expectedVersion: 0,
+      rule: {
+        name: "Stale assignment user",
+        events: ["DocumentUpdated"],
+        assignees: [{ kind: "user", userId: "stale-assignment@example.com" }]
+      }
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      userAccounts,
+      notificationRules,
+      assignmentRules,
+      actor: () => admin
+    });
+
+    const notification = await app.request("/desk/admin/notification-rules?doctype=Note&rule=Stale%20notification%20user");
+    expect(notification.status).toBe(200);
+    const notificationHtml = await notification.text();
+    expect(notificationHtml).toContain('<option value="enabled-user@example.com">enabled-user@example.com</option>');
+    expect(notificationHtml).toContain('<option value="stale-notification@example.com">stale-notification@example.com</option>');
+    expect(notificationHtml).not.toContain("disabled-user@example.com");
+
+    const assignment = await app.request("/desk/admin/assignment-rules?doctype=Note&rule=Stale%20assignment%20user");
+    expect(assignment.status).toBe(200);
+    const assignmentHtml = await assignment.text();
+    expect(assignmentHtml).toContain('<option value="enabled-user@example.com">enabled-user@example.com</option>');
+    expect(assignmentHtml).toContain('<option value="stale-assignment@example.com">stale-assignment@example.com</option>');
+    expect(assignmentHtml).not.toContain("disabled-user@example.com");
   });
 
   it("round-trips sparse assignment rules without materializing default fields", async () => {
@@ -5474,6 +5703,7 @@ describe("Desk app", () => {
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
     expect(staleHtml).toContain("Expected field property overrides at version 0, found 1");
+    expect(staleHtml).toContain('name="label" value="Details"');
     expect(staleHtml).toContain("Urgency");
 
     const cleared = await app.request("/desk/admin/field-properties/Note/priority/clear", {
@@ -5483,6 +5713,32 @@ describe("Desk app", () => {
     });
     expect(cleared.status).toBe(303);
     await expect(services.fieldProperties.list(admin, "Note")).resolves.toMatchObject({ version: 2, fields: [] });
+  });
+
+  it("renders field property fetchFrom metadata suggestions", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE, "User"] };
+    const services = createLinkedServices();
+    const fieldProperties = new FieldPropertyService({
+      registry: services.registry,
+      events: services.store,
+      ids: deterministicIds(["property-1"]),
+      clock: fixedClock(now)
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      fieldProperties,
+      actor: () => admin
+    });
+
+    const response = await app.request("/desk/admin/field-properties?doctype=Task&field=description");
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('name="fetchFrom" list="field-property-fetch-from-options" value=""');
+    expect(html).toContain('<datalist id="field-property-fetch-from-options">');
+    expect(html).toContain('<option value="project.title">project -&gt; title</option>');
   });
 
   it("applies custom fields to generated Desk forms and lists", async () => {
@@ -5897,6 +6153,66 @@ describe("Desk app", () => {
     await expect(services.userAccounts.get(admin, owner.id)).resolves.toMatchObject({
       version: 5,
       enabled: true
+    });
+  });
+
+  it("renders user account role fields from the role catalog while preserving CSV submits", async () => {
+    const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE] };
+    const services = createServices(["account-doc-1"]);
+    const roles = new RoleService({
+      events: services.store,
+      ids: deterministicIds(["role-support", "role-disabled"]),
+      clock: fixedClock(now)
+    });
+    const userAccounts = new UserAccountService({
+      events: services.store,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["account-1"]),
+      clock: fixedClock(now)
+    });
+    await roles.create({
+      actor: admin,
+      role: "Support",
+      enabled: true,
+      expectedVersion: 0
+    });
+    await roles.create({
+      actor: admin,
+      role: "Retired",
+      enabled: false,
+      expectedVersion: 1
+    });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      roles,
+      userAccounts,
+      actor: () => admin
+    });
+
+    const empty = await app.request("/desk/admin/users");
+    expect(empty.status).toBe(200);
+    const html = await empty.text();
+    expect(html).toContain('<datalist id="user-account-create-role-suggestions">');
+    expect(html).toContain('<option value="Support">Support</option>');
+    expect(html).toContain('<option value="System Manager">System Manager</option>');
+    expect(html).not.toContain('<option value="Retired">Retired</option>');
+
+    const created = await app.request("/desk/admin/users", {
+      method: "POST",
+      body: new URLSearchParams({
+        user: "agent@example.com",
+        password: "secret-123",
+        roles: "Support, User",
+        enabled: "true",
+        expectedVersion: "0"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(created.status).toBe(303);
+    await expect(userAccounts.get(admin, "agent@example.com")).resolves.toMatchObject({
+      roles: ["Support", "User"]
     });
   });
 

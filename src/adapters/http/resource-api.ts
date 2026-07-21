@@ -539,10 +539,14 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.get("/api/resource/:doctype/import-template.csv", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    if (!canImportDocuments(actor, doctype)) {
-      throw permissionDenied(`Actor '${actor.id}' cannot import ${doctype.name}`);
+    const readableDoctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
+    if (!canImportDocuments(actor, readableDoctype)) {
+      throw permissionDenied(`Actor '${actor.id}' cannot import ${readableDoctype.name}`);
     }
+    const mode = documentImportMode(c.req.query("mode"));
+    const doctype = mode === "create"
+      ? await options.queries.getEffectiveCreateMeta(actor, c.req.param("doctype"))
+      : await options.queries.getEffectiveUpdateMeta(actor, c.req.param("doctype"));
     const template = documentImportTemplate(doctype);
     writeCsvDownloadHeaders(c, template);
     return c.body(template.body);

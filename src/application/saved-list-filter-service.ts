@@ -1,4 +1,4 @@
-import { notFound, permissionDenied } from "../core/errors.js";
+import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedListFiltersStream } from "../core/streams.js";
@@ -36,6 +36,7 @@ import { systemClock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
+import { projectDocTypeForFieldQueries } from "./document-field-access-policy.js";
 
 export type { SavedListFilter, SavedListFilterEventPayload } from "./saved-list-filter-events.js";
 
@@ -92,7 +93,7 @@ export class SavedListFilterService {
   async list(actor: Actor, doctypeName: string, tenantId = resolveTenant(actor)): Promise<readonly SavedListFilter[]> {
     const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
     const filters = await this.readAll(tenantId, doctype, actor.id);
-    return sortedSavedListFilters(filters);
+    return sortedSavedListFilters(this.queryableFilters(actor, doctype, filters));
   }
 
   async get(
@@ -103,7 +104,7 @@ export class SavedListFilterService {
   ): Promise<SavedListFilter> {
     const doctype = await this.readableDoctype(actor, doctypeName, tenantId);
     const decision = planSavedListFilterLookup(
-      findSavedListFilter(await this.readAll(tenantId, doctype, actor.id), id),
+      findSavedListFilter(this.queryableFilters(actor, doctype, await this.readAll(tenantId, doctype, actor.id)), id),
       id
     );
     if (decision.status === "missing") {
@@ -127,10 +128,11 @@ export class SavedListFilterService {
     }
     const id = command.id ?? this.ids.next("filter_");
     const label = normalizeSavedListFilterLabel(command.label);
-    const normalizedFilters = normalizeListFilters(doctype, command.filters);
+    const queryableDoctype = projectDocTypeForFieldQueries({ actor: command.actor, doctype });
+    const normalizedFilters = normalizeListFilters(queryableDoctype, command.filters);
     const normalizedFilterExpression = command.filterExpression === undefined
       ? undefined
-      : normalizeListFilterExpression(doctype, command.filterExpression);
+      : normalizeListFilterExpression(queryableDoctype, command.filterExpression);
     const now = this.clock.now();
     const event = savedListFilterEvent({
       id: this.ids.next("evt_"),
@@ -241,8 +243,32 @@ export class SavedListFilterService {
     });
     return savedListFiltersForOwner(foldSavedListFilters(tenantId, doctype, events), ownerId);
   }
+
+  private queryableFilters(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    filters: readonly SavedListFilter[]
+  ): readonly SavedListFilter[] {
+    const queryableDoctype = projectDocTypeForFieldQueries({ actor, doctype });
+    return filters.filter((filter) => savedFilterIsQueryable(queryableDoctype, filter));
+  }
 }
 
 function resolveTenant(actor: Actor, explicitTenantId?: TenantId): TenantId {
   return explicitTenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+}
+
+function savedFilterIsQueryable(doctype: DocTypeDefinition, filter: SavedListFilter): boolean {
+  try {
+    normalizeListFilters(doctype, filter.filters);
+    if (filter.filterExpression !== undefined) {
+      normalizeListFilterExpression(doctype, filter.filterExpression);
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof FrameworkError && error.code === "BAD_REQUEST") {
+      return false;
+    }
+    throw error;
+  }
 }

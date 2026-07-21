@@ -1,4 +1,5 @@
-import { notFound, permissionDenied } from "../core/errors.js";
+import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
+import { normalizeListFilterExpression, normalizeListFilters, normalizeListOrder } from "../core/list-view.js";
 import { assertWebViewMatchesDocType, type WebViewDefinition } from "../core/web-view.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition } from "../core/types.js";
@@ -48,7 +49,10 @@ export class WebViewService {
   async listWebViews(actor: Actor): Promise<readonly WebViewDefinition[]> {
     const readable: WebViewDefinition[] = [];
     for (const webView of this.registry.listWebViews()) {
-      if ((await this.webViewReadAccess(actor, webView)).status === "allow") {
+      const decision = await this.webViewReadAccess(actor, webView).catch((error: unknown) =>
+        isActorScopedWebViewInvalid(error) ? undefined : Promise.reject(error)
+      );
+      if (decision?.status === "allow") {
         readable.push(webView);
       }
     }
@@ -163,6 +167,32 @@ export class WebViewService {
   private async readMetaFor(actor: Actor, webView: WebViewDefinition): Promise<DocTypeDefinition> {
     const doctype = await this.queries.getEffectiveMeta(actor, webView.doctype);
     assertWebViewMatchesDocType(webView, doctype);
+    assertWebViewQueryableFields(webView, await this.effectiveQueryMetaFor(actor, webView.doctype, doctype));
     return doctype;
   }
+
+  private async effectiveQueryMetaFor(
+    actor: Actor,
+    doctypeName: string,
+    fallback: DocTypeDefinition
+  ): Promise<DocTypeDefinition> {
+    const queryMeta = (this.queries as Partial<Pick<QueryService, "getEffectiveQueryMeta">>).getEffectiveQueryMeta;
+    return queryMeta === undefined ? fallback : queryMeta.call(this.queries, actor, doctypeName);
+  }
+}
+
+function assertWebViewQueryableFields(webView: WebViewDefinition, doctype: DocTypeDefinition): void {
+  normalizeListFilters(doctype, [
+    { field: webView.routeField, value: "" },
+    ...(webView.publishedField === undefined ? [] : [{ field: webView.publishedField, value: true }])
+  ], { errorCode: "WEB_VIEW_INVALID" });
+  normalizeListFilters(doctype, webView.filters ?? [], { errorCode: "WEB_VIEW_INVALID" });
+  if (webView.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, webView.filterExpression, { errorCode: "WEB_VIEW_INVALID" });
+  }
+  normalizeListOrder(doctype, webView.orderBy, webView.order);
+}
+
+function isActorScopedWebViewInvalid(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "WEB_VIEW_INVALID";
 }

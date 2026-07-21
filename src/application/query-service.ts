@@ -62,8 +62,16 @@ import {
 } from "./document-query-policy.js";
 import {
   resolveTenantDocType,
+  resolveTenantDocTypeContext,
   type TenantDocTypeResolver
 } from "./document-tenant-policy.js";
+import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
+import {
+  projectDocTypeForFieldAccess,
+  projectDocTypeForFieldQueries,
+  readableDocumentFieldNames,
+  redactDocumentSnapshot
+} from "./document-field-access-policy.js";
 
 export interface QueryServiceOptions {
   readonly registry: ModelRegistry;
@@ -74,6 +82,11 @@ export interface QueryServiceOptions {
 }
 
 export type QueryServiceDocTypeResolver = TenantDocTypeResolver;
+
+interface QueryServiceDocTypeContext {
+  readonly doctype: DocTypeDefinition;
+  readonly relatedDocType: RelatedDocTypeResolver;
+}
 
 export interface DocumentCsvExportOptions {
   readonly tenantId?: string;
@@ -113,19 +126,31 @@ export class QueryService {
   listDoctypes(actor: Actor): readonly DocTypeDefinition[] {
     return this.registry.list().filter((doctype) =>
       canUseDocTypeAction({ actor, doctype, action: "read" })
-    );
+    ).map((doctype) => projectDocTypeForFieldAccess({ actor, doctype, action: "read" }));
   }
 
   getMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
     const doctype = this.registry.get(doctypeName);
     this.requireDocTypeAction(actor, doctype, "read");
-    return doctype;
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "read" });
   }
 
   getCreateMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
     const doctype = this.registry.get(doctypeName);
     this.requireDocTypeAction(actor, doctype, "create");
-    return doctype;
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "create" });
+  }
+
+  getUpdateMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
+    const doctype = this.registry.get(doctypeName);
+    this.requireDocTypeAction(actor, doctype, "update");
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "update" });
+  }
+
+  getQueryMeta(actor: Actor, doctypeName: string): DocTypeDefinition {
+    const doctype = this.registry.get(doctypeName);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return projectDocTypeForFieldQueries({ actor, doctype });
   }
 
   async getDocument(
@@ -134,7 +159,7 @@ export class QueryService {
     name: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocumentSnapshot> {
-    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
     const document = await this.projections.get(tenantId, doctype.name, name);
     const projection = planDocumentReadProjection({ doctype, name, document });
     if (projection.status === "not-found") {
@@ -149,7 +174,25 @@ export class QueryService {
     if (access.status === "deny") {
       throw permissionDenied(access.message);
     }
-    return projection.document;
+    return redactDocumentSnapshot({ actor, doctype, document: projection.document, relatedDocType });
+  }
+
+  async redactDocument(
+    actor: Actor,
+    document: DocumentSnapshot
+  ): Promise<DocumentSnapshot> {
+    const { doctype, relatedDocType } = await this.doctypeContext(actor, document.doctype, document.tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return redactDocumentSnapshot({ actor, doctype, document, relatedDocType });
+  }
+
+  async readableFieldNames(
+    actor: Actor,
+    document: DocumentSnapshot
+  ): Promise<ReadonlySet<string>> {
+    const { doctype } = await this.doctypeContext(actor, document.doctype, document.tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return readableDocumentFieldNames({ actor, doctype, document });
   }
 
   async listDocuments(
@@ -167,15 +210,16 @@ export class QueryService {
     } = {}
   ): Promise<ListDocumentsResult> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
     this.requireDocTypeAction(actor, doctype, "read");
+    const queryDoctype = projectDocTypeForFieldQueries({ actor, doctype });
     const limit = clampLimit(options.limit, options.maxLimit);
     const offset = Math.max(0, options.offset ?? 0);
-    const order = normalizeListOrder(doctype, options.orderBy, options.order);
-    const filters = normalizeListFilters(doctype, options.filters ?? []);
+    const order = normalizeListOrder(queryDoctype, options.orderBy, options.order);
+    const filters = normalizeListFilters(queryDoctype, options.filters ?? []);
     const filterExpression = options.filterExpression === undefined
       ? undefined
-      : normalizeListFilterExpression(doctype, options.filterExpression);
+      : normalizeListFilterExpression(queryDoctype, options.filterExpression);
     const result = await this.projections.list({
       tenantId,
       doctype: doctype.name,
@@ -186,7 +230,7 @@ export class QueryService {
       limit,
       offset
     });
-    const data = await this.filterReadableDocuments(actor, doctype, result.data);
+    const data = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType);
     return {
       ...result,
       data
@@ -205,7 +249,17 @@ export class QueryService {
     actor: Actor,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<readonly DocTypeDefinition[]> {
-    return Promise.all(this.listDoctypes(actor).map((doctype) => this.resolveDocType(doctype, actor, tenantId)));
+    const readable = this.registry.list().filter((doctype) =>
+      canUseDocTypeAction({ actor, doctype, action: "read" })
+    );
+    return Promise.all(readable.map(async (doctype) =>
+      projectDocTypeForFieldAccess({
+        actor,
+        action: "read",
+        doctype: await this.resolveDocType(doctype, actor, tenantId),
+        tenantId
+      })
+    ));
   }
 
   async getEffectiveMeta(
@@ -213,7 +267,9 @@ export class QueryService {
     doctypeName: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocTypeDefinition> {
-    return this.resolveDocType(this.getMeta(actor, doctypeName), actor, tenantId);
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "read", tenantId });
   }
 
   async getEffectiveCreateMeta(
@@ -221,7 +277,29 @@ export class QueryService {
     doctypeName: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocTypeDefinition> {
-    return this.resolveDocType(this.getCreateMeta(actor, doctypeName), actor, tenantId);
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "create");
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "create", tenantId });
+  }
+
+  async getEffectiveUpdateMeta(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "update");
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "update", tenantId });
+  }
+
+  async getEffectiveQueryMeta(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return projectDocTypeForFieldQueries({ actor, doctype });
   }
 
   async resolveEffectiveDocType(
@@ -229,7 +307,19 @@ export class QueryService {
     doctypeName: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocTypeDefinition> {
-    return this.doctypeFor(actor, doctypeName, tenantId);
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return projectDocTypeForFieldAccess({ actor, doctype, action: "read", tenantId });
+  }
+
+  async resolveEffectiveChildDocType(
+    actor: Actor,
+    doctypeName: string,
+    action: "read" | "create" | "update" = "read",
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocTypeDefinition> {
+    const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
+    return projectDocTypeForFieldAccess({ actor, doctype, action, tenantId });
   }
 
   async getEffectiveListView(
@@ -254,6 +344,14 @@ export class QueryService {
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<ResolvedFormView> {
     return resolveFormView(await this.getEffectiveCreateMeta(actor, doctypeName, tenantId));
+  }
+
+  async getEffectiveUpdateFormView(
+    actor: Actor,
+    doctypeName: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<ResolvedFormView> {
+    return resolveFormView(await this.getEffectiveUpdateMeta(actor, doctypeName, tenantId));
   }
 
   async listLinkOptions(
@@ -281,13 +379,14 @@ export class QueryService {
       readonly limit?: number;
     } = {}
   ): Promise<LinkOptionsResult> {
-    const field = getLinkField(doctype, fieldName);
-    const target = this.registry.get(field.linkTo);
+    const source = projectDocTypeForFieldAccess({ actor, doctype, action: "read" });
+    const field = getLinkField(source, fieldName);
+    const target = await this.doctypeFor(actor, field.linkTo, options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID);
     this.requireDocTypeAction(actor, target, "read");
     const limit = clampLimit(options.limit ?? 20);
     const search = normalizeSearch(options.q);
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
-    const linkOptions = await this.collectLinkOptions(actor, doctype, field, target, tenantId, search, limit);
+    const linkOptions = await this.collectLinkOptions(actor, source, field, target, tenantId, search, limit);
     return {
       doctype: doctype.name,
       field: field.name,
@@ -343,16 +442,18 @@ export class QueryService {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
     this.requireDocTypeAction(actor, doctype, "read");
-    const listView = resolveListView(doctype);
+    const visibleDoctype = projectDocTypeForFieldAccess({ actor, doctype, action: "read", tenantId });
+    const queryDoctype = projectDocTypeForFieldQueries({ actor, doctype });
+    const listView = resolveListView(visibleDoctype);
     const filters = mergeDefaultFilters(
       options.useDefaultFilters === false ? [] : listView.filters,
       options.filters ?? []
     );
     const filterExpression = options.filterExpression === undefined
       ? undefined
-      : normalizeListFilterExpression(doctype, options.filterExpression);
+      : normalizeListFilterExpression(queryDoctype, options.filterExpression);
     const order = normalizeListOrder(
-      doctype,
+      queryDoctype,
       options.orderBy ?? listView.orderBy,
       options.order ?? listView.order
     );
@@ -411,6 +512,15 @@ export class QueryService {
     return this.resolveDocType(this.registry.get(doctypeName), actor, tenantId);
   }
 
+  private async doctypeContext(
+    actor: Actor,
+    doctypeName: string,
+    tenantId: string
+  ): Promise<QueryServiceDocTypeContext> {
+    const root = await this.doctypeFor(actor, doctypeName, tenantId);
+    return resolveTenantDocTypeContext(root, (name) => this.doctypeFor(actor, name, tenantId));
+  }
+
   private async resolveDocType(
     base: DocTypeDefinition,
     actor: Actor,
@@ -443,7 +553,10 @@ export class QueryService {
         if (!(await this.canReadLinkTarget(actor, source, field, target, document, grants))) {
           continue;
         }
-        const option = toLinkOption(document, target);
+        const option = toLinkOption(
+          await this.redactDocumentForActor(actor, target, document),
+          target
+        );
         const candidate = planLinkOptionCandidate({
           option,
           search,
@@ -481,7 +594,8 @@ export class QueryService {
         limit: pageSize,
         offset
       });
-      const readable = await this.filterReadableDocuments(actor, doctype, result.data);
+      const context = await resolveTenantDocTypeContext(doctype, (name) => this.doctypeFor(actor, name, tenantId));
+      const readable = await this.filterReadableDocuments(actor, doctype, result.data, context.relatedDocType);
       for (const document of readable) {
         const candidate = planGlobalSearchCandidate({ doctype, document, query });
         if (candidate.status === "add") {
@@ -499,7 +613,8 @@ export class QueryService {
   private async filterReadableDocuments(
     actor: Actor,
     doctype: DocTypeDefinition,
-    documents: readonly DocumentSnapshot[]
+    documents: readonly DocumentSnapshot[],
+    relatedDocType: RelatedDocTypeResolver
   ): Promise<readonly DocumentSnapshot[]> {
     const readable = await Promise.all(
       documents.map(async (document) => {
@@ -511,7 +626,9 @@ export class QueryService {
         };
       })
     );
-    return readable.filter((entry) => entry.readable).map((entry) => entry.document);
+    return readable
+      .filter((entry) => entry.readable)
+      .map((entry) => redactDocumentSnapshot({ actor, doctype, document: entry.document, relatedDocType }));
   }
 
   private requireDocTypeAction(actor: Actor, doctype: DocTypeDefinition, action: PermissionAction): void {
@@ -569,6 +686,22 @@ export class QueryService {
       target: document,
       sharedPermissions,
       userPermissionGrants: grants
+    });
+  }
+
+  private async redactDocumentForActor(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    document: DocumentSnapshot
+  ): Promise<DocumentSnapshot> {
+    const context = await resolveTenantDocTypeContext(doctype, (name) =>
+      this.doctypeFor(actor, name, document.tenantId)
+    );
+    return redactDocumentSnapshot({
+      actor,
+      doctype,
+      document,
+      relatedDocType: context.relatedDocType
     });
   }
 

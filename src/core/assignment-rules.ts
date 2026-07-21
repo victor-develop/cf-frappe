@@ -10,6 +10,7 @@ import type {
   DocumentData,
   DocumentSnapshot,
   DomainEvent,
+  FieldDefinition,
   TenantId
 } from "./types.js";
 
@@ -284,12 +285,16 @@ function normalizeAssignee(
   if (value.kind === "field") {
     const field = normalizeRequiredString(value.field, "Assignment rule assignee field");
     const definition = doctype.fields.find((candidate) => candidate.name === field);
-    if (!definition || (definition.type !== "text" && definition.type !== "link")) {
+    if (!definition || !isAssignmentRuleAssigneeField(definition)) {
       throw invalid(`Assignment rule assignee field '${field}' must be a text or link field on ${doctype.name}`);
     }
     return Object.freeze({ kind: "field", field });
   }
   throw invalid(`Assignment rule assignee kind '${String((value as { readonly kind?: unknown }).kind)}' is not supported`);
+}
+
+export function isAssignmentRuleAssigneeField(field: FieldDefinition): boolean {
+  return field.type === "text" || field.type === "link";
 }
 
 function documentStringValue(snapshot: DocumentSnapshot, field: string): string | undefined {

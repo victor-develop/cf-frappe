@@ -1,10 +1,13 @@
 import { permissionDenied } from "../core/errors.js";
+import { FrameworkError } from "../core/errors.js";
 import {
+  assertKanbanMatchesDocType,
   kanbanColumnsForDocType,
   type KanbanDefinition
 } from "../core/kanban.js";
+import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor } from "../core/types.js";
+import type { Actor, DocTypeDefinition } from "../core/types.js";
 import { isPermissionDeniedError } from "./access-policy.js";
 import type { QueryService } from "./query-service.js";
 import {
@@ -84,13 +87,26 @@ export class KanbanService {
 
   private async kanbanReadAccess(actor: Actor, kanban: KanbanDefinition): Promise<KanbanReadAccessDecision> {
     try {
-      this.queries.getMeta(actor, kanban.doctype);
+      const visibleDoctype = await this.queries.getEffectiveMeta(actor, kanban.doctype);
+      assertKanbanMatchesDocType(kanban, visibleDoctype);
+      assertKanbanQueryableFields(kanban, await this.queries.getEffectiveQueryMeta(actor, kanban.doctype));
       return planKanbanReadAccess({ actor, board: kanban, doctypeReadable: true });
     } catch (error) {
-      if (isPermissionDeniedError(error)) {
+      if (isPermissionDeniedError(error) || isActorScopedKanbanInvalid(error)) {
         return planKanbanReadAccess({ actor, board: kanban, doctypeReadable: false });
       }
       throw error;
     }
   }
+}
+
+function assertKanbanQueryableFields(kanban: KanbanDefinition, doctype: DocTypeDefinition): void {
+  normalizeListFilters(doctype, kanban.filters ?? [], { errorCode: "KANBAN_INVALID" });
+  if (kanban.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, kanban.filterExpression, { errorCode: "KANBAN_INVALID" });
+  }
+}
+
+function isActorScopedKanbanInvalid(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "KANBAN_INVALID";
 }

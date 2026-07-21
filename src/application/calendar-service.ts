@@ -1,7 +1,9 @@
 import { permissionDenied } from "../core/errors.js";
-import type { CalendarDefinition } from "../core/calendar.js";
+import { FrameworkError } from "../core/errors.js";
+import { assertCalendarMatchesDocType, type CalendarDefinition } from "../core/calendar.js";
+import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor } from "../core/types.js";
+import type { Actor, DocTypeDefinition } from "../core/types.js";
 import type { QueryService } from "./query-service.js";
 import { isPermissionDeniedError } from "./access-policy.js";
 import {
@@ -98,13 +100,30 @@ export class CalendarService {
 
   private async calendarReadAccess(actor: Actor, calendar: CalendarDefinition): Promise<CalendarReadAccessDecision> {
     try {
-      this.queries.getMeta(actor, calendar.doctype);
+      const visibleDoctype = await this.queries.getEffectiveMeta(actor, calendar.doctype);
+      assertCalendarMatchesDocType(calendar, visibleDoctype);
+      assertCalendarQueryableFields(calendar, await this.queries.getEffectiveQueryMeta(actor, calendar.doctype));
       return planCalendarReadAccess({ actor, calendar, doctypeReadable: true });
     } catch (error) {
-      if (isPermissionDeniedError(error)) {
+      if (isPermissionDeniedError(error) || isActorScopedCalendarInvalid(error)) {
         return planCalendarReadAccess({ actor, calendar, doctypeReadable: false });
       }
       throw error;
     }
   }
+}
+
+function assertCalendarQueryableFields(calendar: CalendarDefinition, doctype: DocTypeDefinition): void {
+  normalizeListFilters(doctype, [
+    { field: calendar.startField, value: "" },
+    ...(calendar.endField === undefined ? [] : [{ field: calendar.endField, value: "" }])
+  ], { errorCode: "CALENDAR_INVALID" });
+  normalizeListFilters(doctype, calendar.filters ?? [], { errorCode: "CALENDAR_INVALID" });
+  if (calendar.filterExpression !== undefined) {
+    normalizeListFilterExpression(doctype, calendar.filterExpression, { errorCode: "CALENDAR_INVALID" });
+  }
+}
+
+function isActorScopedCalendarInvalid(error: unknown): boolean {
+  return error instanceof FrameworkError && error.code === "CALENDAR_INVALID";
 }

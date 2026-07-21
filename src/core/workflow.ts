@@ -159,8 +159,12 @@ export function normalizeWorkflowDefinition(
   });
 }
 
+export function isWorkflowStateField(field: FieldDefinition): boolean {
+  return ["text", "longText", "date", "datetime", "link", "select"].includes(field.type);
+}
+
 function assertWorkflowStateFieldCanStoreStates(field: FieldDefinition, states: readonly string[]): void {
-  if (!["text", "longText", "date", "datetime", "link", "select"].includes(field.type)) {
+  if (!isWorkflowStateField(field)) {
     throw new FrameworkError(
       "WORKFLOW_INVALID",
       `Workflow state field '${field.name}' must be a string-compatible field`,

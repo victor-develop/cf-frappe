@@ -3,20 +3,26 @@ import type {
   DocStatus,
   DocTypeDefinition,
   DocTypeName,
+  DocumentData,
+  DocumentEventPayload,
   DocumentName,
   DocumentSnapshot,
+  DomainEvent,
+  JsonValue,
   TenantId
 } from "../core/types.js";
 import { DEFAULT_TENANT_ID } from "../core/types.js";
-import { foldDocument, foldDocumentAssignments } from "../core/events.js";
+import { foldDocument, foldDocumentAssignments, foldDocumentFrom } from "../core/events.js";
+import { domainEventPayloadKind } from "../core/domain-events.js";
 import { documentStream } from "../core/streams.js";
 import type { EventStore } from "../ports/event-store.js";
 import {
   documentHistoryAssignmentsResult,
   documentHistoryFollowersResult,
   documentHistoryTagsResult,
-  documentTimelineEntries,
+  documentTimelineEventChanges,
   documentTimelineBaselineEventCount,
+  documentTimelineSummary,
   normalizeDocumentTimelineBaselineLimit,
   normalizeDocumentTimelineBeforeSequence,
   normalizeDocumentTimelineLimit,
@@ -58,7 +64,15 @@ export interface DocumentHistoryServiceOptions {
   readonly maxDiffBaselineEvents?: number;
 }
 
-type DocumentHistoryQueries = Pick<QueryService, "getDocument" | "getEffectiveMeta" | "listDocuments" | "listEffectiveDoctypes">;
+type DocumentHistoryQueries = Pick<
+  QueryService,
+  | "getDocument"
+  | "getEffectiveMeta"
+  | "listDocuments"
+  | "listEffectiveDoctypes"
+  | "redactDocument"
+  | "readableFieldNames"
+>;
 
 export interface GetDocumentTimelineOptions {
   readonly tenantId?: TenantId;
@@ -112,6 +126,11 @@ export class DocumentHistoryService {
     });
     const page = selectDocumentTimelinePage({ events, beforeSequence, limit });
     const baseline = await this.baselineBefore(stream, page.visibleEvents[0]?.sequence);
+    const currentSnapshot = await this.snapshotAt(stream, document.version);
+    const visibleFieldNames = currentSnapshot === null
+      ? new Set<string>()
+      : await this.queries.readableFieldNames(actor, currentSnapshot);
+    const entries = await this.redactedTimelineEntries(actor, page.visibleEvents, baseline, visibleFieldNames);
     return {
       tenantId: document.tenantId,
       doctype: document.doctype,
@@ -121,7 +140,7 @@ export class DocumentHistoryService {
       limit,
       beforeSequence,
       ...(page.nextBeforeSequence === undefined ? {} : { nextBeforeSequence: page.nextBeforeSequence }),
-      entries: documentTimelineEntries(page.visibleEvents, baseline)
+      entries
     };
   }
 
@@ -205,6 +224,45 @@ export class DocumentHistoryService {
     return foldDocument(events);
   }
 
+  private async snapshotAt(stream: string, sequence: number): Promise<DocumentSnapshot | null> {
+    return foldDocument(await this.events.readStream(stream, { maxSequence: sequence }));
+  }
+
+  private async redactedTimelineEntries(
+    actor: Actor,
+    events: readonly DomainEvent[],
+    initialSnapshot: DocumentSnapshot | null,
+    visibleFieldNames: ReadonlySet<string>
+  ): Promise<readonly DocumentTimelineEntry[]> {
+    let before = initialSnapshot;
+    const entries: DocumentTimelineEntry[] = [];
+    for (const event of events) {
+      const next = foldDocumentFrom(before, [event]);
+      const redactedBefore = before === null ? null : await this.queries.redactDocument(actor, before);
+      const redactedAfter = next === null ? null : await this.queries.redactDocument(actor, next);
+      const payload = redactedTimelinePayload(event.payload, redactedBefore, redactedAfter, visibleFieldNames);
+      const changes = documentTimelineEventChanges(
+        { ...event, payload },
+        filterSnapshotFields(redactedBefore, visibleFieldNames),
+        filterSnapshotFields(redactedAfter, visibleFieldNames)
+      );
+      entries.push({
+        eventId: event.id,
+        sequence: event.sequence,
+        type: event.type,
+        kind: domainEventPayloadKind(event),
+        actorId: event.actorId,
+        occurredAt: event.occurredAt,
+        summary: documentTimelineSummary(payload),
+        changes,
+        payload,
+        metadata: {}
+      });
+      before = next;
+    }
+    return entries;
+  }
+
   private async assignedDocumentDoctypes(
     actor: Actor,
     tenantId: TenantId,
@@ -258,6 +316,92 @@ export class DocumentHistoryService {
     });
     return foldDocumentAssignments(events);
   }
+}
+
+function redactedTimelinePayload(
+  payload: DocumentEventPayload,
+  before: DocumentSnapshot | null,
+  after: DocumentSnapshot | null,
+  visibleFieldNames: ReadonlySet<string>
+): DocumentEventPayload {
+  switch (payload.kind) {
+    case "DocumentCreated":
+      return {
+        kind: "DocumentCreated",
+        docstatus: payload.docstatus,
+        data: filterDataFields(after?.data ?? {}, visibleFieldNames)
+      };
+    case "DocumentUpdated": {
+      const change = redactedDataChange(payload.patch, before, after, visibleFieldNames, payload.unset);
+      return {
+        kind: "DocumentUpdated",
+        patch: change.patch,
+        ...(change.unset.length === 0 ? {} : { unset: change.unset })
+      };
+    }
+    case "WorkflowTransitioned":
+      return {
+        ...payload,
+        patch: redactedDataChange(payload.patch, before, after, visibleFieldNames).patch
+      };
+    case "DomainCommandApplied":
+      return {
+        ...payload,
+        input: {},
+        patch: redactedDataChange(payload.patch, before, after, visibleFieldNames).patch
+      };
+    default:
+      return payload;
+  }
+}
+
+function redactedDataChange(
+  patch: DocumentData,
+  before: DocumentSnapshot | null,
+  after: DocumentSnapshot | null,
+  visibleFieldNames: ReadonlySet<string>,
+  unset: readonly string[] = []
+): { readonly patch: DocumentData; readonly unset: readonly string[] } {
+  const nextPatch: Record<string, JsonValue> = {};
+  const nextUnset: string[] = [];
+  for (const field of [...new Set([...Object.keys(patch), ...unset])].sort()) {
+    if (!visibleFieldNames.has(field)) {
+      continue;
+    }
+    const oldValue = before?.data[field];
+    const newValue = after?.data[field];
+    if (jsonEquals(oldValue, newValue)) {
+      continue;
+    }
+    if (newValue === undefined) {
+      nextUnset.push(field);
+    } else {
+      nextPatch[field] = newValue;
+    }
+  }
+  return {
+    patch: nextPatch as DocumentData,
+    unset: nextUnset
+  };
+}
+
+function filterSnapshotFields(
+  snapshot: DocumentSnapshot | null,
+  visibleFieldNames: ReadonlySet<string>
+): DocumentSnapshot | null {
+  return snapshot === null
+    ? null
+    : { ...snapshot, data: filterDataFields(snapshot.data, visibleFieldNames) };
+}
+
+function filterDataFields(data: DocumentData, visibleFieldNames: ReadonlySet<string>): DocumentData {
+  return Object.fromEntries(
+    Object.entries(data).filter(([field]) => visibleFieldNames.has(field))
+  ) as DocumentData;
+}
+
+function jsonEquals(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function assignedDocumentSummary(

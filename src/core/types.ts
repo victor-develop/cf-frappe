@@ -31,6 +31,30 @@ export interface FieldDefaultContext {
   readonly now: string;
 }
 
+export type FieldPermissionAction = "read" | "create" | "update";
+
+export const FIELD_PERMISSION_ACTIONS = ["read", "create", "update"] as const satisfies readonly FieldPermissionAction[];
+
+export interface FieldPermissionContext {
+  readonly actor: Actor;
+  readonly action: FieldPermissionAction;
+  readonly doctype: DocTypeDefinition;
+  readonly field: FieldDefinition;
+  readonly tenantId?: TenantId;
+  readonly document?: DocumentSnapshot;
+  readonly value?: JsonValue;
+}
+
+export type FieldPermissionPredicate = (context: FieldPermissionContext) => boolean;
+
+export interface FieldPermissionRule {
+  readonly roles: readonly string[];
+  readonly actions: readonly FieldPermissionAction[];
+  readonly when?: FieldPermissionPredicate;
+}
+
+export interface PersistedFieldPermissionRule extends Omit<FieldPermissionRule, "when"> {}
+
 export interface FieldDefinition {
   readonly name: string;
   readonly label?: string;
@@ -60,10 +84,12 @@ export interface FieldDefinition {
   readonly min?: number;
   readonly max?: number;
   readonly defaultValue?: JsonValue | ((context: FieldDefaultContext) => JsonValue);
+  readonly permissions?: readonly FieldPermissionRule[];
 }
 
-export interface PersistedFieldDefinition extends Omit<FieldDefinition, "defaultValue"> {
+export interface PersistedFieldDefinition extends Omit<FieldDefinition, "defaultValue" | "permissions"> {
   readonly defaultValue?: JsonValue;
+  readonly permissions?: readonly PersistedFieldPermissionRule[];
 }
 
 export interface FieldPropertyOverrides {
@@ -279,6 +305,7 @@ export interface DomainCommandDefinition {
   readonly fields?: readonly string[];
   readonly internal?: boolean;
   readonly allowReadOnlyFields?: boolean;
+  readonly bypassFieldPermissions?: boolean;
   readonly roles?: readonly string[];
   readonly permissionAction?: PermissionAction;
   readonly buildPatch?: (context: DomainCommandContext) => DocumentData;
