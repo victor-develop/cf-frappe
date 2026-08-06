@@ -113,7 +113,7 @@ describe("ReturnsOS standalone operations app", () => {
       data: {
         approved_amount: 139,
         refund_state: "Processing",
-        scheduled_refund_at: "2026-08-06T03:00:00.000Z"
+        scheduled_refund_at: "2026-08-06T11:00:00.000Z"
       }
     });
 
@@ -227,6 +227,19 @@ describe("ReturnsOS standalone operations app", () => {
     );
     expect(invalidSearch.status).toBe(400);
     expect(await invalidSearch.text()).toContain("Search query is invalid");
+
+    const finance = harness.optionsFor("finance-approver");
+    const invalidDate = await submit(
+      finance,
+      "/returns/cases/RMA-2026-000004/command/approveAndScheduleRefund",
+      {
+        expected_version: "2",
+        approved_amount: "139",
+        scheduled_refund_at: "2026-02-30T12:00"
+      }
+    );
+    expect(invalidDate.status).toBe(400);
+    expect(await invalidDate.text()).toContain("scheduled_refund_at must be a valid date and time");
 
     const returnsAgent = harness.optionsFor("returns-agent");
     const beforeOversizedCommand = await harness.store.get("default", "Return Request", "RMA-2026-000001");

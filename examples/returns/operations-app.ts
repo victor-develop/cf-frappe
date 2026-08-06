@@ -831,8 +831,26 @@ function moneyValue(form: FormData, field: string): number {
 
 function requiredDateTime(form: FormData, field: string): string {
   const value = requiredText(form, field, 40);
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) throw new ReturnsAppError(400, `${field} must be a valid date and time`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (match === null) throw new ReturnsAppError(400, `${field} must be a valid date and time`);
+
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const parsed = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  if (
+    year < 1000
+    || parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+    || parsed.getUTCHours() !== hour
+    || parsed.getUTCMinutes() !== minute
+  ) {
+    throw new ReturnsAppError(400, `${field} must be a valid date and time`);
+  }
   return parsed.toISOString();
 }
 
