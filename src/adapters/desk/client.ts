@@ -4413,6 +4413,15 @@ export function renderDeskClientScript(): string {
         return deskPath(doctype) + "/import-template.csv";
       },
       notificationsUrl: deskNotificationsPath,
+      printingUrl: function () {
+        return "/desk/printing";
+      },
+      printingFormatUrl: function (format) {
+        return "/desk/printing/formats/" + encodePart(format);
+      },
+      printingLetterheadUrl: function (letterhead) {
+        return "/desk/printing/letterheads/" + encodePart(letterhead);
+      },
       printPdfUrl: deskPrintPdfPath,
       printUrl: deskPrintPath,
       reportBuilderUrl: deskReportBuilderPath,

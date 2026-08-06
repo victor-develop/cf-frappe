@@ -73,6 +73,14 @@ import type {
 import type { JobExecutionDashboard } from "../../application/job-history-service.js";
 import type { JobScheduleDashboard } from "../../application/job-schedule-service.js";
 import type { ReportRunResult } from "../../application/report-service.js";
+import type {
+  RelatedDocTypeResource,
+  RelatedResourcesView
+} from "../../application/related-resource-service.js";
+import type {
+  PrintFormatInspection,
+  PrintingWorkspaceOverview
+} from "../../application/printing-workspace-service.js";
 import type { DashboardRunResult } from "../../application/dashboard-service.js";
 import type { RoleCatalogState } from "../../core/roles.js";
 import type { SavedListFilter } from "../../application/saved-list-filter-service.js";
@@ -81,7 +89,8 @@ import {
   PRINT_PAGE_ORIENTATIONS,
   PRINT_PAGE_SIZE_NAMES,
   type PrintFormatDefinition,
-  type PrintLayoutDefinition
+  type PrintLayoutDefinition,
+  type PrintLetterheadDefinition
 } from "../../core/print-format.js";
 import type { PrintSettingsState } from "../../core/print-settings.js";
 import type { UserAccount } from "../../core/user-accounts.js";
@@ -159,11 +168,13 @@ export interface DeskLayoutOptions {
   readonly activeCalendar?: string;
   readonly activeSearch?: boolean;
   readonly activeAssignments?: boolean;
+  readonly activePrinting?: boolean;
   readonly activeAdmin?: string;
   readonly activeWorkspace?: string;
   readonly showFiles?: boolean;
   readonly showNotifications?: boolean;
   readonly showAssignments?: boolean;
+  readonly showPrinting?: boolean;
   readonly adminLinks?: readonly DeskNavLink[];
   readonly doctypes: readonly DocTypeDefinition[];
   readonly reports?: readonly ReportDefinition[];
@@ -282,6 +293,7 @@ export function renderDeskLayout(options: DeskLayoutOptions): string {
       ${dashboardNav ? `<p class="nav-heading">Dashboards</p>${dashboardNav}` : ""}
       ${kanbanNav ? `<p class="nav-heading">Kanban</p>${kanbanNav}` : ""}
       ${calendarNav ? `<p class="nav-heading">Calendars</p>${calendarNav}` : ""}
+      ${options.showPrinting ? `<p class="nav-heading">Output</p><a class="nav-link${options.activePrinting ? " is-active" : ""}" href="/desk/printing">Printing</a>` : ""}
       ${options.showNotifications ? `<p class="nav-heading">Notifications</p><a class="nav-link" href="/desk/notifications">Inbox</a>` : ""}
       ${options.showFiles ? `<p class="nav-heading">Files</p><a class="nav-link" href="/desk/files">Files</a>` : ""}
       ${adminNav ? `<p class="nav-heading">Admin</p>${adminNav}` : ""}`;
@@ -2512,11 +2524,22 @@ export function renderAssignmentRuleAdmin(state: AssignmentRuleAdminState): stri
 
 export function renderPrintSettingsAdmin(
   state: PrintSettingsState,
-  options: { readonly error?: string } = {}
+  options: {
+    readonly error?: string;
+    readonly action?: string;
+    readonly editable?: boolean;
+  } = {}
 ): string {
   const layout = state.settings.defaultLayout;
+  if (options.editable === false) {
+    return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
+    <section id="default-layout" class="panel printing-section">
+      <div class="form-head"><h2>Default Print Layout</h2><p>v${String(state.version)}</p></div>
+      ${renderPrintLayoutDefinition(layout, "No tenant default is configured. Formats use their own layout or renderer defaults.")}
+    </section>`;
+  }
   return `${options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : ""}
-  <form class="panel form" method="post" action="/desk/admin/print-settings">
+  <form id="default-layout" class="panel form" method="post" action="${escapeHtml(options.action ?? "/desk/admin/print-settings")}">
     <input type="hidden" name="expectedVersion" value="${String(state.version)}">
     <div class="form-head"><h2>Default Print Layout</h2><p>v${String(state.version)}</p></div>
     <div class="fields">
@@ -2536,6 +2559,131 @@ export function renderPrintSettingsAdmin(
     </div>
     <div class="actions"><button class="button primary" type="submit">Save Settings</button></div>
   </form>`;
+}
+
+export function renderPrintingWorkspace(
+  overview: PrintingWorkspaceOverview,
+  options: { readonly error?: string } = {}
+): string {
+  const formatGroups = groupPrintFormatSummaries(overview.formats)
+    .map(([group, formats]) => `<section class="printing-group">
+      <h3>${escapeHtml(group)}</h3>
+      <ul class="resource-row-list">${formats.map((format) => `<li><a class="resource-row" href="/desk/printing/formats/${encodeURIComponent(format.name)}">
+        <span><strong>${escapeHtml(format.label)}</strong><small>${escapeHtml(format.doctype)}${format.description === undefined ? "" : ` · ${escapeHtml(format.description)}`}</small></span>
+        <span class="related-resource-kind">Print Format</span>
+      </a></li>`).join("")}</ul>
+    </section>`).join("");
+  const formats = `<section class="panel printing-section">
+    <div class="form-head"><h2>Print Formats</h2><p>${String(overview.formats.length)}</p></div>
+    ${formatGroups || '<p class="empty">No Print Formats are visible for your roles.</p>'}
+  </section>`;
+  const letterheads = `<section class="panel printing-section">
+    <div class="form-head"><h2>Letterheads</h2><p>${String(overview.letterheads.length)}</p></div>
+    ${overview.letterheads.length === 0
+      ? '<p class="empty">No Letterheads are visible for your roles.</p>'
+      : `<ul class="resource-row-list">${overview.letterheads.map((letterhead) => `<li><a class="resource-row" href="/desk/printing/letterheads/${encodeURIComponent(letterhead.name)}"><span><strong>${escapeHtml(letterhead.label)}</strong><small>${escapeHtml(letterhead.name)}</small></span><span class="related-resource-kind">Letterhead</span></a></li>`).join("")}</ul>`}
+  </section>`;
+  return `<section class="toolbar"><div><strong>Printing</strong><p class="muted-copy">Inspect app-defined output and tenant layout defaults.</p></div></section>
+    ${formats}
+    ${letterheads}
+    ${renderPrintSettingsAdmin(overview.settings, {
+      ...(options.error === undefined ? {} : { error: options.error }),
+      action: "/desk/printing/default-layout",
+      editable: overview.canManageDefaultLayout
+    })}`;
+}
+
+export function renderPrintFormatInspection(
+  inspection: PrintFormatInspection,
+  options: { readonly printPdfEnabled?: boolean } = {}
+): string {
+  const format = inspection.format;
+  const sections = (format.sections ?? []).length === 0
+    ? ""
+    : `<section class="panel printing-section"><div class="form-head"><h2>Sections</h2><p>${String(format.sections?.length ?? 0)}</p></div>${format.sections?.map((section) => `<section class="print-format-section"><h3>${escapeHtml(section.heading ?? "Fields")}</h3><ul class="value-list">${section.fields.map((field) => `<li><strong>${escapeHtml(field.label ?? field.field)}</strong><span>${escapeHtml(field.field)}</span></li>`).join("")}</ul></section>`).join("")}</section>`;
+  const template = format.template === undefined
+    ? ""
+    : `<section class="panel printing-section"><div class="form-head"><h2>Template Source</h2><p>Read only</p></div><pre class="source-preview"><code>${escapeHtml(format.template)}</code></pre></section>`;
+  const previews = inspection.previewDocuments.length === 0
+    ? '<p class="empty">No readable documents are available for preview.</p>'
+    : `<ul class="resource-row-list">${inspection.previewDocuments.map((document) => {
+        const base = `/desk/print/${encodeURIComponent(format.name)}/${encodeURIComponent(document.name)}`;
+        return `<li><div class="resource-row"><span><strong>${escapeHtml(document.name)}</strong><small>${escapeHtml(format.doctype)}</small></span><span class="related-resource-actions"><a class="button" href="${base}">HTML</a>${options.printPdfEnabled ? `<a class="button" href="${base}/pdf">PDF</a>` : ""}</span></div></li>`;
+      }).join("")}</ul>`;
+  return `<section class="toolbar"><a class="button" href="/desk/printing">Back to Printing</a></section>
+    <section class="panel printing-section">
+      <div class="form-head"><h2>${escapeHtml(format.label ?? format.name)}</h2><p>${escapeHtml(format.doctype)}</p></div>
+      ${format.description === undefined ? "" : `<p>${escapeHtml(format.description)}</p>`}
+      <dl class="definition-list">
+        <div><dt>Name</dt><dd>${escapeHtml(format.name)}</dd></div>
+        <div><dt>Module</dt><dd>${escapeHtml(format.module ?? "-")}</dd></div>
+        <div><dt>Permission</dt><dd>${escapeHtml(format.permissionAction ?? "read")}</dd></div>
+        <div><dt>Roles</dt><dd>${escapeHtml((format.roles ?? []).join(", ") || "Any authorized role")}</dd></div>
+        <div><dt>Letterhead</dt><dd>${format.letterhead === undefined ? "-" : `<a href="/desk/printing/letterheads/${encodeURIComponent(format.letterhead)}">${escapeHtml(format.letterhead)}</a>`}</dd></div>
+      </dl>
+    </section>
+    ${sections}${template}
+    <section class="panel printing-section"><div class="form-head"><h2>Layout</h2><p>Effective output</p></div>
+      <div class="layout-comparison">
+        <section><h3>Tenant Default</h3>${renderPrintLayoutDefinition(inspection.inheritedLayout, "Not configured")}</section>
+        <section><h3>Format Override</h3>${renderPrintLayoutDefinition(format.layout, "No override")}</section>
+        <section><h3>Effective Layout</h3>${renderPrintLayoutDefinition(inspection.effectiveLayout, "Renderer defaults")}</section>
+      </div>
+    </section>
+    <section class="panel printing-section"><div class="form-head"><h2>Preview Documents</h2><p>${String(inspection.previewDocuments.length)}</p></div>${previews}</section>`;
+}
+
+export function renderPrintLetterheadInspection(letterhead: PrintLetterheadDefinition): string {
+  return `<section class="toolbar"><a class="button" href="/desk/printing">Back to Printing</a></section>
+    <section class="panel printing-section">
+      <div class="form-head"><h2>${escapeHtml(letterhead.label ?? letterhead.name)}</h2><p>Read only</p></div>
+      <dl class="definition-list">
+        <div><dt>Name</dt><dd>${escapeHtml(letterhead.name)}</dd></div>
+        <div><dt>Roles</dt><dd>${escapeHtml((letterhead.roles ?? []).join(", ") || "Any authorized role")}</dd></div>
+      </dl>
+    </section>
+    <section class="panel printing-section"><div class="form-head"><h2>Header HTML</h2><p>Escaped source</p></div><pre class="source-preview"><code>${escapeHtml(letterhead.headerHtml ?? "")}</code></pre></section>
+    <section class="panel printing-section"><div class="form-head"><h2>Footer HTML</h2><p>Escaped source</p></div><pre class="source-preview"><code>${escapeHtml(letterhead.footerHtml ?? "")}</code></pre></section>`;
+}
+
+function groupPrintFormatSummaries(
+  formats: PrintingWorkspaceOverview["formats"]
+): Array<readonly [string, PrintingWorkspaceOverview["formats"]]> {
+  const groups = new Map<string, PrintingWorkspaceOverview["formats"][number][]>();
+  for (const format of formats) {
+    const group = `${format.module ?? "General"} · ${format.doctype}`;
+    const entries = groups.get(group) ?? [];
+    entries.push(format);
+    groups.set(group, entries);
+  }
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function renderPrintLayoutDefinition(layout: PrintLayoutDefinition | undefined, emptyMessage: string): string {
+  if (layout === undefined) {
+    return `<p class="empty">${escapeHtml(emptyMessage)}</p>`;
+  }
+  const pageSize = typeof layout.pageSize === "string"
+    ? layout.pageSize
+    : layout.pageSize === undefined
+      ? "Renderer default"
+      : `${String(layout.pageSize.widthMm)} × ${String(layout.pageSize.heightMm)} mm`;
+  const margins = layout.margins === undefined
+    ? "Renderer default"
+    : `T ${printLayoutValue(layout.margins.topMm)} · R ${printLayoutValue(layout.margins.rightMm)} · B ${printLayoutValue(layout.margins.bottomMm)} · L ${printLayoutValue(layout.margins.leftMm)} mm`;
+  const font = layout.font === undefined
+    ? "Renderer default"
+    : `${layout.font.family ?? "Renderer default"}${layout.font.sizePt === undefined ? "" : ` · ${String(layout.font.sizePt)} pt`}`;
+  return `<dl class="definition-list compact-definition-list">
+    <div><dt>Page</dt><dd>${escapeHtml(pageSize)}</dd></div>
+    <div><dt>Orientation</dt><dd>${escapeHtml(layout.orientation ?? "Renderer default")}</dd></div>
+    <div><dt>Margins</dt><dd>${escapeHtml(margins)}</dd></div>
+    <div><dt>Font</dt><dd>${escapeHtml(font)}</dd></div>
+  </dl>`;
+}
+
+function printLayoutValue(value: number | undefined): string {
+  return value === undefined ? "-" : String(value);
 }
 
 function renderPrintPageSizeOptions(layout: PrintLayoutDefinition | undefined): string {
@@ -3661,6 +3809,57 @@ function renderReportGroups(groups: ReportRunResult["groups"]): string {
       </section>`;
     })
     .join("");
+}
+
+export function renderRelatedResources(
+  resources: RelatedResourcesView,
+  options: { readonly printPdfEnabled?: boolean } = {}
+): string {
+  if (resources.doctypes.length === 0 && resources.printFormats.length === 0) {
+    return "";
+  }
+  const doctypeItems = resources.doctypes.map((resource) => {
+    const direction = resource.direction === "incoming" ? "Incoming" : "Outgoing";
+    return `<li><a class="related-resource-link" href="${escapeHtml(relatedDocTypeHref(resource, resources.documentName))}">
+      <span><strong>${escapeHtml(resource.doctypeLabel)}</strong><small>${escapeHtml(direction)} via ${escapeHtml(resource.fieldLabel)}</small></span>
+      <span class="related-resource-kind">DocType</span>
+    </a></li>`;
+  }).join("");
+  const printFormatItems = resources.printFormats.map((format) => {
+    const href = resources.documentName === undefined
+      ? `/desk/printing/formats/${encodeURIComponent(format.name)}`
+      : `/desk/print/${encodeURIComponent(format.name)}/${encodeURIComponent(resources.documentName)}`;
+    const pdfLink = resources.documentName !== undefined && options.printPdfEnabled
+      ? `<a class="button" href="${href}/pdf">PDF</a>`
+      : "";
+    return `<li><div class="related-resource-link related-resource-print">
+      <a href="${href}"><strong>${escapeHtml(format.label)}</strong>${format.description === undefined ? "" : `<small>${escapeHtml(format.description)}</small>`}</a>
+      <span class="related-resource-actions"><span class="related-resource-kind">Print Format</span>${pdfLink}</span>
+    </div></li>`;
+  }).join("");
+  const groups = [
+    doctypeItems === "" ? "" : `<section class="related-resource-group"><h3>Linked DocTypes</h3><ul class="related-resource-list">${doctypeItems}</ul></section>`,
+    printFormatItems === "" ? "" : `<section class="related-resource-group"><h3>Print Formats</h3><ul class="related-resource-list">${printFormatItems}</ul></section>`
+  ].join("");
+  const count = resources.doctypes.length + resources.printFormats.length;
+  return `<section class="panel related-resources" aria-label="Related resources">
+    <div class="form-head"><h2>Related</h2><p>${String(count)} ${count === 1 ? "resource" : "resources"}</p></div>
+    <div class="related-resource-groups">${groups}</div>
+  </section>`;
+}
+
+function relatedDocTypeHref(resource: RelatedDocTypeResource, documentName: string | undefined): string {
+  const base = `/desk/${encodeURIComponent(resource.doctype)}`;
+  if (documentName === undefined) {
+    return base;
+  }
+  if (resource.direction === "outgoing" && resource.linkedDocumentName !== undefined) {
+    return `${base}/${encodeURIComponent(resource.linkedDocumentName)}`;
+  }
+  if (resource.direction === "incoming") {
+    return `${base}?${encodeURIComponent(`filter_${resource.field}`)}=${encodeURIComponent(documentName)}&default_filters=0`;
+  }
+  return base;
 }
 
 export function renderListView(
@@ -5369,6 +5568,160 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+.related-resources {
+  padding: 18px;
+}
+.related-resource-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 20px;
+}
+.related-resource-group h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.related-resource-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+.related-resource-list li {
+  border-bottom: 1px solid var(--border);
+}
+.related-resource-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 58px;
+  padding: 10px 0;
+  color: var(--text);
+  text-decoration: none;
+}
+.related-resource-link:hover strong {
+  color: var(--primary);
+}
+.related-resource-link > span:first-child,
+.related-resource-print > a {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  color: inherit;
+  text-decoration: none;
+}
+.related-resource-link small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.related-resource-kind {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.related-resource-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.printing-section {
+  padding: 18px;
+}
+.printing-group + .printing-group {
+  margin-top: 20px;
+}
+.printing-group h3,
+.print-format-section h3,
+.layout-comparison h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.resource-row-list,
+.value-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+.resource-row-list li,
+.value-list li {
+  border-bottom: 1px solid var(--border);
+}
+.resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 58px;
+  padding: 10px 0;
+  color: var(--text);
+  text-decoration: none;
+}
+.resource-row > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.resource-row small,
+.muted-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+.resource-row:hover strong {
+  color: var(--primary);
+}
+.definition-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px 18px;
+  margin: 16px 0 0;
+}
+.definition-list div {
+  min-width: 0;
+}
+.definition-list dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.definition-list dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+.compact-definition-list {
+  grid-template-columns: 1fr;
+  margin-top: 0;
+}
+.layout-comparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 20px;
+}
+.print-format-section + .print-format-section {
+  margin-top: 18px;
+}
+.value-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+}
+.value-list span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.source-preview {
+  max-height: 420px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .main > .panel,
 .main > form.panel,

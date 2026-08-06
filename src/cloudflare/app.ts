@@ -37,7 +37,9 @@ import { DocumentShareService } from "../application/document-share-service.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { PrintSettingsService } from "../application/print-settings-service.js";
 import { PrintService } from "../application/print-service.js";
+import { PrintingWorkspaceService } from "../application/printing-workspace-service.js";
 import { QueryService } from "../application/query-service.js";
+import { RelatedResourceService } from "../application/related-resource-service.js";
 import { ReportService } from "../application/report-service.js";
 import { RoleService } from "../application/role-service.js";
 import { SavedListFilterService } from "../application/saved-list-filter-service.js";
@@ -134,6 +136,8 @@ export interface CloudFrappeRuntimeServices {
   readonly naming: NamingService;
   readonly printSettings: PrintSettingsService;
   readonly prints: PrintService;
+  readonly relatedResources: RelatedResourceService;
+  readonly printing: PrintingWorkspaceService;
   readonly queries: QueryService;
   readonly reports: ReportService;
   readonly dashboards: DashboardService;
@@ -458,6 +462,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries, printSettings });
+  const relatedResources = new RelatedResourceService({ queries: restrictedQueries, prints });
+  const printing = new PrintingWorkspaceService({ prints, printSettings, queries: restrictedQueries });
   const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
   const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
   const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
@@ -551,6 +557,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     naming,
     printSettings,
     prints,
+    relatedResources,
+    printing,
     queries: restrictedQueries,
     reports,
     dashboards,
@@ -722,6 +730,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     registry: options.registry,
     documents,
     prints,
+    relatedResources,
+    printing,
     printSettings,
     ...(files === undefined ? {} : { files }),
     queries: restrictedQueries,

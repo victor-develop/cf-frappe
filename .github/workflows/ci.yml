@@ -39,6 +39,12 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser journeys
+        run: npm run test:browser
+
       - name: Architecture-critical coverage
         run: npm run coverage
 

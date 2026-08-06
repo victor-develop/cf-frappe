@@ -40,6 +40,7 @@ import {
   jobScheduleDefinitionsStream,
   NotificationRuleService,
   QueryService,
+  RelatedResourceService,
   ReportService,
   REPORT_FORMULA_MAX_DEPTH,
   RoleService,
@@ -139,6 +140,8 @@ describe("Desk app", () => {
       registry: services.registry,
       documents: services.documents,
       ...(options.prints === false ? {} : { prints: services.prints }),
+      ...(options.prints === false ? {} : { relatedResources: services.relatedResources }),
+      ...(options.prints === false ? {} : { printing: services.printing }),
       printSettings: services.printSettings,
       ...(options.printPdfRenderer === undefined ? {} : { printPdfRenderer: options.printPdfRenderer }),
       queries: services.queries,
@@ -7052,6 +7055,8 @@ describe("Desk app", () => {
       workflows,
       notificationRules,
       assignmentRules,
+      prints: services.prints,
+      printing: services.printing,
       printSettings: services.printSettings,
       dataPatches,
       jobSchedules: new JobScheduleService({
@@ -7074,16 +7079,21 @@ describe("Desk app", () => {
     expect(homeHtml).toContain('href="/desk/admin/workflows"');
     expect(homeHtml).toContain('href="/desk/admin/notification-rules"');
     expect(homeHtml).toContain('href="/desk/admin/assignment-rules"');
-    expect(homeHtml).toContain('href="/desk/admin/print-settings"');
+    expect(homeHtml).toContain('href="/desk/printing">Printing</a>');
+    expect(homeHtml).not.toContain('href="/desk/admin/print-settings"');
     expect(homeHtml).toContain('href="/desk/admin/data-patches"');
     expect(homeHtml).toContain('href="/desk/admin/jobs/schedules"');
     expect(homeHtml).not.toContain('href="/desk/admin/users"');
 
-    const printSettingsPage = await app.request("/desk/admin/print-settings");
-    expect(printSettingsPage.status).toBe(200);
-    await expect(printSettingsPage.text()).resolves.toContain(
-      '<a class="nav-link is-active" href="/desk/admin/print-settings">Print Settings</a>'
+    const printingPage = await app.request("/desk/printing");
+    expect(printingPage.status).toBe(200);
+    await expect(printingPage.text()).resolves.toContain(
+      '<a class="nav-link is-active" href="/desk/printing">Printing</a>'
     );
+
+    const oldPrintSettingsPage = await app.request("/desk/admin/print-settings");
+    expect(oldPrintSettingsPage.status).toBe(302);
+    expect(oldPrintSettingsPage.headers.get("location")).toBe("/desk/printing#default-layout");
 
     const dataPatchPage = await app.request("/desk/admin/data-patches");
     expect(dataPatchPage.status).toBe(200);
@@ -7178,21 +7188,25 @@ describe("Desk app", () => {
     await expect(missing.text()).resolves.toContain("Data patches are not enabled");
   });
 
-  it("renders and updates print settings from the Desk admin surface", async () => {
+  it("renders the Printing workspace and updates its Default Print Layout", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();
     const app = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
+      prints: services.prints,
+      printing: services.printing,
       printSettings: services.printSettings,
       actor: () => admin
     });
 
-    const empty = await app.request("/desk/admin/print-settings");
+    const empty = await app.request("/desk/printing");
     expect(empty.status).toBe(200);
     const emptyHtml = await empty.text();
-    expect(emptyHtml).toContain('action="/desk/admin/print-settings"');
+    expect(emptyHtml).toContain("Print Formats");
+    expect(emptyHtml).toContain("/desk/printing/formats/Note%20Standard");
+    expect(emptyHtml).toContain('action="/desk/printing/default-layout"');
     expect(emptyHtml).toContain('name="expectedVersion" value="0"');
     expect(emptyHtml).toContain('name="pageSize"');
     expect(emptyHtml).toContain('name="orientation"');
@@ -7205,7 +7219,7 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('name="fontFamily"');
     expect(emptyHtml).toContain('name="fontSizePt"');
 
-    const saved = await app.request("/desk/admin/print-settings", {
+    const saved = await app.request("/desk/printing/default-layout", {
       method: "POST",
       body: new URLSearchParams({
         expectedVersion: "0",
@@ -7220,7 +7234,7 @@ describe("Desk app", () => {
       })
     });
     expect(saved.status).toBe(303);
-    expect(saved.headers.get("location")).toBe("/desk/admin/print-settings");
+    expect(saved.headers.get("location")).toBe("/desk/printing#default-layout");
     await expect(services.printSettings.get(admin)).resolves.toMatchObject({
       version: 1,
       settings: {
@@ -7233,7 +7247,7 @@ describe("Desk app", () => {
       }
     });
 
-    const current = await app.request("/desk/admin/print-settings");
+    const current = await app.request("/desk/printing");
     expect(current.status).toBe(200);
     const currentHtml = await current.text();
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
@@ -7243,7 +7257,7 @@ describe("Desk app", () => {
     expect(currentHtml).toContain('name="fontFamily" value="Inter"');
     expect(currentHtml).toContain('name="fontSizePt" type="number" step="any" min="6" max="72" value="10"');
 
-    const stale = await app.request("/desk/admin/print-settings", {
+    const stale = await app.request("/desk/printing/default-layout", {
       method: "POST",
       body: new URLSearchParams({
         expectedVersion: "0",
@@ -7255,7 +7269,7 @@ describe("Desk app", () => {
     expect(staleHtml).toContain("Expected print settings at version 0, found 1");
     expect(staleHtml).toContain('name="expectedVersion" value="1"');
 
-    const cleared = await app.request("/desk/admin/print-settings", {
+    const cleared = await app.request("/desk/printing/default-layout", {
       method: "POST",
       body: new URLSearchParams({
         expectedVersion: "1",
@@ -7268,7 +7282,7 @@ describe("Desk app", () => {
       settings: {}
     });
 
-    const custom = await app.request("/desk/admin/print-settings", {
+    const custom = await app.request("/desk/printing/default-layout", {
       method: "POST",
       body: new URLSearchParams({
         expectedVersion: "2",
@@ -7288,13 +7302,20 @@ describe("Desk app", () => {
       }
     });
 
-    const customPage = await app.request("/desk/admin/print-settings");
+    const customPage = await app.request("/desk/printing");
     const customHtml = await customPage.text();
     expect(customHtml).toContain('name="customWidthMm" type="number" step="any" min="1" max="2000" value="210"');
     expect(customHtml).toContain('name="customHeightMm" type="number" step="any" min="1" max="2000" value="297"');
+
+    const legacyPost = await app.request("/desk/admin/print-settings", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "3" })
+    });
+    expect(legacyPost.status).toBe(303);
+    expect(legacyPost.headers.get("location")).toBe("/desk/printing#default-layout");
   });
 
-  it("renders Desk print settings admin route errors", async () => {
+  it("renders Printing workspace availability and Default Layout permission errors", async () => {
     const admin = { ...owner, id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
     const services = createServices();
     const disabled = createDeskApp({
@@ -7303,25 +7324,36 @@ describe("Desk app", () => {
       queries: services.queries,
       actor: () => admin
     });
-    const missing = await disabled.request("/desk/admin/print-settings");
+    const missing = await disabled.request("/desk/printing");
     expect(missing.status).toBe(404);
-    await expect(missing.text()).resolves.toContain("Print settings are not enabled");
+    await expect(missing.text()).resolves.toContain("Printing workspace is not enabled");
 
-    const missingPost = await disabled.request("/desk/admin/print-settings", {
+    const missingPost = await disabled.request("/desk/printing/default-layout", {
       method: "POST",
       body: new URLSearchParams({ expectedVersion: "0", pageSize: "A4" })
     });
     expect(missingPost.status).toBe(404);
-    await expect(missingPost.text()).resolves.toContain("Print settings are not enabled");
+    await expect(missingPost.text()).resolves.toContain("Printing workspace is not enabled");
 
     const userApp = createDeskApp({
       registry: services.registry,
       documents: services.documents,
       queries: services.queries,
+      prints: services.prints,
+      printing: services.printing,
       printSettings: services.printSettings,
       actor: () => guest
     });
-    const denied = await userApp.request("/desk/admin/print-settings");
+    const readOnly = await userApp.request("/desk/printing");
+    expect(readOnly.status).toBe(200);
+    const readOnlyHtml = await readOnly.text();
+    expect(readOnlyHtml).toContain("Default Print Layout");
+    expect(readOnlyHtml).not.toContain('action="/desk/printing/default-layout"');
+
+    const denied = await userApp.request("/desk/printing/default-layout", {
+      method: "POST",
+      body: new URLSearchParams({ expectedVersion: "0", pageSize: "A4" })
+    });
     expect(denied.status).toBe(403);
     await expect(denied.text()).resolves.toContain("cannot manage print settings");
   });
@@ -7762,7 +7794,71 @@ describe("Desk app", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('name="expectedVersion" value="1"');
+    expect(html).toContain("<h2>Related</h2>");
+    expect(html).toContain("Print Formats");
     expect(html).toContain("/desk/print/Note%20Standard/My%20Note");
+  });
+
+  it("renders incoming and outgoing Related Resources with document-aware navigation", async () => {
+    const services = createLinkedServices([
+      "related-project",
+      "related-task",
+      "related-project-beta",
+      "related-task-beta"
+    ]);
+    const relatedResources = new RelatedResourceService({ queries: services.queries });
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      relatedResources,
+      actor: () => owner
+    });
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Project Alpha" } });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Task Alpha", project: "Project Alpha" }
+    });
+
+    const projectList = await app.request("/desk/Project");
+    expect(await projectList.text()).toContain("Incoming via project");
+    const projectDocument = await app.request("/desk/Project/Project%20Alpha");
+    const projectHtml = await projectDocument.text();
+    expect(projectHtml).toContain("Linked DocTypes");
+    expect(projectHtml).toContain('/desk/Task?filter_project=Project%20Alpha&amp;default_filters=0');
+
+    await services.documents.create({ actor: owner, doctype: "Project", data: { title: "Project Beta" } });
+    await services.documents.create({
+      actor: owner,
+      doctype: "Task",
+      data: { title: "Task Beta", project: "Project Beta" }
+    });
+    const incoming = await app.request("/desk/Task?filter_project=Project%20Alpha&default_filters=0");
+    const incomingHtml = await incoming.text();
+    expect(incomingHtml).toContain("Task Alpha");
+    expect(incomingHtml).not.toContain("Task Beta");
+
+    const taskList = await app.request("/desk/Task");
+    expect(await taskList.text()).toContain("Outgoing via project");
+    const taskDocument = await app.request("/desk/Task/Task%20Alpha");
+    expect(await taskDocument.text()).toContain('/desk/Project/Project%20Alpha');
+  });
+
+  it("omits the Related section when no visible resource exists", async () => {
+    const services = createServices();
+    const app = createDeskApp({
+      registry: services.registry,
+      documents: services.documents,
+      queries: services.queries,
+      relatedResources: new RelatedResourceService({ queries: services.queries }),
+      actor: () => owner
+    });
+
+    const response = await app.request("/desk/Note");
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain("<h2>Related</h2>");
   });
 
   it("renders PDF print links in edit forms when a renderer is configured", async () => {

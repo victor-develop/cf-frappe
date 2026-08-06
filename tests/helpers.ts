@@ -11,7 +11,9 @@ import {
   fixedClock,
   InMemoryDocumentStore,
   PrintService,
+  PrintingWorkspaceService,
   QueryService,
+  RelatedResourceService,
   ReportService,
   SavedListFilterService,
   SavedReportService,
@@ -322,6 +324,8 @@ export function createServices(
     ids: deterministicIds(["print-settings-event-1", "print-settings-event-2", "print-settings-event-3"])
   });
   const prints = new PrintService({ registry, queries, printSettings });
+  const relatedResources = new RelatedResourceService({ queries, prints });
+  const printing = new PrintingWorkspaceService({ prints, printSettings, queries });
   const reports = new ReportService({ registry, queries });
   const savedReports = new SavedReportService({
     registry,
@@ -330,7 +334,7 @@ export function createServices(
     clock: fixedClock(now),
     ids: deterministicIds(options.savedReportIds ?? ["saved-report-1", "saved-report-event-1", "saved-report-event-2"])
   });
-  return { registry, store, events: store, projections: store, documents, documentShares, history, audit, savedFilters, savedReports, userPermissions, printSettings, prints, queries, reports };
+  return { registry, store, events: store, projections: store, documents, documentShares, history, audit, savedFilters, savedReports, userPermissions, printSettings, prints, relatedResources, printing, queries, reports };
 }
 
 export function createLinkedServices(ids: readonly string[] = ["evt1", "evt2", "evt3", "evt4"]) {

@@ -61,7 +61,14 @@ import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "..
 import type { PrintService } from "../../application/print-service.js";
 import { ensurePrintSettingsServiceAvailable } from "../../application/print-settings-policy.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
+import {
+  ensurePrintingWorkspaceServiceAvailable,
+  type PrintFormatInspection,
+  type PrintingWorkspaceOverview,
+  type PrintingWorkspaceService
+} from "../../application/printing-workspace-service.js";
 import { QueryService } from "../../application/query-service.js";
+import type { RelatedResourceService } from "../../application/related-resource-service.js";
 import { resolveDeskRealtimeRoute, type DeskRealtimeRouteConfig } from "../../application/realtime-policy.js";
 import { ensureReportServiceAvailable } from "../../application/report-policy.js";
 import type { ReportCsvExportOptions, ReportRunOptions, ReportService } from "../../application/report-service.js";
@@ -109,6 +116,7 @@ import {
   PRINT_PAGE_ORIENTATIONS,
   PRINT_PAGE_SIZE_NAMES,
   type PrintLayoutDefinition,
+  type PrintLetterheadDefinition,
   type PrintPageOrientation,
   type PrintPageSizeName
 } from "../../core/print-format.js";
@@ -208,7 +216,10 @@ import {
   renderAssignmentRuleAdmin,
   renderNotificationRuleAdmin,
   renderNamingAdmin,
-  renderPrintSettingsAdmin,
+  renderPrintFormatInspection,
+  renderPrintLetterheadInspection,
+  renderPrintingWorkspace,
+  renderRelatedResources,
   renderReportList,
   renderReportView,
   renderRoleAdmin,
@@ -316,6 +327,8 @@ export interface DeskAppOptions {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
   readonly prints?: PrintService;
+  readonly relatedResources?: RelatedResourceService;
+  readonly printing?: PrintingWorkspaceService;
   readonly printSettings?: PrintSettingsService;
   readonly printPdfRenderer?: PrintPdfRenderer;
   readonly files?: FileService;
@@ -987,29 +1000,38 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     return renderDeskAssignmentRulePage(options, actor, selectedDoctype, state, 200, undefined, selectedRule);
   });
 
-  app.get("/desk/admin/print-settings", async (c) => {
-    const printSettings = requirePrintSettings(options);
+  app.get("/desk/printing", async (c) => {
+    const printing = requirePrinting(options);
     const actor = await options.actor(c.req.raw);
-    const state = await printSettings.get(actor);
-    return renderDeskPrintSettingsPage(options, actor, state);
+    return renderDeskPrintingPage(options, actor, await printing.overview(actor));
   });
 
-  app.post("/desk/admin/print-settings", async (c) => {
-    const printSettings = requirePrintSettings(options);
+  app.get("/desk/printing/formats/:format", async (c) => {
+    const printing = requirePrinting(options);
     const actor = await options.actor(c.req.raw);
-    try {
-      const form = await parseDeskPrintSettings(c.req.raw);
-      await printSettings.change({
-        actor,
-        settings: form.settings,
-        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
-        metadata: requestMetadata(c.req.raw)
-      });
-      return c.redirect("/desk/admin/print-settings", 303);
-    } catch (error) {
-      return renderDeskPrintSettingsFailure(options, actor, printSettings, error);
-    }
+    const inspection = await printing.inspectFormat(actor, c.req.param("format"));
+    return renderDeskPrintFormatPage(options, actor, inspection);
   });
+
+  app.get("/desk/printing/letterheads/:letterhead", async (c) => {
+    const printing = requirePrinting(options);
+    const actor = await options.actor(c.req.raw);
+    return renderDeskPrintLetterheadPage(
+      options,
+      actor,
+      printing.inspectLetterhead(actor, c.req.param("letterhead"))
+    );
+  });
+
+  app.post("/desk/printing/default-layout", async (c) =>
+    changeDeskPrintSettings(options, c.req.raw, "/desk/printing#default-layout")
+  );
+
+  app.get("/desk/admin/print-settings", (c) => c.redirect("/desk/printing#default-layout", 302));
+
+  app.post("/desk/admin/print-settings", async (c) =>
+    changeDeskPrintSettings(options, c.req.raw, "/desk/printing#default-layout")
+  );
 
   app.get("/desk/admin/jobs", async (c) => {
     const jobs = requireJobs(options);
@@ -2990,6 +3012,21 @@ async function renderDeskListPage(
   const importModes = deskCsvImportModesFor(actor, doctype);
   const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
   const listReturnHref = `/desk/${encodeURIComponent(doctype.name)}${url.search}`;
+  const relatedResources = await options.relatedResources?.forDocType(actor, doctype.name);
+  const list = renderListView(doctype, listView, listResult.data, effectiveFilters, {
+    ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
+    ...(savedFilters ? { savedFilters } : {}),
+    ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
+    exportHref,
+    clientScripts: options.registry.listClientScripts(doctype.name, "list"),
+    bulkActions,
+    bulkReturnHref: listReturnHref,
+    importModes,
+    importReturnHref: listReturnHref,
+    ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
+    canCreate: can(actor, doctype, "create"),
+    ...deskRealtimeRouteOption(options)
+  });
   return html(
     renderDeskLayoutFor(options, {
       title: doctype.label ?? doctype.name,
@@ -2997,20 +3034,7 @@ async function renderDeskListPage(
       active: doctype.name,
       doctypes,
       reports,
-      body: renderListView(doctype, listView, listResult.data, effectiveFilters, {
-        ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
-        ...(savedFilters ? { savedFilters } : {}),
-        ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
-        exportHref,
-        clientScripts: options.registry.listClientScripts(doctype.name, "list"),
-        bulkActions,
-        bulkReturnHref: listReturnHref,
-        importModes,
-        importReturnHref: listReturnHref,
-        ...(result.importResult === undefined ? {} : { importResult: result.importResult }),
-        canCreate: can(actor, doctype, "create"),
-        ...deskRealtimeRouteOption(options)
-      })
+      body: `${list}${relatedResources === undefined ? "" : renderRelatedResources(relatedResources)}`
     })
   );
 }
@@ -3149,9 +3173,6 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.assignmentRules === undefined
       ? []
       : [{ id: "assignment-rules", label: "Assignment Rules", href: "/desk/admin/assignment-rules" }]),
-    ...(options.printSettings === undefined
-      ? []
-      : [{ id: "print-settings", label: "Print Settings", href: "/desk/admin/print-settings" }]),
     ...(options.userPermissions === undefined
       ? []
       : [{ id: "user-permissions", label: "User Permissions", href: "/desk/admin/user-permissions" }]),
@@ -3526,6 +3547,11 @@ function requirePrintSettings(options: DeskAppOptions): PrintSettingsService {
   return options.printSettings;
 }
 
+function requirePrinting(options: DeskAppOptions): PrintingWorkspaceService {
+  ensurePrintingWorkspaceServiceAvailable(options.printing);
+  return options.printing;
+}
+
 function requireJobs(options: DeskAppOptions): JobHistoryService {
   ensureJobHistoryServiceAvailable(options.jobs);
   return options.jobs;
@@ -3576,7 +3602,8 @@ function renderDeskLayoutFor(options: DeskAppOptions, layout: DeskLayoutOptions)
     ...layout,
     showNotifications: layout.showNotifications ?? options.notifications !== undefined,
     showFiles: layout.showFiles ?? options.files !== undefined,
-    showAssignments: layout.showAssignments ?? options.timeline !== undefined
+    showAssignments: layout.showAssignments ?? options.timeline !== undefined,
+    showPrinting: layout.showPrinting ?? options.printing !== undefined
   });
 }
 
@@ -4479,46 +4506,91 @@ async function renderDeskAssignmentRuleFailure(
   );
 }
 
-async function renderDeskPrintSettingsPage(
+async function renderDeskPrintingPage(
   options: DeskAppOptions,
   actor: Actor,
-  state: Awaited<ReturnType<PrintSettingsService["get"]>>,
+  overview: PrintingWorkspaceOverview,
   status = 200,
   error?: string
 ): Promise<Response> {
-  const doctypes = options.queries.listDoctypes(actor);
+  const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   return html(
     renderDeskLayoutFor(options, {
-      title: "Print Settings",
-      activeAdmin: "print-settings",
+      title: "Printing",
+      activePrinting: true,
       adminLinks: adminLinksFor(options, actor),
       doctypes,
       reports,
-      body: renderPrintSettingsAdmin(state, error === undefined ? {} : { error })
+      body: renderPrintingWorkspace(overview, error === undefined ? {} : { error })
     }),
     status
   );
 }
 
-async function renderDeskPrintSettingsFailure(
+async function renderDeskPrintFormatPage(
   options: DeskAppOptions,
   actor: Actor,
-  printSettings: PrintSettingsService,
-  error: unknown
+  inspection: PrintFormatInspection
 ): Promise<Response> {
-  if (error instanceof FrameworkError && error.status === 403) {
-    throw error;
-  }
-  const state = await printSettings.get(actor);
-  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
-  return renderDeskPrintSettingsPage(
-    options,
-    actor,
-    state,
-    error instanceof FrameworkError ? error.status : 500,
-    message
+  return html(
+    renderDeskLayoutFor(options, {
+      title: inspection.format.label ?? inspection.format.name,
+      activePrinting: true,
+      adminLinks: adminLinksFor(options, actor),
+      doctypes: await listDeskDoctypes(options, actor),
+      reports: listReports(options, actor),
+      body: renderPrintFormatInspection(inspection, {
+        printPdfEnabled: options.printPdfRenderer !== undefined
+      })
+    })
   );
+}
+
+async function renderDeskPrintLetterheadPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  letterhead: PrintLetterheadDefinition
+): Promise<Response> {
+  return html(
+    renderDeskLayoutFor(options, {
+      title: letterhead.label ?? letterhead.name,
+      activePrinting: true,
+      adminLinks: adminLinksFor(options, actor),
+      doctypes: await listDeskDoctypes(options, actor),
+      reports: listReports(options, actor),
+      body: renderPrintLetterheadInspection(letterhead)
+    })
+  );
+}
+
+async function changeDeskPrintSettings(
+  options: DeskAppOptions,
+  request: Request,
+  redirectTo: string
+): Promise<Response> {
+  const printing = requirePrinting(options);
+  const printSettings = requirePrintSettings(options);
+  const actor = await options.actor(request);
+  try {
+    const form = await parseDeskPrintSettings(request);
+    await printSettings.change({
+      actor,
+      settings: form.settings,
+      ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+      metadata: requestMetadata(request)
+    });
+    return new Response(null, { status: 303, headers: { location: redirectTo } });
+  } catch (error) {
+    const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+    return renderDeskPrintingPage(
+      options,
+      actor,
+      await printing.overview(actor),
+      error instanceof FrameworkError ? error.status : 500,
+      message
+    );
+  }
 }
 
 function customFieldAdminHref(doctype: string): string {
@@ -4557,8 +4629,13 @@ async function renderDeskDocumentPage(
 ): Promise<Response> {
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
-  const printFormats = listPrintFormats(options, actor, doctype.name);
   const document = await options.queries.getDocument(actor, doctype.name, name);
+  const relatedResources = await options.relatedResources?.forDocument(
+    actor,
+    doctype.name,
+    document.name
+  );
+  const printFormats = options.relatedResources === undefined ? listPrintFormats(options, actor, doctype.name) : [];
   const formView = await options.queries.getEffectiveDocumentFormView(actor, doctype.name, name, document.tenantId);
   const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "read");
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
@@ -4604,6 +4681,9 @@ async function renderDeskDocumentPage(
       );
   const realtimeRoute = deskRealtimeRoute(options);
   const presence = realtimeRoute ? renderDocumentPresencePanel(document, { realtimeRoute }) : "";
+  const related = relatedResources === undefined
+    ? ""
+    : renderRelatedResources(relatedResources, { printPdfEnabled: options.printPdfRenderer !== undefined });
   return html(
     renderDeskLayoutFor(options, {
       title: document.name,
@@ -4612,7 +4692,7 @@ async function renderDeskDocumentPage(
       doctypes,
       reports,
       showFiles: options.files !== undefined,
-      body: `${form}${presence}${attachments}${
+      body: `${form}${related}${presence}${attachments}${
         timeline
           ? renderDocumentTimeline(timeline, {
               allowComment: canComment,

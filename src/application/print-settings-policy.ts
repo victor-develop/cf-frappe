@@ -28,10 +28,17 @@ export function authorizePrintSettingsAdministration(command: {
   readonly adminRoles: readonly string[];
   readonly tenantId?: TenantId | undefined;
 }): TenantId {
-  if (!command.adminRoles.some((role) => command.actor.roles.includes(role))) {
+  if (!canAdministerPrintSettings(command)) {
     throw permissionDenied(`Actor '${command.actor.id}' cannot manage print settings`);
   }
   return resolvePrintSettingsTenant(command);
+}
+
+export function canAdministerPrintSettings(command: {
+  readonly actor: Actor;
+  readonly adminRoles: readonly string[];
+}): boolean {
+  return command.adminRoles.some((role) => command.actor.roles.includes(role));
 }
 
 export function ensurePrintSettingsServiceAvailable<T>(printSettings: T | undefined): asserts printSettings is T {

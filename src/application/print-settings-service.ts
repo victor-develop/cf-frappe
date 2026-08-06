@@ -23,6 +23,7 @@ import {
 } from "./print-settings-events.js";
 import {
   authorizePrintSettingsAdministration,
+  canAdministerPrintSettings,
   ensurePrintSettingsExpectedVersion,
   normalizePrintSettingsPatchInput,
   planPrintSettingsPatchChange
@@ -71,6 +72,10 @@ export class PrintSettingsService {
 
   authorizeAdministration(actor: Actor, tenantId?: TenantId): TenantId {
     return authorizePrintSettingsAdministration({ actor, tenantId, adminRoles: this.adminRoles });
+  }
+
+  canAdminister(actor: Actor): boolean {
+    return canAdministerPrintSettings({ actor, adminRoles: this.adminRoles });
   }
 
   async change(command: ChangePrintSettingsCommand): Promise<PrintSettingsState> {

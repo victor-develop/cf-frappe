@@ -229,4 +229,48 @@ describe("PrintService", () => {
 
     expect(() => prints.getPrintFormat(guest, "Note Standard")).toThrow("cannot read print format");
   });
+
+  it("enforces permissionAction against the concrete document before printing", async () => {
+    const { registry, documents, prints } = createServices(["action-allowed", "action-denied"]);
+    registry.registerDocType(defineDocType({
+      name: "Action Protected Print",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "print_allowed", type: "boolean" }
+      ],
+      permissions: [
+        { roles: ["User"], actions: ["read", "create"] },
+        {
+          roles: ["User"],
+          actions: ["update"],
+          when: ({ document }) => document === undefined || document.data.print_allowed === true
+        }
+      ]
+    }));
+    registry.registerPrintFormat(definePrintFormat({
+      name: "Action Protected Format",
+      doctype: "Action Protected Print",
+      permissionAction: "update",
+      sections: [{ fields: [{ field: "title" }] }],
+      roles: ["User"]
+    }));
+    await documents.create({
+      actor: owner,
+      doctype: "Action Protected Print",
+      data: { title: "Allowed Print", print_allowed: true }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Action Protected Print",
+      data: { title: "Denied Print", print_allowed: false }
+    });
+
+    await expect(prints.printDocument(owner, "Action Protected Format", "Allowed Print")).resolves.toMatchObject({
+      document: { name: "Allowed Print" }
+    });
+    await expect(prints.printDocument(owner, "Action Protected Format", "Denied Print")).rejects.toThrow(
+      "cannot update Action Protected Print/Denied Print"
+    );
+  });
 });

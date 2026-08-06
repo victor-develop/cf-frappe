@@ -106,6 +106,17 @@ export interface DocumentCsvExportOptions {
   readonly limit?: number;
 }
 
+export interface ListDocumentsOptions {
+  readonly tenantId?: string;
+  readonly filters?: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
+  readonly orderBy?: string;
+  readonly order?: ListOrderDirection;
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly maxLimit?: number;
+}
+
 export interface DocumentCsvExport {
   readonly filename: string;
   readonly contentType: typeof CSV_CONTENT_TYPE;
@@ -184,6 +195,25 @@ export class QueryService {
     return redactDocumentSnapshot({ actor, doctype, document, relatedDocType });
   }
 
+  async getDocumentForAction(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    action: PermissionAction,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocumentSnapshot> {
+    const { doctype, relatedDocType, document } = await this.documentContextForRead(
+      actor,
+      doctypeName,
+      name,
+      tenantId
+    );
+    if (action !== "read" && !(await this.canActOnDocument(actor, doctype, action, document))) {
+      throw permissionDenied(`Actor '${actor.id}' cannot ${action} ${doctype.name}/${document.name}`);
+    }
+    return redactDocumentSnapshot({ actor, doctype, document, relatedDocType });
+  }
+
   async redactDocument(
     actor: Actor,
     document: DocumentSnapshot
@@ -232,20 +262,23 @@ export class QueryService {
   async listDocuments(
     actor: Actor,
     doctypeName: string,
-    options: {
-      readonly tenantId?: string;
-      readonly filters?: readonly ListDocumentsFilter[];
-      readonly filterExpression?: ListFilterExpression;
-      readonly orderBy?: string;
-      readonly order?: ListOrderDirection;
-      readonly limit?: number;
-      readonly offset?: number;
-      readonly maxLimit?: number;
-    } = {}
+    options: ListDocumentsOptions = {}
+  ): Promise<ListDocumentsResult> {
+    return this.listDocumentsForAction(actor, doctypeName, "read", options);
+  }
+
+  async listDocumentsForAction(
+    actor: Actor,
+    doctypeName: string,
+    action: PermissionAction,
+    options: ListDocumentsOptions = {}
   ): Promise<ListDocumentsResult> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
     this.requireDocTypeAction(actor, doctype, "read");
+    if (action !== "read") {
+      this.requireDocTypeAction(actor, doctype, action);
+    }
     const queryDoctype = projectDocTypeForFieldQueries({ actor, doctype });
     const limit = clampLimit(options.limit, options.maxLimit);
     const offset = Math.max(0, options.offset ?? 0);
@@ -262,7 +295,7 @@ export class QueryService {
           filters
         });
     const predicate = andPredicateExpressions([filtersPredicate, filterPredicate]);
-    return this.listReadableDocumentPage(actor, doctype, relatedDocType, {
+    return this.listReadableDocumentPage(actor, doctype, relatedDocType, action, {
       tenantId,
       doctype: doctype.name,
       ...(predicate === undefined ? {} : { predicate }),
@@ -294,6 +327,21 @@ export class QueryService {
         action: "read",
         doctype: await this.resolveDocType(doctype, actor, tenantId),
         tenantId
+      })
+    ));
+  }
+
+  async listEffectiveQueryDoctypes(
+    actor: Actor
+  ): Promise<readonly DocTypeDefinition[]> {
+    const tenantId = actor.tenantId ?? DEFAULT_TENANT_ID;
+    const readable = this.registry.list().filter((doctype) =>
+      canUseDocTypeAction({ actor, doctype, action: "read" })
+    );
+    return Promise.all(readable.map(async (doctype) =>
+      projectDocTypeForFieldQueries({
+        actor,
+        doctype: await this.resolveDocType(doctype, actor, tenantId)
       })
     ));
   }
@@ -663,15 +711,18 @@ export class QueryService {
     actor: Actor,
     doctype: DocTypeDefinition,
     documents: readonly DocumentSnapshot[],
-    relatedDocType: RelatedDocTypeResolver
+    relatedDocType: RelatedDocTypeResolver,
+    action: PermissionAction = "read"
   ): Promise<readonly DocumentSnapshot[]> {
     const readable = await Promise.all(
       documents.map(async (document) => {
         const projection = planDocumentReadProjection({ doctype, name: document.name, document });
+        const canRead = projection.status === "check-access" &&
+          await this.canReadDocument(actor, doctype, projection.document);
         return {
           document,
-          readable: projection.status === "check-access" &&
-            await this.canReadDocument(actor, doctype, projection.document)
+          readable: canRead && (action === "read" ||
+            await this.canActOnDocument(actor, doctype, action, projection.document))
         };
       })
     );
@@ -684,6 +735,7 @@ export class QueryService {
     actor: Actor,
     doctype: DocTypeDefinition,
     relatedDocType: RelatedDocTypeResolver,
+    action: PermissionAction,
     query: {
       readonly tenantId: string;
       readonly doctype: string;
@@ -707,7 +759,7 @@ export class QueryService {
         limit: scanPageSize,
         offset: scanOffset
       });
-      const readable = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType);
+      const readable = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType, action);
       for (const document of readable) {
         if (readableTotal >= query.offset && data.length < query.limit) {
           data.push(document);

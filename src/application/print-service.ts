@@ -76,7 +76,12 @@ export class PrintService {
   async printDocument(actor: Actor, formatName: string, name: string): Promise<PrintDocumentView> {
     const format = this.getPrintFormat(actor, formatName);
     const doctype = await this.queries.getEffectiveMeta(actor, format.doctype);
-    const document = await this.queries.getDocument(actor, format.doctype, name);
+    const document = await this.queries.getDocumentForAction(
+      actor,
+      format.doctype,
+      name,
+      format.permissionAction ?? "read"
+    );
     const letterhead = format.letterhead ? this.getPrintLetterhead(actor, format.letterhead) : undefined;
     const defaultLayout = (await this.printSettings?.defaultsFor(actor))?.settings.defaultLayout;
     const layout = mergePrintLayouts(defaultLayout, format.layout);

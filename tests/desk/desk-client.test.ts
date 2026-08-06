@@ -471,6 +471,9 @@ interface DeskClientRuntime {
     readonly adminUserPermissionsUrl: (options?: Record<string, unknown>) => string;
     readonly adminUsersUrl: (options?: Record<string, unknown>) => string;
     readonly adminWorkflowsUrl: (doctype?: string) => string;
+    readonly printingUrl: () => string;
+    readonly printingFormatUrl: (format: string) => string;
+    readonly printingLetterheadUrl: (letterhead: string) => string;
     readonly bulkCancel: (
       doctype: string,
       documents: readonly DeskBulkDocumentSelection[],
@@ -1010,6 +1013,13 @@ describe("Desk client runtime", () => {
       "/desk/admin/assignment-rules?doctype=Task+Type&rule=High%2FTriage"
     );
     expect(runtime.desk.adminPrintSettingsUrl()).toBe("/desk/admin/print-settings");
+    expect(runtime.desk.printingUrl()).toBe("/desk/printing");
+    expect(runtime.desk.printingFormatUrl("Return Authorization/Compact")).toBe(
+      "/desk/printing/formats/Return%20Authorization%2FCompact"
+    );
+    expect(runtime.desk.printingLetterheadUrl("Returns & Support")).toBe(
+      "/desk/printing/letterheads/Returns%20%26%20Support"
+    );
     expect(runtime.desk.adminUserPermissionsUrl({ user: "reader@example.com" })).toBe(
       "/desk/admin/user-permissions?user=reader%40example.com"
     );
