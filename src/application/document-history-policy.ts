@@ -1,5 +1,5 @@
 import { badRequest } from "../core/errors.js";
-import { domainEventPayloadKind } from "../core/domain-events.js";
+import { domainEventPayloadKind, isCurrentWorkflowTransitionPayload } from "../core/domain-events.js";
 import {
   foldDocumentAssignments,
   foldDocumentFollowers,
@@ -80,6 +80,9 @@ export function documentTimelineEntries(
   let before = initialSnapshot;
   const entries: DocumentTimelineEntry[] = [];
   for (const event of events) {
+    if (!isCurrentDocumentHistoryEvent(event)) {
+      continue;
+    }
     const after = foldDocumentFrom(before, [event]);
     entries.push({
       eventId: event.id,
@@ -173,8 +176,8 @@ export function documentTimelineEventChanges(
     case "CustomFieldDisabled":
     case "FieldPropertyOverrideSaved":
     case "FieldPropertyOverrideCleared":
-    case "WorkflowDefinitionSaved":
-    case "WorkflowDefinitionCleared":
+    case "NamedWorkflowSaved":
+    case "NamedWorkflowCleared":
     case "NotificationRuleSaved":
     case "NotificationRuleCleared":
     case "AssignmentRuleSaved":
@@ -193,6 +196,7 @@ export function documentTimelineEventChanges(
     case "AutomationRunDelivered":
     case "AutomationRunFailed":
     case "AutomationRunDeadLettered":
+    case "AutomationRunSuppressed":
       return [];
   }
   return [];
@@ -304,10 +308,10 @@ export function documentTimelineSummary(payload: DocumentEventPayload): string {
       return `Saved field property override for ${payload.doctypeName}.${payload.fieldName}`;
     case "FieldPropertyOverrideCleared":
       return `Cleared field property override for ${payload.doctypeName}.${payload.fieldName}`;
-    case "WorkflowDefinitionSaved":
-      return `Saved workflow definition for ${payload.doctypeName}`;
-    case "WorkflowDefinitionCleared":
-      return `Cleared workflow definition for ${payload.doctypeName}`;
+    case "NamedWorkflowSaved":
+      return `Saved workflow definition ${payload.doctypeName}.${payload.workflowName}`;
+    case "NamedWorkflowCleared":
+      return `Cleared workflow definition ${payload.doctypeName}.${payload.workflowName}`;
     case "NotificationRuleSaved":
       return `Saved notification rule ${payload.doctypeName}.${payload.rule.name}`;
     case "NotificationRuleCleared":
@@ -344,11 +348,16 @@ export function documentTimelineSummary(payload: DocumentEventPayload): string {
       return `Automation run failed ${payload.runId}`;
     case "AutomationRunDeadLettered":
       return `Automation run dead-lettered ${payload.runId}`;
+    case "AutomationRunSuppressed":
+      return `Automation run suppressed ${payload.runId}`;
     case "WorkflowTransitioned":
       return workflowSummary(payload);
     case "DomainCommandApplied":
-      return `Applied ${payload.command}`;
+      return payload.transitions.length === 0
+        ? `Applied ${payload.command}`
+        : `Applied ${payload.command} with ${payload.transitions.map((transition) => `${transition.workflow}.${transition.action}`).join(", ")}`;
   }
+  return "Recorded document event";
 }
 
 export function documentHistoryAssignmentsResult(
@@ -397,7 +406,7 @@ export function documentHistoryEventsAtVersion(
   events: readonly DomainEvent[],
   version: number
 ): readonly DomainEvent[] {
-  return events.filter((event) => event.sequence <= version);
+  return events.filter((event) => event.sequence <= version && isCurrentDocumentHistoryEvent(event));
 }
 
 export function selectDocumentTimelinePage(options: {
@@ -406,7 +415,7 @@ export function selectDocumentTimelinePage(options: {
   readonly limit: number;
 }): DocumentTimelinePage {
   const authorizedEvents = options.events
-    .filter((event) => event.sequence <= options.beforeSequence)
+    .filter((event) => event.sequence <= options.beforeSequence && isCurrentDocumentHistoryEvent(event))
     .sort(bySequence);
   const hasMore = authorizedEvents.length > options.limit;
   const overflow = hasMore ? authorizedEvents[authorizedEvents.length - options.limit - 1] : undefined;
@@ -476,7 +485,13 @@ function isTimelineEventPayloadKind<TKind extends DocumentEventPayload["kind"]>(
   event: DomainEvent,
   kind: TKind
 ): event is DomainEvent<Extract<DocumentEventPayload, { readonly kind: TKind }>> {
-  return domainEventPayloadKind(event) === kind;
+  return domainEventPayloadKind(event) === kind &&
+    (kind !== "WorkflowTransitioned" || isCurrentWorkflowTransitionPayload(event.payload));
+}
+
+function isCurrentDocumentHistoryEvent(event: DomainEvent): boolean {
+  return domainEventPayloadKind(event) !== "WorkflowTransitioned" ||
+    isCurrentWorkflowTransitionPayload(event.payload);
 }
 
 function diffPatch(
@@ -530,9 +545,7 @@ function summarizeText(text: string): string {
 }
 
 function workflowSummary(payload: Extract<DocumentEventPayload, { readonly kind: "WorkflowTransitioned" }>): string {
-  const fields = Object.keys(payload.patch);
-  const fieldList = fields.length > 0 ? fields.join(", ") : "workflow";
-  return `${pastTense(payload.action)} ${fieldList} from ${payload.from} to ${payload.to}`;
+  return `${pastTense(payload.action)} ${payload.workflow}.${payload.stateField} from ${payload.from} to ${payload.to}`;
 }
 
 function pastTense(action: string): string {

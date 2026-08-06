@@ -4,7 +4,7 @@ Metadata-driven, event-sourced application framework for Cloudflare Workers.
 
 cf-frappe takes the productive idea behind Frappe's DocType-centered development model and rebuilds it for the Cloudflare stack: Workers, Durable Objects, D1, R2, Queues, Cron Triggers, and edge-native authentication. Define your data model once, then get command APIs, generated Desk UI, permissions, workflows, reports, files, notifications, realtime collaboration, migrations, and operator tooling around it.
 
-[GitHub](https://github.com/victor-develop/cf-frappe) - [Release v0.1.0](https://github.com/victor-develop/cf-frappe/releases/tag/v0.1.0) - [Frappe Assessment](docs/frappe-assessment.md) - [Architecture Review](docs/architecture-review.md) - [Test Parity](docs/test-parity.md)
+[GitHub](https://github.com/victor-develop/cf-frappe) - [Release v0.1.0](https://github.com/victor-develop/cf-frappe/releases/tag/v0.1.0) - [ReturnsOS Example](examples/returns/README.md) - [Architecture Upgrade Blueprint](docs/transition-automation-architecture-blueprint.md) - [Workflow Cutover](docs/transition-automation-cutover.md) - [Frappe Assessment](docs/frappe-assessment.md) - [Architecture Review](docs/architecture-review.md) - [Test Parity](docs/test-parity.md)
 
 > cf-frappe is inspired by the Frappe Framework, but it is not affiliated with Frappe Technologies. It is an experimental Cloudflare-native framework for event-sourced business applications.
 
@@ -51,6 +51,7 @@ cf-frappe is built around four constraints:
 - Typed DocType metadata with fields, defaults, validation, naming, permissions, workflows, links, and child tables.
 - Event-sourced document lifecycle: create, update, submit, cancel, delete, duplicate, amend, comments, assignments, tags, followers, shares, and timelines.
 - Atomic multi-stream document commits for naming series, unique values, and document events through `DocumentStore.commitBatch`.
+- Framework Naming Engine with named counters, dynamic date/field tokens, prefix/suffix literals, scoped resets, exclusions, preview, forward-only adjustment, and generated target fields.
 - Generated HTTP resource APIs, CSV import/export, global search, link options, and remote CLI operations.
 - Generated Desk list/form UI with saved filters, compound filters, layouts, client scripts, bulk actions, and navigation.
 - Metadata-defined reports, report builder, dashboards, Calendar views, Kanban boards, print formats, letterheads, website pages, web views, and public web forms.
@@ -142,13 +143,15 @@ export const Task = defineDocType({
     { name: "priority", type: "select", options: ["Low", "Medium", "High"], defaultValue: "Medium" },
     { name: "status", type: "select", options: ["Open", "Done"], defaultValue: "Open" }
   ],
-  workflow: {
+  workflows: [{
+    name: "lifecycle",
+    stateField: "status",
     initialState: "Open",
     states: ["Open", "Done"],
     transitions: [
       { action: "complete", from: "Open", to: "Done", roles: ["User"] }
     ]
-  },
+  }],
   permissions: [
     { roles: ["User"], actions: ["read", "create", "update", "transition"] }
   ]
@@ -204,6 +207,20 @@ export const EmployeeRecord = defineDocType({
 });
 ```
 
+For business identifiers, the series strategy can generate both the document name and a read-only field:
+
+```ts
+naming: {
+  kind: "series",
+  pattern: "TASK-{YYYY}-{sequence:6}",
+  targetField: "task_id",
+  counter: "tasks",
+  reset: "year"
+}
+```
+
+The counter advance, generated field, unique reservations, and document create event commit atomically. See [Naming Engine](docs/naming-engine.md) for tokens, scopes, exclusions, preview, APIs, and administration.
+
 Field conditions receive `{ actor, action, doctype, field, tenantId, document, value }`. `document` and `value` are present when the check is document/value scoped; metadata-only checks intentionally do not execute the condition.
 
 Field permissions are enforced server-side. Read paths redact document data and project metadata. Create, update, merge, and domain commands reject unauthorized user-supplied fields. Query surfaces only allow filters, ordering, aggregates, saved filters, reports, dashboards, Kanban, Calendar, web views, print formats, and import templates to reference fields that are unconditionally readable for the actor role; conditionally readable fields can be displayed after a document is loaded, but cannot be queried to infer hidden values. `System Manager` bypasses field-level rules.
@@ -243,20 +260,24 @@ npm run check
 Run the example:
 
 ```bash
-npm run build
-npx wrangler d1 create cf-frappe-dev
-npm run d1:migrate:local
-npm run dev
+mise exec node@latest -- npm run up
 ```
+
+After the initial `npm install`, this one command applies pending local D1 migrations, preserves Wrangler state, and starts the example on the first available port from `8787` through `8797`.
+
+Then open [http://localhost:8787/demo](http://localhost:8787/demo), select **Demo Administrator**, and seed the deterministic ReturnsOS fixtures. Use [http://localhost:8787/returns](http://localhost:8787/returns) for the standalone product frontend and **Admin Desk** for generated metadata/reporting surfaces. Both UIs share the same workflows, composite commands, field permissions, durable Automation, Queue delivery, and recovery schedule.
 
 The repository currently passes:
 
 - `npm run typecheck`
 - `npm run test`
+- `npm run coverage`
+- `npm run coverage:naming`
+- `npm run coverage:all`
 - `npm run build`
 - `npm run check`
 
-Current verification: `241` Vitest files and `2857` tests passing.
+Current verification: `256` Vitest files and `3060` tests passing. The architecture-critical coverage gate reports `95.27%` branch coverage. A separate naming-reliability gate enforces at least `93%` branch coverage for every naming-critical file and currently reports `97.06%` overall; the full-source baseline is `82.52%` branch coverage and is reported separately.
 
 ### TODO
 
@@ -267,7 +288,10 @@ Current verification: `241` Vitest files and `2857` tests passing.
 - [Frappe Assessment](docs/frappe-assessment.md): comparison against the official Frappe Framework concepts.
 - [Architecture Review](docs/architecture-review.md): architecture-quality review history and standalone reviewer evidence.
 - [Test Parity](docs/test-parity.md): test-count target and current parity against the upstream Frappe reference.
-- [Todo Example](examples/todos): small runnable model and Worker example.
+- [ReturnsOS Example](examples/returns/README.md): full reference application for multi-workflow and durable Automation.
+- [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
+- [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
+- [Todo Example](examples/todos): small metadata-only model example.
 
 ### Contributing
 
@@ -321,6 +345,7 @@ cf-frappe 的设计约束：
 - 类型化 DocType 元数据：字段、默认值、校验、命名规则、权限、workflow、link field、child table。
 - 事件化文档生命周期：创建、更新、提交、取消、删除、复制、修订、评论、分配、标签、关注、分享和时间线。
 - 文档命名序列、唯一值占用和文档事件通过 `DocumentStore.commitBatch` 做多 stream 原子提交。
+- 框架级 Naming Engine：支持 named counter、日期/字段 token、前后缀、scope reset、排除规则、预览、计数器只向前调整和生成字段。
 - 自动生成 HTTP resource API、CSV 导入导出、全局搜索、link options 和远程 CLI。
 - 自动生成 Desk 列表/表单 UI，支持 saved filters、compound filters、布局、client script、批量操作和导航。
 - 元数据定义 report、report builder、dashboard、Calendar、Kanban、print format、letterhead、website page、web view 和 public web form。
@@ -408,11 +433,13 @@ export const Task = defineDocType({
     { name: "priority", type: "select", options: ["Low", "Medium", "High"], defaultValue: "Medium" },
     { name: "status", type: "select", options: ["Open", "Done"], defaultValue: "Open" }
   ],
-  workflow: {
+  workflows: [{
+    name: "lifecycle",
+    stateField: "status",
     initialState: "Open",
     states: ["Open", "Done"],
     transitions: [{ action: "complete", from: "Open", to: "Done", roles: ["User"] }]
-  },
+  }],
   permissions: [{ roles: ["User"], actions: ["read", "create", "update", "transition"] }]
 });
 
@@ -466,6 +493,20 @@ export const EmployeeRecord = defineDocType({
 });
 ```
 
+业务编号可以同时生成文档名和只读字段：
+
+```ts
+naming: {
+  kind: "series",
+  pattern: "TASK-{YYYY}-{sequence:6}",
+  targetField: "task_id",
+  counter: "tasks",
+  reset: "year"
+}
+```
+
+计数器推进、生成字段、唯一值占用和文档创建事件会原子提交。完整 token、scope、排除规则、预览和管理 API 参见 [Naming Engine](docs/naming-engine.md)。
+
 字段条件函数会拿到 `{ actor, action, doctype, field, tenantId, document, value }`。当检查发生在具体文档或字段值上时，`document` 和 `value` 会存在；纯 metadata 检查不会执行条件函数。
 
 字段级权限是服务端强制的。读路径会对 document data 脱敏，并按 actor 投影 metadata。create、update、merge 和 domain command 会拒绝用户提交的无权限字段。filter、排序、聚合、saved filter、report、dashboard、Kanban、Calendar、web view、print format 和 import template 只能引用该 actor role 无条件可读的字段；条件可读字段可以在文档加载后展示，但不能被拿来查询和推断隐藏值。`System Manager` 会绕过字段级规则。
@@ -505,20 +546,24 @@ npm run check
 运行示例：
 
 ```bash
-npm run build
-npx wrangler d1 create cf-frappe-dev
-npm run d1:migrate:local
-npm run dev
+mise exec node@latest -- npm run up
 ```
+
+第一次执行完 `npm install` 后，这一个命令会应用本地 D1 migration、保留 Wrangler 状态，并从 `8787` 到 `8797` 自动选择空闲端口启动示例。
+
+然后打开 [http://localhost:8787/demo](http://localhost:8787/demo)，切换到 **Demo Administrator** 并生成 ReturnsOS 固定测试数据。使用 [http://localhost:8787/returns](http://localhost:8787/returns) 体验独立业务前台，使用 **Admin Desk** 检查元数据生成的后台与报表页面；两套 UI 共用相同的 workflow、复合 command、字段权限、持久化 Automation、Queue 投递和补偿 schedule。
 
 当前仓库通过：
 
 - `npm run typecheck`
 - `npm run test`
+- `npm run coverage`
+- `npm run coverage:naming`
+- `npm run coverage:all`
 - `npm run build`
 - `npm run check`
 
-当前验证结果：`241` 个 Vitest 文件，`2857` 个测试全部通过。
+当前验证结果：`256` 个 Vitest 文件，`3060` 个测试全部通过；CI 强制的架构关键路径 branch coverage 为 `95.27%`。Naming reliability 另有逐文件门禁，每个关键文件 branch coverage 都不得低于 `93%`，当前整体为 `97.06%`；全源码 branch coverage 基线为 `82.52%`，另行透明报告。
 
 ### TODO
 
@@ -529,7 +574,10 @@ See [English TODO](#todo).
 - [Frappe Assessment](docs/frappe-assessment.md)：和官方 Frappe Framework 概念的对照评估。
 - [Architecture Review](docs/architecture-review.md)：架构质量评审历史和独立评审证据。
 - [Test Parity](docs/test-parity.md)：和上游 Frappe 测试数量目标的对齐情况。
-- [Todo Example](examples/todos)：一个小型可运行模型和 Worker 示例。
+- [ReturnsOS Example](examples/returns/README.md)：多工作流和持久化 Automation 的完整参考应用。
+- [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
+- [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。
+- [Todo Example](examples/todos)：一个小型元数据示例。
 
 ### 贡献
 

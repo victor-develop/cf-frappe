@@ -1,4 +1,4 @@
-import { SavedListFilterService } from "../../src";
+import { presentSavedListFilter, SavedListFilterService } from "../../src";
 import { createServices, manager, owner } from "../helpers";
 import type { DocumentEventPayload, SavedListFilterEventPayload } from "../../src";
 
@@ -9,7 +9,7 @@ describe("SavedListFilterService", () => {
       filterId: "filter-high",
       label: "High notes",
       ownerId: owner.id,
-      filters: [{ field: "priority", value: "High" }]
+      predicate: comparison("priority", "High")
     });
 
     expect(payload.label).toBe("High notes");
@@ -42,7 +42,7 @@ describe("SavedListFilterService", () => {
       doctype: "Note",
       ownerId: owner.id,
       label: "High notes",
-      filters: [{ field: "priority", value: "High" }]
+      predicate: comparison("priority", "High")
     });
     await expect(savedFilters.list(owner, "Note")).resolves.toMatchObject([
       { id: "filter-high", label: "High notes" }
@@ -55,7 +55,8 @@ describe("SavedListFilterService", () => {
           kind: "SavedListFilterSaved",
           filterId: "filter-high",
           ownerId: owner.id,
-          label: "High notes"
+          label: "High notes",
+          predicate: comparison("priority", "High")
         }
       }
     ]);
@@ -92,6 +93,82 @@ describe("SavedListFilterService", () => {
     });
 
     expect(saved).toMatchObject({
+      predicate: {
+        kind: "group",
+        match: "all",
+        predicates: [
+          {
+            kind: "compare",
+            left: { kind: "field", scope: "after", field: "workflow_state" },
+            operator: "eq",
+            right: { kind: "literal", value: "Open" }
+          },
+          {
+            kind: "group",
+            match: "any",
+            predicates: [
+              {
+                kind: "compare",
+                left: { kind: "field", scope: "after", field: "priority" },
+                operator: "eq",
+                right: { kind: "literal", value: "High" }
+              },
+              {
+                kind: "compare",
+                left: { kind: "field", scope: "after", field: "count" },
+                operator: "between",
+                right: { kind: "literal", value: [2, 5] }
+              }
+            ]
+          }
+        ]
+      }
+    });
+    expect(saved).not.toHaveProperty("filterExpression");
+    const persisted = await events.readStream("acme:__SavedListFilters:Note%3Aowner%40example%2Ecom");
+    expect(persisted).toMatchObject([
+      {
+        payload: {
+          kind: "SavedListFilterSaved",
+          predicate: {
+            kind: "group",
+            match: "all",
+            predicates: [
+              {
+                kind: "compare",
+                left: { kind: "field", scope: "after", field: "workflow_state" },
+                operator: "eq",
+                right: { kind: "literal", value: "Open" }
+              },
+              {
+                kind: "group",
+                match: "any",
+                predicates: [
+                  {
+                    kind: "compare",
+                    left: { kind: "field", scope: "after", field: "priority" },
+                    operator: "eq",
+                    right: { kind: "literal", value: "High" }
+                  },
+                  {
+                    kind: "compare",
+                    left: { kind: "field", scope: "after", field: "count" },
+                    operator: "between",
+                    right: { kind: "literal", value: [2, 5] }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]);
+    expect(persisted[0]?.payload).not.toHaveProperty("filterExpression");
+
+    const secondService = new SavedListFilterService({ registry, events });
+    const folded = await secondService.get(owner, "Note", saved.id);
+    expect(folded.predicate).toEqual(saved.predicate);
+    expect(presentSavedListFilter(folded)).toMatchObject({
       filters: [{ field: "workflow_state", value: "Open" }],
       filterExpression: {
         kind: "group",
@@ -102,25 +179,7 @@ describe("SavedListFilterService", () => {
         ]
       }
     });
-    await expect(events.readStream("acme:__SavedListFilters:Note%3Aowner%40example%2Ecom")).resolves.toMatchObject([
-      {
-        payload: {
-          kind: "SavedListFilterSaved",
-          filterExpression: {
-            kind: "group",
-            match: "any",
-            filters: [
-              { field: "priority", value: "High" },
-              { field: "count", operator: "between", value: [2, 5] }
-            ]
-          }
-        }
-      }
-    ]);
-
-    const secondService = new SavedListFilterService({ registry, events });
-    const folded = await secondService.get(owner, "Note", saved.id);
-    expect(folded.filterExpression).toEqual(saved.filterExpression);
+    expect(presentSavedListFilter(folded)).not.toHaveProperty("predicate");
     expect(
       secondService.mergeSavedFilterInputs(
         folded,
@@ -130,16 +189,37 @@ describe("SavedListFilterService", () => {
     ).toMatchObject({
       filters: [
         { field: "workflow_state", value: "Open" },
-        { field: "priority", value: "Low" }
+        { field: "priority", value: "Low" },
+        { field: "system.name", operator: "contains", value: "Q2" }
       ],
       filterExpression: {
         kind: "group",
-        match: "all",
+        match: "any",
         filters: [
-          saved.filterExpression,
-          { field: "system.name", operator: "contains", value: "Q2" }
+          { field: "priority", value: "High" },
+          { field: "count", operator: "between", value: [2, 5] }
         ]
       }
+    });
+
+    const explicitExpression = {
+      kind: "group" as const,
+      match: "all" as const,
+      filters: [
+        { field: "priority", value: "High" },
+        {
+          kind: "group" as const,
+          match: "any" as const,
+          filters: [
+            { field: "count", operator: "between" as const, value: [1, 1] },
+            { field: "priority", operator: "ne" as const, value: "Low" }
+          ]
+        }
+      ]
+    };
+    expect(secondService.mergeSavedFilterInputs(undefined, [], explicitExpression)).toEqual({
+      filters: [],
+      filterExpression: explicitExpression
     });
   });
 
@@ -182,6 +262,12 @@ describe("SavedListFilterService", () => {
     expect(updated).toMatchObject({
       id: saved.id,
       label: "Closed high notes",
+      predicate: {
+        kind: "group",
+        match: "all"
+      }
+    });
+    expect(presentSavedListFilter(updated)).toMatchObject({
       filters: [
         { field: "priority", operator: "in", value: ["High", "Medium"] },
         { field: "workflow_state", value: "Closed" }
@@ -233,12 +319,52 @@ describe("SavedListFilterService", () => {
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("rejects saved filter conditions that exceed the shared Predicate node budget", async () => {
+    const { events, registry } = createServices(["create-1"]);
+    const savedFilters = new SavedListFilterService({ registry, events });
+
+    await expect(savedFilters.save({
+      actor: owner,
+      doctype: "Note",
+      label: "Oversized",
+      filters: Array.from({ length: 64 }, () => ({ field: "priority", value: "High" }))
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Predicate expression cannot exceed 5 levels or 64 nodes"
+    });
+
+    await expect(savedFilters.save({
+      actor: owner,
+      doctype: "Note",
+      label: "Combined oversized",
+      filters: Array.from({ length: 31 }, () => ({ field: "priority", value: "High" })),
+      filterExpression: {
+        kind: "group",
+        match: "any",
+        filters: Array.from({ length: 32 }, () => ({ field: "priority", operator: "ne" as const, value: "Low" }))
+      }
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Predicate expression cannot exceed 5 levels or 64 nodes"
+    });
+    await expect(events.readStream("acme:__SavedListFilters:Note%3Aowner%40example%2Ecom")).resolves.toEqual([]);
+  });
 });
 
 function savedListFilterPayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "SavedListFilterSaved" }>
 ): Extract<SavedListFilterEventPayload, { readonly kind: "SavedListFilterSaved" }> {
   return payload;
+}
+
+function comparison(field: string, value: string) {
+  return {
+    kind: "compare" as const,
+    left: { kind: "field" as const, scope: "after" as const, field },
+    operator: "eq" as const,
+    right: { kind: "literal" as const, value }
+  };
 }
 
 function deterministicFilterIds(values: readonly string[]) {

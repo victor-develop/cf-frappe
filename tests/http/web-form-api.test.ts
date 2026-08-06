@@ -26,7 +26,8 @@ const leadDocType = defineDocType({
     { name: "email", type: "text", placeholder: "jane@example.com" },
     { name: "score", type: "integer" },
     { name: "accepted", type: "boolean" },
-    { name: "details", type: "json" }
+    { name: "details", type: "json" },
+    { name: "source", type: "text" }
   ],
   permissions: [{ roles: ["Guest"], actions: ["create"] }]
 });
@@ -75,7 +76,9 @@ describe("web form api", () => {
       data: {
         form: { name: "Lead Intake", route: "lead/intake", successUrl: "/page/thanks" },
         doctype: "Lead",
-        fields: expect.arrayContaining([{ field: "title", label: "Name", type: "text", required: true, placeholder: "Jane Buyer" }])
+        fields: expect.arrayContaining([
+          { field: "title", label: "Name", type: "text", required: true, placeholder: "Jane Buyer" }
+        ])
       }
     });
 
@@ -127,6 +130,110 @@ describe("web form api", () => {
           details: { source: "html" }
         }
       });
+
+    const unknownField = await app.request("/web-forms/lead/intake", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title: "Unknown Field Lead", unexpected: "ignored-no-more" })
+    });
+    expect(unknownField.status).toBe(400);
+    await expect(store.get("default", "Lead", "Unknown Field Lead")).resolves.toBeNull();
+
+    const unknownJsonField = await app.request("/api/web-form/Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Unknown JSON Lead", unexpected: "rejected" } })
+    });
+    expect(unknownJsonField.status).toBe(400);
+    await expect(store.get("default", "Lead", "Unknown JSON Lead")).resolves.toBeNull();
+
+    const duplicateFields = new URLSearchParams({ title: "Duplicate Field Lead" });
+    duplicateFields.append("title", "Second Title");
+    const duplicateField = await app.request("/web-forms/lead/intake", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: duplicateFields
+    });
+    expect(duplicateField.status).toBe(400);
+    await expect(store.get("default", "Lead", "Duplicate Field Lead")).resolves.toBeNull();
+  });
+
+  it("accepts server-supplied fields only through a request-scoped trusted resolver", async () => {
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Server Lead Intake",
+          route: "server/lead-intake",
+          doctype: "Lead",
+          fields: [
+            { field: "title", required: true },
+            { field: "source", required: true, serverSupplied: true }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const trustedRequests = new WeakMap<Request, Readonly<Record<string, string>>>();
+    const app = createResourceApi({
+      registry,
+      documents,
+      queries,
+      webForms: new WebFormService({ registry, documents, queries }),
+      webFormServerSuppliedData: (request, webFormName) =>
+        webFormName === "Server Lead Intake" ? trustedRequests.get(request) : undefined,
+      actor: unsafeHeaderActorResolver
+    });
+
+    const metadata = await app.request("/api/meta/web-forms/Server%20Lead%20Intake");
+    const metadataBody = await metadata.json() as { data: { fields: unknown[] } };
+    expect(metadataBody.data.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "source", required: true, serverSupplied: true })
+    ]));
+    const page = await app.request("/web-forms/server/lead-intake");
+    expect(page.status).toBe(200);
+    expect(await page.text()).not.toContain('name="source"');
+
+    const jsonInjection = await app.request("/api/web-form/Server%20Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Injected JSON Lead", source: "client" } })
+    });
+    expect(jsonInjection.status).toBe(400);
+
+    for (const path of ["/web-forms/server/lead-intake", "/web-forms/Server%20Lead%20Intake"]) {
+      const htmlInjection = await app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ title: `Injected ${path}`, source: "client" })
+      });
+      expect(htmlInjection.status).toBe(400);
+    }
+
+    const trustedJsonRequest = new Request("http://localhost/api/web-form/Server%20Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Trusted JSON Lead" } })
+    });
+    trustedRequests.set(trustedJsonRequest, { source: "server-json" });
+    expect((await app.fetch(trustedJsonRequest)).status).toBe(201);
+
+    const trustedHtmlRequest = new Request("http://localhost/web-forms/server/lead-intake", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ title: "Trusted HTML Lead" })
+    });
+    trustedRequests.set(trustedHtmlRequest, { source: "server-html" });
+    expect((await app.fetch(trustedHtmlRequest)).status).toBe(201);
+
+    await expect(store.get("default", "Lead", "Trusted JSON Lead")).resolves.toMatchObject({
+      data: { source: "server-json" }
+    });
+    await expect(store.get("default", "Lead", "Trusted HTML Lead")).resolves.toMatchObject({
+      data: { source: "server-html" }
+    });
   });
 
   it("hides unpublished Web Forms from public metadata, listing, and HTML submission routes", async () => {

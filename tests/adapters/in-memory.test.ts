@@ -5,9 +5,17 @@ import {
   InMemoryDataPatchLog,
   InMemoryEventStore,
   InMemoryJobExecutionLog,
-  InMemoryProjectionStore
+  InMemoryProjectionStore,
+  predicateExpressionFromListFilterExpression
 } from "../../src";
-import type { DocumentData, DocumentSnapshot, JobMessage, NewDomainEvent } from "../../src";
+import type {
+  DocumentData,
+  DocumentSnapshot,
+  JobMessage,
+  ListDocumentsFilter,
+  NewDomainEvent,
+  PredicateExpression
+} from "../../src";
 
 describe("in-memory adapters", () => {
   const stream = documentStream("acme", "Note", "One");
@@ -336,11 +344,11 @@ describe("in-memory adapters", () => {
       projections.list({
         tenantId: "acme",
         doctype: "Note",
-        filters: [
+        predicate: filterPredicate([
           { field: "priority", operator: "ne", value: "Low" },
           { field: "count", operator: "gt", value: 2 },
           { field: "count", operator: "lt", value: 10 }
-        ],
+        ]),
         limit: 1
       })
     ).resolves.toMatchObject({
@@ -376,7 +384,7 @@ describe("in-memory adapters", () => {
       projections.list({
         tenantId: "acme",
         doctype: "Note",
-        filters: [{ field: "count", operator: "lte", value: 2 }]
+        predicate: filterPredicate([{ field: "count", operator: "lte", value: 2 }])
       })
     ).resolves.toMatchObject({
       data: [{ name: "Low Count" }],
@@ -387,7 +395,7 @@ describe("in-memory adapters", () => {
       projections.list({
         tenantId: "acme",
         doctype: "Note",
-        filters: [{ field: "body", operator: "contains", value: "" }]
+        predicate: filterPredicate([{ field: "body", operator: "contains", value: "" }])
       })
     ).resolves.toMatchObject({
       data: [],
@@ -562,3 +570,7 @@ describe("in-memory adapters", () => {
     });
   });
 });
+
+function filterPredicate(filters: readonly ListDocumentsFilter[]): PredicateExpression {
+  return predicateExpressionFromListFilterExpression({ kind: "group", match: "all", filters });
+}

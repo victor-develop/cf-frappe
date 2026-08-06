@@ -16,6 +16,8 @@ describe("document command events", () => {
     expect(
       commandPayload(
         workflowTransitionedPayload({
+          workflow: "lifecycle",
+          stateField: "workflow_state",
           action: "close",
           from: "Open",
           to: "Closed",
@@ -24,6 +26,8 @@ describe("document command events", () => {
       )
     ).toEqual({
       kind: "WorkflowTransitioned",
+      workflow: "lifecycle",
+      stateField: "workflow_state",
       action: "close",
       from: "Open",
       to: "Closed",
@@ -44,17 +48,20 @@ describe("document command events", () => {
       kind: "DomainCommandApplied",
       command: "approve",
       input: { comment: "ok" },
-      patch: { status: "Approved" }
+      patch: { status: "Approved" },
+      transitions: []
     });
   });
 
   it("derives workflow transition event types", () => {
     expect(workflowTransitionEventType({
       doctypeName: "Note",
+      workflow: "lifecycle",
       action: "close"
-    })).toBe("NoteClose");
+    })).toBe("NoteLifecycleClose");
     expect(workflowTransitionEventType({
       doctypeName: "Expense Claim",
+      workflow: "approval",
       action: "approve",
       transitionEventType: "ExpenseApproved"
     })).toBe("ExpenseApproved");
@@ -70,6 +77,8 @@ describe("document command events", () => {
   it("narrows document command events by payload kind when event type names are custom", () => {
     const transitioned = event(
       workflowTransitionedPayload({
+        workflow: "approval",
+        stateField: "workflow_state",
         action: "approve",
         from: "Open",
         to: "Approved",

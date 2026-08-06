@@ -44,8 +44,29 @@ import {
   salesInvoiceItemDocType,
   supportTicketDocType
 } from "../helpers";
+import { afterField, beforeField } from "../predicate-fixtures.js";
 
 describe("DocumentService", () => {
+  it("uses UUID naming when a DocType does not declare a naming strategy", async () => {
+    const AutoNamed = defineDocType({
+      name: "Auto Named",
+      fields: [{ name: "title", type: "text", required: true }],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [AutoNamed] }),
+      store: new InMemoryDocumentStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["auto-name", "auto-event"])
+    });
+
+    await expect(documents.create({
+      actor: owner,
+      doctype: "Auto Named",
+      data: { title: "Generated" }
+    })).resolves.toMatchObject({ name: "doc_auto-name" });
+  });
+
   it("creates a document through defaults, hooks, events, and projection", async () => {
     const { documents, projections, events } = createServices(["e1"]);
     const created = await documents.create({
@@ -326,7 +347,7 @@ describe("DocumentService", () => {
         {
           name: "escalation_reason",
           type: "text",
-          mandatoryDependsOn: { field: "priority", value: "High" }
+          mandatoryDependsOn: afterField("priority", "High")
         }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
@@ -391,7 +412,7 @@ describe("DocumentService", () => {
         {
           name: "approval_note",
           type: "text",
-          readOnlyDependsOn: { field: "status", value: "Approved" }
+          readOnlyDependsOn: afterField("status", "Approved")
         }
       ],
       permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
@@ -534,6 +555,120 @@ describe("DocumentService", () => {
     });
   });
 
+  it("skips occupied series names left by legacy data and advances the counter atomically", async () => {
+    const legacyTicketDocType = defineDocType({
+      name: "Support Ticket",
+      naming: { kind: "provided" },
+      fields: supportTicketDocType.fields,
+      permissions: supportTicketDocType.permissions ?? []
+    });
+    const store = new InMemoryDocumentStore();
+    const legacyDocuments = new DocumentService({
+      registry: createRegistry({ doctypes: [legacyTicketDocType] }),
+      store,
+      clock: fixedClock(now)
+    });
+    for (let index = 1; index <= 12; index += 1) {
+      await legacyDocuments.create({
+        actor: owner,
+        doctype: "Support Ticket",
+        name: `TICK-.${String(index).padStart(4, "0")}`,
+        data: { subject: `Imported ${String(index)}` }
+      });
+    }
+
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [supportTicketDocType] }),
+      store,
+      clock: fixedClock(now)
+    });
+    await expect(documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "Generated" }
+    })).resolves.toMatchObject({ name: "TICK-.0013" });
+    await expect(store.readStream(
+      namingSeriesStream("acme", "Support Ticket", "TICK-.####")
+    )).resolves.toMatchObject([
+      { payload: { kind: "DocumentCreated", data: { current: 13 } } }
+    ]);
+  });
+
+  it("uses one max-attempt budget across exclusions and occupied document names", async () => {
+    const fields = [{ name: "subject", type: "text" as const, required: true }];
+    const permissions = [{ roles: ["User"], actions: ["read", "create"] as const }];
+    const legacy = defineDocType({
+      name: "Bounded Ticket",
+      naming: { kind: "provided" },
+      fields,
+      permissions
+    });
+    const bounded = defineDocType({
+      name: "Bounded Ticket",
+      naming: {
+        kind: "series",
+        pattern: "BUD-.####",
+        exclusions: [{ type: "range", from: 1, to: 1 }],
+        maxAttempts: 3
+      },
+      fields,
+      permissions
+    });
+    const store = new InMemoryDocumentStore();
+    const legacyDocuments = new DocumentService({
+      registry: createRegistry({ doctypes: [legacy] }),
+      store,
+      clock: fixedClock(now)
+    });
+    for (const name of ["BUD-.0002", "BUD-.0003"]) {
+      await legacyDocuments.create({ actor: owner, doctype: "Bounded Ticket", name, data: { subject: name } });
+    }
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [bounded] }),
+      store,
+      clock: fixedClock(now)
+    });
+
+    await expect(documents.create({
+      actor: owner,
+      doctype: "Bounded Ticket",
+      data: { subject: "Budget exhausted" }
+    })).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+    await expect(store.readStream(documentStream("acme", "Bounded Ticket", "BUD-.0004"))).resolves.toHaveLength(0);
+  });
+
+  it("does not retry unrelated document conflicts as naming conflicts", async () => {
+    class UnrelatedConflictStore extends InMemoryDocumentStore {
+      attempts = 0;
+
+      override async commitBatch(
+        _entries: readonly DocumentCommitBatchEntry[],
+        _project: (events: readonly DomainEvent[]) => DocumentCommitBatchProjection
+      ): Promise<DocumentCommit> {
+        this.attempts += 1;
+        throw new FrameworkError("DOCUMENT_CONFLICT", "unrelated unique reservation conflict", { status: 409 });
+      }
+    }
+    const Ticket = defineDocType({
+      ...supportTicketDocType,
+      naming: { kind: "series", pattern: "TICK-.####", maxAttempts: 3 }
+    });
+    const store = new UnrelatedConflictStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Ticket] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["series-event", "document-event"])
+    });
+
+    await expect(documents.create({
+      actor: owner,
+      doctype: "Support Ticket",
+      data: { subject: "No retry" }
+    })).rejects.toThrow("unrelated unique reservation conflict");
+    expect(store.attempts).toBe(1);
+  });
+
   it("commits naming-series allocation atomically with document creation", async () => {
     class FailingCreateStore extends InMemoryDocumentStore {
       override async commitBatch(
@@ -576,11 +711,13 @@ describe("DocumentService", () => {
         { name: "display_name", type: "text" },
         { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
       ],
-      workflow: {
+      workflows: [{
+        name: "lifecycle",
+        stateField: "workflow_state",
         initialState: "Open",
         states: ["Open", "Closed"],
         transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
-      },
+      }],
       permissions: [{ roles: ["User"], actions: ["read", "create", "update", "delete", "transition"] }]
     });
     const store = new InMemoryDocumentStore();
@@ -614,7 +751,7 @@ describe("DocumentService", () => {
       name: "ada",
         data: { email: "ada@example.com", display_name: "Ada" }
       });
-    await documents.transition({ actor: owner, doctype: "Contact", name: "ada", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Contact", name: "ada", workflow: "lifecycle", action: "close" });
     await expect(
       documents.create({
         actor: owner,
@@ -2793,6 +2930,7 @@ describe("DocumentService", () => {
       actor: owner,
       doctype: "Note",
       name: "My Note",
+      workflow: "lifecycle",
       action: "close"
     });
 
@@ -2800,6 +2938,49 @@ describe("DocumentService", () => {
       version: 2,
       data: { workflow_state: "Closed" }
     });
+  });
+
+  it("validates workflow transition links before committing any event", async () => {
+    const TicketState = defineDocType({
+      name: "Ticket State",
+      naming: { kind: "provided" },
+      fields: [],
+      permissions: [{ roles: ["User"], actions: ["read", "create"] }]
+    });
+    const LinkedTicket = defineDocType({
+      name: "Linked Ticket",
+      naming: { kind: "provided" },
+      fields: [{ name: "state", type: "link", linkTo: "Ticket State", defaultValue: "Open" }],
+      workflows: [{
+        name: "lifecycle",
+        stateField: "state",
+        initialState: "Open",
+        states: ["Open", "Closed"],
+        transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
+      }],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "transition"] }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [TicketState, LinkedTicket] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["state-open", "ticket-create", "unused-transition"])
+    });
+    await documents.create({ actor: owner, doctype: "Ticket State", name: "Open", data: {} });
+    await documents.create({ actor: owner, doctype: "Linked Ticket", name: "TICKET-1", data: {} });
+
+    await expect(documents.transition({
+      actor: owner,
+      doctype: "Linked Ticket",
+      name: "TICKET-1",
+      workflow: "lifecycle",
+      action: "close"
+    })).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      issues: [expect.objectContaining({ field: "state", code: "link_not_found" })]
+    });
+    await expect(store.readStream(documentStream("acme", "Linked Ticket", "TICKET-1"))).resolves.toHaveLength(1);
   });
 
   it("rejects direct workflow state writes outside workflow transitions", async () => {
@@ -2849,11 +3030,13 @@ describe("DocumentService", () => {
         { name: "title", type: "text", required: true },
         { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
       ],
-      workflow: {
+      workflows: [{
+        name: "lifecycle",
+        stateField: "workflow_state",
         initialState: "Open",
         states: ["Open", "Closed"],
         transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
-      },
+      }],
       permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }],
       commands: [
         {
@@ -2881,14 +3064,173 @@ describe("DocumentService", () => {
         input: {}
       })
     ).rejects.toMatchObject({
-      code: "VALIDATION_FAILED",
-      issues: [expect.objectContaining({ field: "workflow_state", code: "workflow_state_protected" })]
+      code: "WORKFLOW_STATE_PROTECTED",
+      issues: []
+    });
+  });
+
+  it("commits a composite domain command across two workflows as one atomic event", async () => {
+    const doctype = compositeCommandDocType([
+      { workflow: "lifecycle", action: "finish" },
+      { workflow: "review", action: "approve" }
+    ]);
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [doctype] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["release-create", "release-ship"])
+    });
+    await documents.create({ actor: owner, doctype: "Release", data: { title: "Release One" } });
+
+    const shipped = await documents.execute({
+      actor: owner,
+      doctype: "Release",
+      name: "Release One",
+      command: "ship",
+      input: { reason: "ready" }
+    });
+
+    expect(shipped).toMatchObject({
+      version: 2,
+      data: { title: "Release One", lifecycle_state: "Done", review_state: "Approved", shipped: true }
+    });
+    await expect(store.readStream(documentStream("acme", "Release", "Release One"))).resolves.toMatchObject([
+      { sequence: 1, payload: { kind: "DocumentCreated" } },
+      {
+        sequence: 2,
+        payload: {
+          kind: "DomainCommandApplied",
+          command: "ship",
+          patch: { lifecycle_state: "Done", review_state: "Approved", shipped: true },
+          transitions: [
+            { workflow: "lifecycle", stateField: "lifecycle_state", action: "finish", from: "Open", to: "Done" },
+            { workflow: "review", stateField: "review_state", action: "approve", from: "Pending", to: "Approved" }
+          ]
+        }
+      }
+    ]);
+  });
+
+  it("reserves and releases unique values atomically with composite domain commands", async () => {
+    const Ticket = defineDocType({
+      name: "Command Unique Ticket",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "code", type: "text", required: true, unique: true },
+        { name: "lifecycle_state", type: "select", options: ["Open", "Done"], defaultValue: "Open" }
+      ],
+      workflows: [{
+        name: "lifecycle",
+        stateField: "lifecycle_state",
+        initialState: "Open",
+        states: ["Open", "Done"],
+        transitions: [{ action: "finish", from: "Open", to: "Done", roles: ["User"] }]
+      }],
+      permissions: [{ roles: ["User"], actions: ["read", "create", "update", "transition"] }],
+      commands: [{
+        name: "publish",
+        eventType: "TicketPublished",
+        fields: ["code"],
+        buildPlan: ({ input }) => ({
+          patch: { code: input.code ?? "", lifecycle_state: "Done" },
+          transitions: [{ workflow: "lifecycle", action: "finish" }]
+        })
+      }]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Ticket] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds([
+        "alpha-code",
+        "alpha-create",
+        "beta-code",
+        "beta-create",
+        "shared-code",
+        "alpha-release",
+        "alpha-publish"
+      ])
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Command Unique Ticket",
+      data: { title: "Alpha", code: "alpha" }
+    });
+    await documents.create({
+      actor: owner,
+      doctype: "Command Unique Ticket",
+      data: { title: "Beta", code: "beta" }
+    });
+
+    await expect(documents.execute({
+      actor: owner,
+      doctype: "Command Unique Ticket",
+      name: "Alpha",
+      command: "publish",
+      input: { code: "shared" }
+    })).resolves.toMatchObject({ data: { code: "shared", lifecycle_state: "Done" }, version: 2 });
+    await expect(documents.execute({
+      actor: owner,
+      doctype: "Command Unique Ticket",
+      name: "Beta",
+      command: "publish",
+      input: { code: "shared" }
+    })).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: "Unique field 'code' on Command Unique Ticket already uses value 'shared'"
+    });
+
+    await expect(store.readStream(documentStream("acme", "Command Unique Ticket", "Beta"))).resolves.toHaveLength(1);
+    await expect(store.readStream(
+      uniqueValueStream("acme", "Command Unique Ticket", "code", "s:alpha")
+    )).resolves.toMatchObject([
+      { payload: { kind: "DocumentCreated", data: { active: true } } },
+      { payload: { kind: "DocumentUpdated", patch: { active: false } } }
+    ]);
+    await expect(store.readStream(
+      uniqueValueStream("acme", "Command Unique Ticket", "code", "s:shared")
+    )).resolves.toMatchObject([
+      { payload: { kind: "DocumentCreated", data: { documentName: "Alpha", active: true } } }
+    ]);
+  });
+
+  it("commits nothing when a later composite workflow transition fails", async () => {
+    const doctype = compositeCommandDocType([
+      { workflow: "review", action: "approve" },
+      { workflow: "lifecycle", action: "finish" }
+    ]);
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [doctype] }),
+      store,
+      clock: fixedClock(now),
+      ids: deterministicIds(["release-create", "unused-command-event"])
+    });
+    await documents.create({ actor: owner, doctype: "Release", data: { title: "Release One" } });
+
+    await expect(documents.execute({
+      actor: owner,
+      doctype: "Release",
+      name: "Release One",
+      command: "ship",
+      input: {}
+    })).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_CONDITION_FAILED" });
+
+    await expect(store.readStream(documentStream("acme", "Release", "Release One"))).resolves.toHaveLength(1);
+    await expect(store.get("acme", "Release", "Release One")).resolves.toMatchObject({
+      version: 1,
+      data: { lifecycle_state: "Open", review_state: "Pending", shipped: false }
     });
   });
 
   it("registers document command payloads through the domain event extension map", () => {
     const payload = documentCommandPayload({
       kind: "WorkflowTransitioned",
+      workflow: "lifecycle",
+      stateField: "workflow_state",
       action: "close",
       from: "Open",
       to: "Closed",
@@ -2901,10 +3243,10 @@ describe("DocumentService", () => {
   it("rejects illegal workflow transitions", async () => {
     const { documents } = createServices(["e1", "e2"]);
     await documents.create({ actor: owner, doctype: "Note", data: data() });
-    await documents.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "My Note", workflow: "lifecycle", action: "close" });
 
     await expect(
-      documents.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" })
+      documents.transition({ actor: owner, doctype: "Note", name: "My Note", workflow: "lifecycle", action: "close" })
     ).rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
   });
 
@@ -3008,6 +3350,9 @@ describe("DocumentService", () => {
       actor: manager,
       doctype: "Note",
       name: "My Note",
+      tenantId: "acme",
+      newName: "My Note Copy",
+      eventType: "NoteDuplicated",
       data: { title: "My Note Copy", body: "Copied" },
       expectedVersion: 1,
       metadata: { source: "copy-button" }
@@ -3026,7 +3371,7 @@ describe("DocumentService", () => {
     await expect(projections.get("acme", "Note", "My Note Copy")).resolves.toEqual(duplicated);
     await expect(events.readStream("acme:Note:My%20Note%20Copy")).resolves.toMatchObject([
       {
-        type: "NoteCreated",
+        type: "NoteDuplicated",
         payload: { kind: "DocumentCreated", data: { title: "My Note Copy", created_by: manager.id } },
         metadata: { source: "copy-button", duplicatedFrom: "My Note", duplicatedFromVersion: 1 }
       }
@@ -3089,7 +3434,7 @@ describe("DocumentService", () => {
   });
 
   it("amends cancelled documents through the create event path with amendment provenance", async () => {
-    const { documents, events, projections } = createServices(["e1", "e2", "e3", "e4"]);
+    const { documents, events, projections } = createServices(["e1", "e2", "e3", "e4", "e5"]);
     await documents.create({ actor: owner, doctype: "Note", data: data({ body: "Original" }) });
     await documents.submit({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 1 });
     await documents.cancel({ actor: owner, doctype: "Note", name: "My Note", expectedVersion: 2 });
@@ -3098,6 +3443,9 @@ describe("DocumentService", () => {
       actor: owner,
       doctype: "Note",
       name: "My Note",
+      tenantId: "acme",
+      newName: "My Note Rev 1",
+      eventType: "NoteAmended",
       data: { title: "My Note Rev 1", body: "Amended" },
       expectedVersion: 3,
       metadata: { source: "amend-button" }
@@ -3117,11 +3465,18 @@ describe("DocumentService", () => {
     await expect(projections.get("acme", "Note", "My Note Rev 1")).resolves.toEqual(amended);
     await expect(events.readStream("acme:Note:My%20Note%20Rev%201")).resolves.toMatchObject([
       {
-        type: "NoteCreated",
+        type: "NoteAmended",
         payload: { kind: "DocumentCreated", data: { title: "My Note Rev 1", created_by: owner.id } },
         metadata: { source: "amend-button", amendedFrom: "My Note", amendedFromVersion: 3 }
       }
     ]);
+    await expect(documents.amend({
+      actor: owner,
+      doctype: "Note",
+      name: "My Note",
+      data: { title: "My Note Rev 2", body: "Amended again" },
+      expectedVersion: 3
+    })).resolves.toMatchObject({ name: "My Note Rev 2" });
   });
 
   it("enforces source read access and expected versions when duplicating documents", async () => {
@@ -3206,7 +3561,7 @@ describe("DocumentService", () => {
       documents.execute({ actor: owner, doctype: "Note", name: "My Note", command: "rewriteBody", input: { body: "Too late" } })
     ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
     await expect(
-      documents.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" })
+      documents.transition({ actor: owner, doctype: "Note", name: "My Note", workflow: "lifecycle", action: "close" })
     ).rejects.toMatchObject({ code: "DOCUMENT_STATUS_CONFLICT" });
     await expect(
       documents.delete({ actor: manager, doctype: "Note", name: "My Note" })
@@ -3343,6 +3698,7 @@ describe("DocumentService", () => {
     const result = await documents.bulkTransition({
       actor: owner,
       doctype: "Note",
+      workflow: "lifecycle",
       action: "close",
       documents: [
         { name: selected.name, expectedVersion: selected.version },
@@ -3409,6 +3765,53 @@ describe("DocumentService", () => {
     });
   });
 });
+
+function compositeCommandDocType(
+  transitions: readonly { readonly workflow: string; readonly action: string }[]
+): DocTypeDefinition {
+  return defineDocType({
+    name: "Release",
+    naming: { kind: "field", field: "title" },
+    fields: [
+      { name: "title", type: "text", required: true },
+      { name: "lifecycle_state", type: "select", options: ["Open", "Done"], defaultValue: "Open" },
+      { name: "review_state", type: "select", options: ["Pending", "Approved"], defaultValue: "Pending" },
+      { name: "shipped", type: "boolean", defaultValue: false }
+    ],
+    workflows: [
+      {
+        name: "lifecycle",
+        stateField: "lifecycle_state",
+        initialState: "Open",
+        states: ["Open", "Done"],
+        transitions: [{ action: "finish", from: "Open", to: "Done", roles: ["User"] }]
+      },
+      {
+        name: "review",
+        stateField: "review_state",
+        initialState: "Pending",
+        states: ["Pending", "Approved"],
+        transitions: [{
+          action: "approve",
+          from: "Pending",
+          to: "Approved",
+          roles: ["User"],
+          allowWhen: beforeField("lifecycle_state", "Done")
+        }]
+      }
+    ],
+    permissions: [{ roles: ["User"], actions: ["read", "create", "update", "transition"] }],
+    commands: [{
+      name: "ship",
+      eventType: "ReleaseShipped",
+      roles: ["User"],
+      buildPlan: () => ({
+        patch: { lifecycle_state: "Done", review_state: "Approved", shipped: true },
+        transitions
+      })
+    }]
+  });
+}
 
 function documentSharePayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "DocumentShared" }>

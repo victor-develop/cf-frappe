@@ -8,6 +8,7 @@ export interface WebFormFieldDefinition {
   readonly label?: string;
   readonly description?: string;
   readonly required?: boolean;
+  readonly serverSupplied?: boolean;
 }
 
 export interface WebFormDefinition {

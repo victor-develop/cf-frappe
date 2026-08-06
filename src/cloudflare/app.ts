@@ -31,6 +31,7 @@ import {
 } from "../application/document-delivery-outbox-consumer.js";
 import { DocumentDeliveryOutboxService } from "../application/document-delivery-outbox-service.js";
 import { KanbanService } from "../application/kanban-service.js";
+import { NamingService } from "../application/naming-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
@@ -75,7 +76,7 @@ import type {
   CloudflareAccessAccountSyncActorResolverOptions,
   OidcAccountSyncActorResolverOptions
 } from "../adapters/http/index.js";
-import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition } from "../core/types.js";
+import { DEFAULT_TENANT_ID, SYSTEM_MANAGER_ROLE, type Actor, type DocTypeDefinition, type JsonValue } from "../core/types.js";
 import { FrameworkError } from "../core/errors.js";
 import type { JobRegistry, JobRetryPolicy } from "../core/jobs.js";
 import type { DataPatchDefinition } from "../core/data-patch.js";
@@ -130,6 +131,7 @@ export interface CloudFrappeRuntimeServices {
   readonly customFields: CustomFieldService;
   readonly fieldProperties: FieldPropertyService;
   readonly workflows: WorkflowService;
+  readonly naming: NamingService;
   readonly printSettings: PrintSettingsService;
   readonly prints: PrintService;
   readonly queries: QueryService;
@@ -267,6 +269,11 @@ export interface CloudFrappeWorkerOptions<
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
+  readonly webFormServerSuppliedData?: (
+    request: Request,
+    webFormName: string,
+    env: TEnv
+  ) => Readonly<Record<string, JsonValue | undefined>> | undefined | Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
 }
 
 export type CloudFrappeActorResolver<TEnv extends CloudFrappeEnv = CloudFrappeEnv> = (
@@ -365,6 +372,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     events,
     validator: new ModelBackedUserPermissionGrantValidator({ registry: options.registry, events })
   });
+  const roles = new RoleService({
+    events,
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+  });
   const customFields = new CustomFieldService({
     registry: options.registry,
     events,
@@ -384,10 +395,20 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     registry: options.registry,
     events,
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
-    preWorkflowDocTypeResolver: preWorkflowDocType
+    preWorkflowDocTypeResolver: preWorkflowDocType,
+    roleResolver: async (actor, tenantId) => (await roles.list(actor, tenantId)).roles
+  });
+  const preNamingDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+    workflows.effectiveDocType(base.name, context.tenantId);
+  const naming = new NamingService({
+    registry: options.registry,
+    events,
+    store: new D1DocumentStore(env.DB),
+    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
+    preNamingDocTypeResolver: preNamingDocType
   });
   const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
-    workflows.effectiveDocType(base.name, context.tenantId);
+    naming.effectiveDocType(base.name, context.tenantId);
   const savedFilters = new SavedListFilterService({
     registry: options.registry,
     events,
@@ -446,10 +467,6 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const webViews = new WebViewService({ registry: options.registry, queries: restrictedQueries });
   const websiteThemes = new WebsiteThemeService({ registry: options.registry });
   const websiteSettings = new WebsiteSettingsService({ registry: options.registry, webPages, webForms, webViews, websiteThemes });
-  const roles = new RoleService({
-    events,
-    ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
-  });
   const notificationRules = new NotificationRuleService({
     registry: options.registry,
     events,
@@ -531,6 +548,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     customFields,
     fieldProperties,
     workflows,
+    naming,
     printSettings,
     prints,
     queries: restrictedQueries,
@@ -669,11 +687,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     customFields,
     fieldProperties,
     workflows,
+    naming,
     reports,
     dashboards,
     kanbans,
     calendars,
     webForms,
+    ...(options.webFormServerSuppliedData === undefined
+      ? {}
+      : { webFormServerSuppliedData: (request: Request, webFormName: string) => options.webFormServerSuppliedData!(request, webFormName, env) }),
     webPages,
     webViews,
     websiteSettings,
@@ -714,6 +736,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     customFields,
     fieldProperties,
     workflows,
+    naming,
     reports,
     dashboards,
     kanbans,

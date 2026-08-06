@@ -21,6 +21,7 @@ import {
 import { SYSTEM_MANAGER_ROLE, type FieldDefinition, type FieldPropertyOverrides } from "../../src/core/types.js";
 import type { FieldPropertyOverrideState } from "../../src/core/field-property-overrides.js";
 import { noteDocType } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
@@ -198,9 +199,9 @@ describe("field property policy", () => {
         item.name === "priority"
           ? {
               ...item,
-              mandatoryDependsOn: { field: "title", operator: "contains" as const, value: "urgent" },
-              readOnlyDependsOn: { field: "count", operator: "gt" as const, value: 3 },
-              hiddenDependsOn: { field: "workflow_state", value: "Closed" }
+              mandatoryDependsOn: afterField("title", "urgent", "contains"),
+              readOnlyDependsOn: afterField("count", 3, "gt"),
+              hiddenDependsOn: afterField("workflow_state", "Closed")
             } satisfies FieldDefinition
           : item
       )
@@ -208,14 +209,14 @@ describe("field property policy", () => {
 
     expect(
       normalizeFieldPropertyOverrideExpressions(effective, "priority", {
-        mandatoryDependsOn: { field: "title", value: "raw" },
-        readOnlyDependsOn: { field: "count", value: 1 },
-        hiddenDependsOn: { field: "workflow_state", value: "Open" }
+        mandatoryDependsOn: afterField("title", "raw"),
+        readOnlyDependsOn: afterField("count", 1),
+        hiddenDependsOn: afterField("workflow_state", "Open")
       })
     ).toEqual({
-      mandatoryDependsOn: { field: "title", operator: "contains", value: "urgent" },
-      readOnlyDependsOn: { field: "count", operator: "gt", value: 3 },
-      hiddenDependsOn: { field: "workflow_state", value: "Closed" }
+      mandatoryDependsOn: afterField("title", "urgent", "contains"),
+      readOnlyDependsOn: afterField("count", 3, "gt"),
+      hiddenDependsOn: afterField("workflow_state", "Closed")
     });
     expect(() => normalizeFieldPropertyOverrideExpressions(effective, "missing", { label: "Missing" })).toThrow(
       "Field 'missing' was not normalized on Note"

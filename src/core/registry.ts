@@ -38,8 +38,9 @@ import {
 } from "./website-settings.js";
 import { assertWebsiteThemeDefinition, defineWebsiteTheme, type WebsiteThemeDefinition } from "./website-theme.js";
 import { assertWorkspaceDefinition, defineWorkspace, type WorkspaceDefinition } from "./workspace.js";
-import { defineDocType } from "./schema.js";
+import { defineDocType, validateDocumentData, type DocTypeNormalizationOptions } from "./schema.js";
 import type {
+  AutomationValueExpression,
   DocTypeDefinition,
   FieldDefinition,
 } from "./types.js";
@@ -48,6 +49,7 @@ export { defineDocumentHooks } from "./document-hooks.js";
 export type { AfterCommitContext, DocumentHooks, HookContext, MaybePromise } from "./document-hooks.js";
 
 export interface RegistryOptions {
+  readonly doctypeNormalization?: DocTypeNormalizationOptions;
   readonly apps?: readonly InstalledAppDefinition[];
   readonly doctypes?: readonly DocTypeDefinition[];
   readonly letterheads?: readonly PrintLetterheadDefinition[];
@@ -68,6 +70,7 @@ export interface RegistryOptions {
 }
 
 export class ModelRegistry {
+  private readonly doctypeNormalization: DocTypeNormalizationOptions;
   private readonly apps = new Map<string, InstalledAppDefinition>();
   private readonly doctypes = new Map<string, DocTypeDefinition>();
   private readonly letterheads = new Map<string, PrintLetterheadDefinition>();
@@ -88,6 +91,7 @@ export class ModelRegistry {
   private readonly hooks = new Map<string, readonly DocumentHooks[]>();
 
   constructor(options: RegistryOptions = {}) {
+    this.doctypeNormalization = options.doctypeNormalization ?? {};
     for (const app of resolveAppDependencyOrder(options.apps ?? [])) {
       this.registerApp(app);
     }
@@ -175,7 +179,7 @@ export class ModelRegistry {
   }
 
   private putDocType(doctype: DocTypeDefinition): void {
-    const definition = defineDocType(doctype);
+    const definition = defineDocType(doctype, this.doctypeNormalization);
     if (this.doctypes.has(definition.name)) {
       throw new FrameworkError("DOCTYPE_DUPLICATE", `DocType '${definition.name}' is already registered`, {
         status: 409
@@ -202,6 +206,75 @@ export class ModelRegistry {
           );
         }
       }
+      this.assertAutomationRuleReferencesResolve(doctype);
+    }
+  }
+
+  private assertAutomationRuleReferencesResolve(source: DocTypeDefinition): void {
+    for (const rule of source.automationRules ?? []) {
+      for (const action of rule.actions) {
+        const target = this.doctypes.get(action.target.doctype);
+        if (!target) {
+          throw automationRuleInvalid(
+            source,
+            rule.id,
+            action.id,
+            `targets unregistered DocType '${action.target.doctype}'`
+          );
+        }
+        const workflowStateFields = new Set((target.workflows ?? []).map((workflow) => workflow.stateField));
+        for (const [fieldName, expression] of Object.entries(action.patch)) {
+          const field = target.fields.find((candidate) => candidate.name === fieldName);
+          if (!field) {
+            throw automationRuleInvalid(
+              source,
+              rule.id,
+              action.id,
+              `patch field '${fieldName}' is not defined on DocType '${target.name}'`
+            );
+          }
+          if (field.readOnly === true) {
+            throw automationRuleInvalid(
+              source,
+              rule.id,
+              action.id,
+              `patch field '${fieldName}' is read only on DocType '${target.name}'`
+            );
+          }
+          if (workflowStateFields.has(fieldName)) {
+            throw automationRuleInvalid(
+              source,
+              rule.id,
+              action.id,
+              `patch field '${fieldName}' is controlled by a Workflow on DocType '${target.name}'`
+            );
+          }
+          this.assertAutomationLiteralMatchesField(source, rule.id, action.id, target, fieldName, expression);
+        }
+      }
+    }
+  }
+
+  private assertAutomationLiteralMatchesField(
+    source: DocTypeDefinition,
+    ruleId: string,
+    actionId: string,
+    target: DocTypeDefinition,
+    fieldName: string,
+    expression: AutomationValueExpression
+  ): void {
+    if (expression.kind !== "literal") {
+      return;
+    }
+    const issues = validateDocumentData(target, { [fieldName]: expression.value }, {
+      partial: true,
+      relatedDocType: (doctype) => this.doctypes.get(doctype)
+    });
+    const issue = issues.find((candidate) =>
+      candidate.field === fieldName || candidate.field?.startsWith(`${fieldName}[`)
+    );
+    if (issue) {
+      throw automationRuleInvalid(source, ruleId, actionId, issue.message);
     }
   }
 
@@ -895,6 +968,19 @@ export class ModelRegistry {
 
 export function createRegistry(options: RegistryOptions = {}): ModelRegistry {
   return new ModelRegistry(options);
+}
+
+function automationRuleInvalid(
+  source: DocTypeDefinition,
+  ruleId: string,
+  actionId: string,
+  detail: string
+): FrameworkError {
+  return new FrameworkError(
+    "AUTOMATION_RULE_INVALID",
+    `Automation rule '${ruleId}' action '${actionId}' on ${source.name} ${detail}`,
+    { status: 400 }
+  );
 }
 
 function websiteSettingsDefinitions(

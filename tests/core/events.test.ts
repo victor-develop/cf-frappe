@@ -66,6 +66,55 @@ describe("event folding", () => {
     expect(foldDocument(events)?.data).not.toHaveProperty("legacy");
   });
 
+  it("ignores pre-cutover workflow events and folds current workflow events", () => {
+    const events = [
+      {
+        ...base,
+        sequence: 1,
+        type: "DocumentCreated",
+        payload: {
+          kind: "DocumentCreated",
+          data: { title: "One", workflow_state: "Open" },
+          docstatus: "draft"
+        }
+      },
+      {
+        ...base,
+        id: "evt2",
+        sequence: 2,
+        type: "WorkflowTransitioned",
+        payload: {
+          kind: "WorkflowTransitioned",
+          action: "legacy-close",
+          from: "Open",
+          to: "Legacy Closed",
+          patch: { workflow_state: "Legacy Closed", legacy: true }
+        }
+      },
+      {
+        ...base,
+        id: "evt3",
+        sequence: 3,
+        type: "WorkflowTransitioned",
+        payload: {
+          kind: "WorkflowTransitioned",
+          workflow: "lifecycle",
+          stateField: "workflow_state",
+          action: "close",
+          from: "Open",
+          to: "Closed",
+          patch: { workflow_state: "Closed" }
+        }
+      }
+    ] as unknown as DomainEvent[];
+
+    expect(foldDocument(events)).toMatchObject({
+      version: 3,
+      data: { title: "One", workflow_state: "Closed" }
+    });
+    expect(foldDocument(events)?.data).not.toHaveProperty("legacy");
+  });
+
   it("rejects non-JSON document create data before folding projections", () => {
     const events: DomainEvent[] = [
       {

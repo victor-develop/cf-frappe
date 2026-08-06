@@ -24,13 +24,17 @@ import type { JobHistoryService } from "../../application/job-history-service.js
 import type { JobRetryPort } from "../../application/job-retry-service.js";
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import type { KanbanService } from "../../application/kanban-service.js";
+import type { NamingService } from "../../application/naming-service.js";
 import type { PrintSettingsService } from "../../application/print-settings-service.js";
 import type { PrintService } from "../../application/print-service.js";
 import { QueryService } from "../../application/query-service.js";
 import type { ReportService } from "../../application/report-service.js";
 import type { RoleService } from "../../application/role-service.js";
 import { ensureSavedListFilterApiAvailable } from "../../application/saved-list-filter-policy.js";
-import type { SavedListFilterService } from "../../application/saved-list-filter-service.js";
+import {
+  presentSavedListFilter,
+  type SavedListFilterService
+} from "../../application/saved-list-filter-service.js";
 import type { SavedReportService } from "../../application/saved-report-service.js";
 import type { UserAccountService } from "../../application/user-account-service.js";
 import type { UserNotificationService } from "../../application/user-notification-service.js";
@@ -69,6 +73,7 @@ import { createFileApi } from "./file-api.js";
 import { createFieldPropertyApi } from "./field-property-api.js";
 import { createJobApi } from "./job-api.js";
 import { createKanbanApi } from "./kanban-api.js";
+import { createNamingApi } from "./naming-api.js";
 import { createNotificationApi } from "./notification-api.js";
 import { createNotificationRuleApi } from "./notification-rule-api.js";
 import { createPrintApi } from "./print-api.js";
@@ -90,7 +95,7 @@ import { createSavedReportApi } from "./saved-report-api.js";
 import { createUserAccountApi } from "./user-account-api.js";
 import { createUserPermissionApi } from "./user-permission-api.js";
 import { createUserProfileApi } from "./user-profile-api.js";
-import { createWebFormApi } from "./web-form-api.js";
+import { createWebFormApi, type WebFormServerSuppliedDataResolver } from "./web-form-api.js";
 import { createWebPageApi } from "./web-page-api.js";
 import { createWebViewApi } from "./web-view-api.js";
 import { createWebsiteSettingsApi } from "./website-settings-api.js";
@@ -119,6 +124,7 @@ export interface ResourceApiOptions {
   readonly kanbans?: KanbanService;
   readonly calendars?: CalendarService;
   readonly webForms?: WebFormService;
+  readonly webFormServerSuppliedData?: WebFormServerSuppliedDataResolver;
   readonly webPages?: WebPageService;
   readonly webViews?: WebViewService;
   readonly websiteSettings?: WebsiteSettingsService;
@@ -139,6 +145,7 @@ export interface ResourceApiOptions {
   readonly customFields?: CustomFieldService;
   readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
+  readonly naming?: NamingService;
 }
 
 export function createResourceApi(options: ResourceApiOptions): Hono {
@@ -332,6 +339,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       createWebFormApi({
         webForms: options.webForms,
         ...(options.websiteSettings === undefined ? {} : { websiteSettings: options.websiteSettings }),
+        ...(options.webFormServerSuppliedData === undefined ? {} : { serverSuppliedData: options.webFormServerSuppliedData }),
         actor: resolveActor,
         maxJsonBytes
       })
@@ -513,6 +521,17 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     );
   }
 
+  if (options.naming) {
+    app.route(
+      "/",
+      createNamingApi({
+        naming: options.naming,
+        actor: resolveActor,
+        maxJsonBytes
+      })
+    );
+  }
+
   app.get("/api/resource/:doctype/export.csv", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const url = new URL(c.req.url);
@@ -648,12 +667,13 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: result });
   });
 
-  app.post("/api/resource/:doctype/bulk-transition/:action", async (c) => {
+  app.post("/api/resource/:doctype/workflows/:workflow/bulk-transition/:action", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { maxJsonBytes });
     const result = await options.documents.bulkTransition({
       actor,
       doctype: c.req.param("doctype"),
+      workflow: c.req.param("workflow"),
       action: c.req.param("action"),
       documents: documentSelectionsValue(body.documents),
       metadata: requestMetadata(c.req.raw)
@@ -697,7 +717,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     const savedFilters = options.savedFilters;
     app.get("/api/resource/:doctype/saved-filters", async (c) => {
       const actor = await resolveActor(c.req.raw);
-      const data = await savedFilters.list(actor, c.req.param("doctype"));
+      const data = (await savedFilters.list(actor, c.req.param("doctype"))).map(presentSavedListFilter);
       return c.json({ data });
     });
 
@@ -707,7 +727,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       if (isRecord(body) && body.id !== undefined) {
         throw badRequest("Saved filter id is server-generated");
       }
-      const data = await savedFilters.save({
+      const data = presentSavedListFilter(await savedFilters.save({
         actor,
         doctype: c.req.param("doctype"),
         label: stringValue(body.label) ?? "",
@@ -715,7 +735,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         ...(body.filterExpression === undefined
           ? {}
           : { filterExpression: listFilterExpressionFromValue(body.filterExpression, "Saved filter expression") })
-      });
+      }));
       return c.json({ data }, 201);
     });
 
@@ -976,7 +996,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
     return c.json({ data: snapshot });
   });
 
-  app.post("/api/resource/:doctype/:name/transition/:action", async (c) => {
+  app.post("/api/resource/:doctype/:name/workflows/:workflow/transition/:action", async (c) => {
     const actor = await resolveActor(c.req.raw);
     const body = await readJson(c.req.raw, { allowEmpty: true, maxJsonBytes });
     const expectedVersion = numberValue(body.expectedVersion);
@@ -984,6 +1004,7 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       actor,
       doctype: c.req.param("doctype"),
       name: c.req.param("name"),
+      workflow: c.req.param("workflow"),
       action: c.req.param("action"),
       ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       metadata: requestMetadata(c.req.raw)

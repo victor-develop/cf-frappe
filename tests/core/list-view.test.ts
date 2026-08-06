@@ -5,8 +5,9 @@ import {
   freezeListFilterExpression,
   listFilterControlsForField,
   listFilterOperatorsForField,
-  matchesListFilterExpression,
+  matchesPredicateExpression,
   normalizeListFilterExpression,
+  predicateExpressionFromListFilterExpression,
   resolveListView,
   type DocumentSnapshot,
   type JsonValue,
@@ -169,14 +170,29 @@ describe("list views", () => {
     ).toEqual({
       kind: "group",
       match: "any",
-      filters: [
-        { field: "status", value: "Open" },
+      predicates: [
+        {
+          kind: "compare",
+          left: { kind: "field", scope: "after", field: "status" },
+          operator: "eq",
+          right: { kind: "literal", value: "Open" }
+        },
         {
           kind: "group",
           match: "all",
-          filters: [
-            { field: "count", operator: "gte", value: 2 },
-            { field: "system.version", operator: "gt", value: 1 }
+          predicates: [
+            {
+              kind: "compare",
+              left: { kind: "field", scope: "after", field: "count" },
+              operator: "gte",
+              right: { kind: "literal", value: 2 }
+            },
+            {
+              kind: "compare",
+              left: { kind: "field", scope: "after", field: "system.version" },
+              operator: "gt",
+              right: { kind: "literal", value: 1 }
+            }
           ]
         }
       ]
@@ -272,7 +288,7 @@ describe("list views", () => {
     ];
 
     for (const [label, expression, expected] of cases) {
-      expect(matchesListFilterExpression(snapshot, expression), label).toBe(expected);
+      expect(matchesPredicateExpression(snapshot, predicateExpressionFromListFilterExpression(expression)), label).toBe(expected);
     }
   });
 

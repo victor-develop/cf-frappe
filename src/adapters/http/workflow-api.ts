@@ -1,9 +1,14 @@
 import { Hono } from "hono";
 import type { WorkflowService } from "../../application/workflow-service.js";
 import { badRequest } from "../../core/errors.js";
-import type { JsonValue, WorkflowDefinition, WorkflowTransition } from "../../core/types.js";
+import type {
+  JsonValue,
+  NamedWorkflowDefinition,
+  NamedWorkflowTransition,
+  PredicateExpression
+} from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
-import { readJsonObject, requestMetadata } from "./request.js";
+import { predicateExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
 
 export interface WorkflowApiOptions {
   readonly workflows: WorkflowService;
@@ -21,15 +26,31 @@ export function createWorkflowApi(options: WorkflowApiOptions): Hono {
     return c.json({ data });
   });
 
-  app.put("/api/workflows/:doctype", async (c) => {
+  app.get("/api/workflows/:doctype/:workflow", async (c) => {
+    const actor = await options.actor(c.req.raw);
+    const data = await options.workflows.get(
+      actor,
+      c.req.param("doctype"),
+      c.req.param("workflow"),
+      c.req.query("tenant")
+    );
+    return c.json({ data });
+  });
+
+  app.put("/api/workflows/:doctype/:workflow", async (c) => {
     const actor = await options.actor(c.req.raw);
     const tenantId = c.req.query("tenant");
     options.workflows.authorizeAdministration(actor, tenantId);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
+    const workflow = workflowValue(body.workflow);
+    const workflowName = c.req.param("workflow");
+    if (workflow.name !== workflowName) {
+      throw badRequest(`workflow.name must match route workflow '${workflowName}'`);
+    }
     const data = await options.workflows.save({
       actor,
       doctype: c.req.param("doctype"),
-      workflow: workflowValue(body.workflow),
+      workflow,
       ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
       ...(tenantId === undefined ? {} : { tenantId }),
       metadata: requestMetadata(c.req.raw)
@@ -37,7 +58,7 @@ export function createWorkflowApi(options: WorkflowApiOptions): Hono {
     return c.json({ data });
   });
 
-  app.delete("/api/workflows/:doctype", async (c) => {
+  app.delete("/api/workflows/:doctype/:workflow", async (c) => {
     const actor = await options.actor(c.req.raw);
     const tenantId = c.req.query("tenant");
     options.workflows.authorizeAdministration(actor, tenantId);
@@ -45,6 +66,7 @@ export function createWorkflowApi(options: WorkflowApiOptions): Hono {
     const data = await options.workflows.clear({
       actor,
       doctype: c.req.param("doctype"),
+      workflowName: c.req.param("workflow"),
       ...(body.expectedVersion === undefined ? {} : { expectedVersion: integerValue(body.expectedVersion, "expectedVersion") }),
       ...(tenantId === undefined ? {} : { tenantId }),
       metadata: requestMetadata(c.req.raw)
@@ -55,26 +77,28 @@ export function createWorkflowApi(options: WorkflowApiOptions): Hono {
   return app;
 }
 
-function workflowValue(value: JsonValue | undefined): WorkflowDefinition {
+function workflowValue(value: JsonValue | undefined): NamedWorkflowDefinition {
   if (!isRecord(value)) {
     throw badRequest("workflow must be an object");
   }
   return {
-    ...optionalString(value.stateField, "workflow.stateField", "stateField"),
+    name: requiredString(value.name, "workflow.name"),
+    ...optionalString(value.label, "workflow.label", "label"),
+    stateField: requiredString(value.stateField, "workflow.stateField"),
     initialState: requiredString(value.initialState, "workflow.initialState"),
     states: stringArray(value.states, "workflow.states"),
     transitions: transitionArray(value.transitions)
   };
 }
 
-function transitionArray(value: JsonValue | undefined): readonly WorkflowTransition[] {
+function transitionArray(value: JsonValue | undefined): readonly NamedWorkflowTransition[] {
   if (!Array.isArray(value)) {
     throw badRequest("workflow.transitions must be an array");
   }
   return value.map((item, index) => transitionValue(item, `workflow.transitions[${index}]`));
 }
 
-function transitionValue(value: JsonValue | undefined, field: string): WorkflowTransition {
+function transitionValue(value: JsonValue | undefined, field: string): NamedWorkflowTransition {
   if (!isRecord(value)) {
     throw badRequest(`${field} must be an object`);
   }
@@ -83,8 +107,20 @@ function transitionValue(value: JsonValue | undefined, field: string): WorkflowT
     from: requiredString(value.from, `${field}.from`),
     to: requiredString(value.to, `${field}.to`),
     ...optionalStringArray(value.roles, `${field}.roles`, "roles"),
+    ...optionalPredicate(value.allowWhen, `${field}.allowWhen`, "allowWhen"),
     ...optionalString(value.eventType, `${field}.eventType`, "eventType")
   };
+}
+
+function optionalPredicate<TKey extends string>(
+  value: JsonValue | undefined,
+  field: string,
+  key: TKey
+): { readonly [K in TKey]?: PredicateExpression } {
+  if (value === undefined) {
+    return {};
+  }
+  return { [key]: predicateExpressionFromValue(value, field) } as { readonly [K in TKey]: PredicateExpression };
 }
 
 function requiredString(value: JsonValue | undefined, field: string): string {

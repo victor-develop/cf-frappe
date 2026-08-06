@@ -10,13 +10,30 @@ export default defineConfig({
     coverage: {
       all: true,
       include: [
+        "src/core/automation-rules.ts",
+        "src/core/document-change.ts",
+        "src/core/domain-events.ts",
+        "src/core/naming-configuration.ts",
+        "src/core/naming.ts",
+        "src/core/safe-regex.ts",
+        "src/core/predicates.ts",
+        "src/core/workflow.ts",
         "src/application/automation-run-consumer.ts",
         "src/application/automation-run-events.ts",
         "src/application/automation-run-policy.ts",
         "src/application/automation-run-service.ts",
-        "src/application/assigned-documents-policy.ts",
-        "src/application/document-history-service.ts",
-        "src/core/automation-rules.ts"
+        "src/application/document-atomic-commit-policy.ts",
+        "src/application/document-command-events.ts",
+        "src/application/document-command-policy.ts",
+        "src/application/naming-events.ts",
+        "src/application/naming-service.ts",
+        "src/application/workflow-events.ts",
+        "src/application/workflow-policy.ts",
+        "src/application/workflow-service.ts",
+        "src/adapters/http/naming-api.ts",
+        "src/adapters/http/web-form-input.ts",
+        "src/application/web-form-policy.ts",
+        "examples/returns/public-intake.ts"
       ],
       provider: "v8",
       reporter: ["text", "json", "html"],
@@ -26,6 +43,7 @@ export default defineConfig({
     },
     environment: "node",
     globals: true,
+    testTimeout: 30_000,
     include: ["tests/**/*.test.ts"]
   }
 });

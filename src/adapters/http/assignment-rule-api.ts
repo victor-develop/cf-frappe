@@ -10,7 +10,7 @@ import type {
   JsonValue
 } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
-import { listFilterExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
+import { predicateExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
 
 export interface AssignmentRuleApiOptions {
   readonly assignmentRules: AssignmentRuleService;
@@ -123,7 +123,7 @@ function ruleValue(name: string, value: JsonValue | undefined): AssignmentRuleDe
     ...optionalBoolean(value.enabled, "rule.enabled", "enabled"),
     events: eventKinds(value.events),
     assignees: assignees(value.assignees),
-    ...(value.condition === undefined ? {} : { condition: listFilterExpressionFromValue(value.condition, "Assignment rule condition") }),
+    ...(value.condition === undefined ? {} : { condition: predicateExpressionFromValue(value.condition, "Assignment rule condition") }),
     ...optionalBoolean(value.excludeActor, "rule.excludeActor", "excludeActor")
   };
 }

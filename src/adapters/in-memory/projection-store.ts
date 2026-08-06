@@ -8,7 +8,7 @@ import type {
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
-import { compareListDocuments, matchesListFilterExpression, matchesListFilters } from "./list-filters.js";
+import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.js";
 
 export class InMemoryProjectionStore implements ProjectionStore {
   private readonly documents = new Map<string, DocumentSnapshot>();
@@ -31,10 +31,7 @@ export class InMemoryProjectionStore implements ProjectionStore {
     const offset = query.offset ?? 0;
     const all = [...this.documents.values()]
       .filter((document) => document.tenantId === query.tenantId && document.doctype === query.doctype)
-      .filter((document) => matchesListFilters(document, query.filters))
-      .filter((document) =>
-        query.filterExpression === undefined ? true : matchesListFilterExpression(document, query.filterExpression)
-      )
+      .filter((document) => matchesDocumentPredicate(document, query.predicate))
       .sort((left, right) => compareListDocuments(left, right, query.orderBy ?? "updatedAt", query.order ?? "desc"));
     return {
       data: all.slice(offset, offset + limit).map(cloneDocumentSnapshot),

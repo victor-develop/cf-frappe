@@ -51,6 +51,7 @@ import {
   UserProfileService,
   WorkflowService,
   type DocTypeDefinition,
+  type Actor,
   type FileStorage,
   type PrintPdfRenderer,
   type PutFileObjectCommand,
@@ -72,6 +73,7 @@ import {
   openNotesReport,
   owner
 } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 class RecordingPrintPdfRenderer implements PrintPdfRenderer {
   readonly calls: RenderPrintPdfCommand[] = [];
@@ -218,6 +220,46 @@ describe("Desk app", () => {
     return { app, documents, queries };
   }
 
+  function makeDocumentFieldPermissionDesk() {
+    const finance: Actor = { id: "finance@example.com", roles: ["Finance"], tenantId: "acme" };
+    const admin: Actor = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
+    const RefundReview = defineDocType({
+      name: "Refund Review",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true, permissions: [{ roles: ["Finance"], actions: ["read"] }] },
+        {
+          name: "status",
+          type: "select",
+          options: ["Pending", "Approved"],
+          permissions: [{ roles: ["Finance"], actions: ["read"] }]
+        },
+        {
+          name: "approved_amount",
+          type: "number",
+          permissions: [{ roles: ["Finance"], actions: ["read", "update"] }]
+        },
+        { name: "confirmed", type: "boolean", permissions: [{ roles: ["Finance"], actions: ["read"] }] }
+      ],
+      commands: [{ name: "setApprovedAmount", eventType: "RefundAmountApproved", fields: ["approved_amount"] }],
+      permissions: [
+        { roles: ["Finance"], actions: ["read", "update"] },
+        { roles: [SYSTEM_MANAGER_ROLE], actions: ["read", "create", "update"] }
+      ]
+    });
+    const registry = createRegistry({ doctypes: [RefundReview] });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({
+      registry,
+      store,
+      ids: deterministicIds(["refund-review-1", "refund-review-2", "refund-review-3"]),
+      clock: fixedClock(now)
+    });
+    const queries = new QueryService({ registry, projections: store });
+    const app = createDeskApp({ registry, documents, queries, actor: () => finance });
+    return { app, admin, documents, queries };
+  }
+
   function makeAccountDesk(actor = owner) {
     const services = createServices(["e1", "e2", "e3", "e4"]);
     const userAccounts = new UserAccountService({
@@ -334,7 +376,8 @@ describe("Desk app", () => {
       registry: services.registry,
       events: services.store,
       ids: deterministicIds(["workflow-1", "workflow-2", "workflow-3"]),
-      clock: fixedClock(now)
+      clock: fixedClock(now),
+      roleResolver: async (roleActor, tenantId) => (await roles.list(roleActor, tenantId)).roles
     });
     const doctypeResolver = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
       workflows.effectiveDocType(base.name, context.tenantId, base);
@@ -811,7 +854,7 @@ describe("Desk app", () => {
       doctype: "Note",
       data: data({ title: "High Closed", priority: "High", count: 5 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "High Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "High Closed", workflow: "lifecycle", action: "close" });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -913,7 +956,7 @@ describe("Desk app", () => {
       doctype: "Note",
       data: data({ title: "Kanban Closed", priority: "High", count: 2 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Kanban Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Kanban Closed", workflow: "lifecycle", action: "close" });
 
     const home = await app.request("/desk");
     expect(home.status).toBe(200);
@@ -3638,8 +3681,8 @@ describe("Desk app", () => {
     expect(source).toContain("userPermissions: Object.freeze");
     expect(source).toContain("documentTopic(tenantId, doctype, name)");
     expect(source).toContain("userTopic(tenantId, userId)");
-    expect(source).toContain("resourcePath(doctype, name) + \"/transition/\"");
-    expect(source).toContain("resourcePath(doctype) + \"/bulk-transition/\"");
+    expect(source).toContain("resourcePath(doctype, name) + \"/workflows/\"");
+    expect(source).toContain("resourcePath(doctype) + \"/workflows/\"");
     expect(source).toContain("new WebSocket(realtimeUrl(topic, options)");
     expect(source).toContain("subscribeDocument");
     expect(source).toContain("DocumentUserNotification");
@@ -3664,7 +3707,7 @@ describe("Desk app", () => {
       doctype: "Note",
       data: data({ title: "Desk Closed High", priority: "High", body: "Closed", count: 3 })
     });
-    await services.documents.transition({ actor: owner, doctype: "Note", name: "Desk Closed High", action: "close" });
+    await services.documents.transition({ actor: owner, doctype: "Note", name: "Desk Closed High", workflow: "lifecycle", action: "close" });
     await services.documents.create({
       actor: owner,
       doctype: "Note",
@@ -4007,10 +4050,10 @@ describe("Desk app", () => {
 
     expect(list.status).toBe(200);
     const html = await list.text();
-    expect(html).toContain('formaction="/desk/Note/bulk-transition/close"');
-    expect(html).toContain("Close selected");
+    expect(html).toContain('formaction="/desk/Note/workflows/lifecycle/bulk-transition/close"');
+    expect(html).toContain("lifecycle: Close selected");
 
-    const transitioned = await app.request("/desk/Note/bulk-transition/close", {
+    const transitioned = await app.request("/desk/Note/workflows/lifecycle/bulk-transition/close", {
       method: "POST",
       body: new URLSearchParams({
         document: "Desk Bulk Transition",
@@ -4463,9 +4506,9 @@ describe("Desk app", () => {
         description: "Visible after quality review.",
         placeholder: "Reviewed by QA",
         type: "boolean",
-        mandatoryDependsOn: JSON.stringify({ field: "priority", value: "High" }),
-        readOnlyDependsOn: JSON.stringify({ field: "priority", value: "Low" }),
-        hiddenDependsOn: JSON.stringify({ field: "priority", operator: "is", value: "not set" }),
+        mandatoryDependsOn: JSON.stringify(afterField("priority", "High")),
+        readOnlyDependsOn: JSON.stringify(afterField("priority", "Low")),
+        hiddenDependsOn: JSON.stringify(afterField("priority", "not set", "is")),
         printHide: "1",
         printHideIfNoValue: "1",
         unique: "1",
@@ -4489,9 +4532,9 @@ describe("Desk app", () => {
             description: "Visible after quality review.",
             placeholder: "Reviewed by QA",
             type: "boolean",
-            mandatoryDependsOn: { field: "priority", value: "High" },
-            readOnlyDependsOn: { field: "priority", value: "Low" },
-            hiddenDependsOn: { field: "priority", operator: "is", value: "not set" },
+            mandatoryDependsOn: afterField("priority", "High"),
+            readOnlyDependsOn: afterField("priority", "Low"),
+            hiddenDependsOn: afterField("priority", "not set", "is"),
             printHide: true,
             printHideIfNoValue: true,
             unique: true,
@@ -4600,39 +4643,46 @@ describe("Desk app", () => {
     expect(emptyHtml).toContain('<select name="stateField">');
     expect(emptyHtml).toContain('<option value="workflow_state" selected>workflow_state</option>');
     expect(emptyHtml).not.toContain('<option value="count">count</option>');
-    expect(emptyHtml).toContain('<input name="initialState" value="">');
-    expect(emptyHtml).toContain('name="transitionAction" value=""');
+    expect(emptyHtml).toContain('<select name="initialState"><option value=""></option><option value="Open" selected>Open</option>');
+    expect(emptyHtml).toContain('name="transitionAction" value="close"');
     expect(emptyHtml).toContain('name="transitionFrom"');
     expect(emptyHtml).toContain('name="transitionTo"');
-    expect(emptyHtml).toContain('name="transitionRoles" type="text" list="workflow-role-suggestions" value=""');
+    expect(emptyHtml).toContain('name="transitionRoles" type="text" list="workflow-role-suggestions" value="User"');
     expect(emptyHtml).toContain('<datalist id="workflow-role-suggestions">');
     expect(emptyHtml).toContain('<option value="Reviewer">Reviewer</option>');
-    expect(emptyHtml).toContain("No workflow override configured.");
+    expect(emptyHtml).toContain("lifecycle");
 
     const created = await app.request("/desk/admin/workflows", {
       method: "POST",
       body: new URLSearchParams({
         doctype: "Note",
+        name: "lifecycle",
+        label: "Lifecycle",
         stateField: "workflow_state",
         initialState: "Open",
         states: "Open\nClosed",
-        transitions: "approve | Open | Closed | User | NoteApproved",
+        transitionAction: "approve",
+        transitionFrom: "Open",
+        transitionTo: "Closed",
+        transitionRoles: "User",
+        transitionEventType: "NoteApproved",
         expectedVersion: "0"
       }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(created.status).toBe(303);
-    expect(created.headers.get("location")).toBe("/desk/admin/workflows?doctype=Note");
-    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({
+    expect(created.headers.get("location")).toBe("/desk/admin/workflows?doctype=Note&workflow=lifecycle");
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject([{
       version: 1,
+      workflowName: "lifecycle",
       workflow: {
         initialState: "Open",
         states: ["Open", "Closed"],
         transitions: [{ action: "approve", from: "Open", to: "Closed", roles: ["User"], eventType: "NoteApproved" }]
       }
-    });
+    }]);
 
-    const current = await app.request("/desk/admin/workflows?doctype=Note");
+    const current = await app.request("/desk/admin/workflows?doctype=Note&workflow=lifecycle");
     expect(current.status).toBe(200);
     const currentHtml = await current.text();
     expect(currentHtml).toContain("approve");
@@ -4640,13 +4690,15 @@ describe("Desk app", () => {
     expect(currentHtml).toContain('<select name="initialState"><option value=""></option><option value="Open" selected>Open</option>');
     expect(currentHtml).toContain('<select name="transitionFrom"><option value=""></option><option value="Open" selected>Open</option>');
     expect(currentHtml).toContain('<select name="transitionTo"><option value=""></option><option value="Open">Open</option><option value="Closed" selected>Closed</option>');
-    expect(currentHtml).toContain('formaction="/desk/admin/workflows/Note/clear"');
+    expect(currentHtml).toContain('formaction="/desk/admin/workflows/Note/lifecycle/clear"');
     expect(currentHtml).toContain('name="expectedVersion" value="1"');
 
     const structured = await app.request("/desk/admin/workflows", {
       method: "POST",
       body: new URLSearchParams([
         ["doctype", "Note"],
+        ["name", "lifecycle"],
+        ["label", "Lifecycle"],
         ["stateField", "workflow_state"],
         ["initialState", "Open"],
         ["states", "Open\nClosed"],
@@ -4660,38 +4712,42 @@ describe("Desk app", () => {
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(structured.status).toBe(303);
-    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject([{
       version: 2,
       workflow: {
         transitions: [{ action: "review", from: "Open", to: "Closed", roles: ["Reviewer"], eventType: "NoteReviewed" }]
       }
-    });
+    }]);
 
     const stale = await app.request("/desk/admin/workflows", {
       method: "POST",
       body: new URLSearchParams({
         doctype: "Note",
+        name: "lifecycle",
+        stateField: "workflow_state",
         initialState: "Open",
         states: "Open\nClosed",
-        transitions: "review | Open | Closed",
+        transitionAction: "review",
+        transitionFrom: "Open",
+        transitionTo: "Closed",
         expectedVersion: "0"
       }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(stale.status).toBe(409);
     const staleHtml = await stale.text();
-    expect(staleHtml).toContain("Expected workflow definitions at version 0, found 2");
+    expect(staleHtml).toContain("Expected workflow &#39;Note.lifecycle&#39; at version 0, found 2");
     expect(staleHtml).toContain('name="transitionAction" value="review"');
     expect(staleHtml).toContain("review");
 
-    const cleared = await app.request("/desk/admin/workflows/Note/clear", {
+    const cleared = await app.request("/desk/admin/workflows/Note/lifecycle/clear", {
       method: "POST",
       body: new URLSearchParams({ expectedVersion: "2" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
     });
     expect(cleared.status).toBe(303);
-    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject({ version: 3 });
-    expect((await services.workflows.list(admin, "Note")).workflow).toBeUndefined();
+    await expect(services.workflows.list(admin, "Note")).resolves.toMatchObject([{ version: 3 }]);
+    expect((await services.workflows.list(admin, "Note"))[0]?.workflow).toBeUndefined();
   });
 
   it("renders and mutates notification rules from the Desk admin surface", async () => {
@@ -4735,7 +4791,7 @@ describe("Desk app", () => {
         events: "DocumentUpdated\nDocumentCommentAdded",
         recipients: "field:created_by",
         channels: "inbox",
-        condition: "{\"field\":\"priority\",\"value\":\"High\"}",
+        condition: JSON.stringify(afterField("priority", "High")),
         subject: "{{ actor }} updated {{ doctype }} {{ name }}",
         enabled: "true",
         excludeActor: "false",
@@ -4756,7 +4812,7 @@ describe("Desk app", () => {
             events: ["DocumentUpdated", "DocumentCommentAdded"],
             recipients: [{ kind: "field", field: "created_by" }],
             channels: ["inbox"],
-            condition: { field: "priority", value: "High" },
+            condition: afterField("priority", "High"),
             excludeActor: false
           }
         }
@@ -4800,7 +4856,7 @@ describe("Desk app", () => {
         ["recipientUser", ""],
         ["channels", "inbox"],
         ["channels", "email"],
-        ["condition", "{\"field\":\"system.docstatus\",\"value\":\"draft\"}"],
+        ["condition", JSON.stringify(afterField("system.docstatus", "draft"))],
         ["subject", "Assignment changed"],
         ["enabled", "false"],
         ["excludeActor", "true"],
@@ -4822,7 +4878,7 @@ describe("Desk app", () => {
             events: ["DocumentAssigned"],
             recipients: [{ kind: "documentOwner" }],
             channels: ["inbox", "email"],
-            condition: { field: "system.docstatus", value: "draft" },
+            condition: afterField("system.docstatus", "draft"),
             subject: "Assignment changed",
             enabled: false,
             excludeActor: true
@@ -4993,7 +5049,7 @@ describe("Desk app", () => {
         events: ["DocumentUpdated"],
         recipients: [{ kind: "user", userId: "manager@example.com" }],
         channels: ["inbox"],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       }
     });
     const app = createDeskApp({
@@ -5022,7 +5078,7 @@ describe("Desk app", () => {
       rules: [
         {
           enabled: true,
-          rule: { name: "Escalations", enabled: true, condition: { field: "priority", value: "High" } }
+          rule: { name: "Escalations", enabled: true, condition: afterField("priority", "High") }
         }
       ]
     });
@@ -5044,7 +5100,7 @@ describe("Desk app", () => {
       rules: [
         {
           enabled: false,
-          rule: { name: "Escalations", enabled: false, condition: { field: "priority", value: "High" } }
+          rule: { name: "Escalations", enabled: false, condition: afterField("priority", "High") }
         }
       ]
     });
@@ -5134,7 +5190,7 @@ describe("Desk app", () => {
         name: "High priority triage",
         events: "DocumentCreated\nDocumentUpdated",
         assignees: "field:created_by\nuser:manager@example.com",
-        condition: "{\"field\":\"priority\",\"value\":\"High\"}",
+        condition: JSON.stringify(afterField("priority", "High")),
         enabled: "true",
         excludeActor: "false",
         expectedVersion: "0"
@@ -5156,7 +5212,7 @@ describe("Desk app", () => {
               { kind: "field", field: "created_by" },
               { kind: "user", userId: "manager@example.com" }
             ],
-            condition: { field: "priority", value: "High" },
+            condition: afterField("priority", "High"),
             excludeActor: false
           }
         }
@@ -5199,7 +5255,7 @@ describe("Desk app", () => {
         ["assigneeKind", "user"],
         ["assigneeField", ""],
         ["assigneeUser", "manager@example.com"],
-        ["condition", "{\"field\":\"system.docstatus\",\"value\":\"draft\"}"],
+        ["condition", JSON.stringify(afterField("system.docstatus", "draft"))],
         ["enabled", "false"],
         ["excludeActor", "true"],
         ["expectedVersion", "1"]
@@ -5219,7 +5275,7 @@ describe("Desk app", () => {
             name: "High priority triage",
             events: ["DocumentSubmitted"],
             assignees: [{ kind: "user", userId: "manager@example.com" }],
-            condition: { field: "system.docstatus", value: "draft" },
+            condition: afterField("system.docstatus", "draft"),
             enabled: false,
             excludeActor: true
           }
@@ -5457,7 +5513,7 @@ describe("Desk app", () => {
         enabled: false,
         events: ["DocumentUpdated"],
         assignees: [{ kind: "user", userId: "manager@example.com" }],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       }
     });
     const app = createDeskApp({
@@ -5486,7 +5542,7 @@ describe("Desk app", () => {
       rules: [
         {
           enabled: true,
-          rule: { name: "Escalations", enabled: true, condition: { field: "priority", value: "High" } }
+          rule: { name: "Escalations", enabled: true, condition: afterField("priority", "High") }
         }
       ]
     });
@@ -5508,7 +5564,7 @@ describe("Desk app", () => {
       rules: [
         {
           enabled: false,
-          rule: { name: "Escalations", enabled: false, condition: { field: "priority", value: "High" } }
+          rule: { name: "Escalations", enabled: false, condition: afterField("priority", "High") }
         }
       ]
     });
@@ -5630,9 +5686,9 @@ describe("Desk app", () => {
         label: "Urgency",
         description: "Pick the operational urgency.",
         placeholder: "Choose a priority",
-        mandatoryDependsOn: JSON.stringify({ field: "title", operator: "is", value: "set" }),
-        readOnlyDependsOn: JSON.stringify({ field: "workflow_state", value: "Closed" }),
-        hiddenDependsOn: JSON.stringify({ field: "title", operator: "is", value: "not set" }),
+        mandatoryDependsOn: JSON.stringify(afterField("title", "set", "is")),
+        readOnlyDependsOn: JSON.stringify(afterField("workflow_state", "Closed")),
+        hiddenDependsOn: JSON.stringify(afterField("title", "not set", "is")),
         printHide: "true",
         printHideIfNoValue: "true",
         noCopy: "true",
@@ -5655,9 +5711,9 @@ describe("Desk app", () => {
               label: "Urgency",
               description: "Pick the operational urgency.",
               placeholder: "Choose a priority",
-              mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
-            readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
-            hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
+              mandatoryDependsOn: afterField("title", "set", "is"),
+            readOnlyDependsOn: afterField("workflow_state", "Closed"),
+            hiddenDependsOn: afterField("title", "not set", "is"),
             printHide: true,
             printHideIfNoValue: true,
             noCopy: true,
@@ -5802,7 +5858,15 @@ describe("Desk app", () => {
     const savedLocation = saved.headers.get("location") ?? "";
     expect(savedLocation).toContain("/desk/Note?saved_filter=");
     await expect(services.savedFilters.list(admin, "Note")).resolves.toMatchObject([
-      { label: "Reviewed notes", filters: [{ field: "reviewed", value: true }] }
+      {
+        label: "Reviewed notes",
+        predicate: {
+          kind: "compare",
+          left: { kind: "field", scope: "after", field: "reviewed" },
+          operator: "eq",
+          right: { kind: "literal", value: true }
+        }
+      }
     ]);
 
     const savedList = await app.request(savedLocation);
@@ -8455,6 +8519,58 @@ describe("Desk app", () => {
     ]);
   });
 
+  it("submits only document-aware writable fields from generated update and command forms", async () => {
+    const { app, admin, documents, queries } = makeDocumentFieldPermissionDesk();
+    await documents.create({
+      actor: admin,
+      doctype: "Refund Review",
+      data: { title: "RR-1", status: "Pending", approved_amount: 0, confirmed: false }
+    });
+
+    const page = await app.request("/desk/Refund%20Review/RR-1");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toMatch(/id="field-title"[^>]* readonly/);
+    expect(html).toMatch(/id="field-status"[^>]* disabled/);
+    expect(html).toMatch(/id="field-confirmed"[^>]* disabled/);
+    expect(html).toMatch(/id="field-approved-amount"[^>]* name="approved_amount"/);
+    expect(html).not.toMatch(/id="field-(?:title|status|confirmed)"[^>]* name=/);
+
+    const update = await app.request("/desk/Refund%20Review/RR-1", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "Forged title",
+        status: "Approved",
+        approved_amount: "139",
+        confirmed: "true",
+        expectedVersion: "1"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(update.status).toBe(303);
+    await expect(queries.getDocument(admin, "Refund Review", "RR-1")).resolves.toMatchObject({
+      version: 2,
+      data: { title: "RR-1", status: "Pending", approved_amount: 139, confirmed: false }
+    });
+
+    const command = await app.request("/desk/Refund%20Review/RR-1/command/setApprovedAmount", {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "Another forged title",
+        status: "Approved",
+        approved_amount: "150",
+        confirmed: "true",
+        expectedVersion: "2"
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" }
+    });
+    expect(command.status).toBe(303);
+    await expect(queries.getDocument(admin, "Refund Review", "RR-1")).resolves.toMatchObject({
+      version: 3,
+      data: { title: "RR-1", status: "Pending", approved_amount: 150, confirmed: false }
+    });
+  });
+
   it("renders and runs metadata-defined workflow transitions from generated forms", async () => {
     const { app, services } = makeDesk();
     await services.documents.create({ actor: owner, doctype: "Note", data: data() });
@@ -8462,10 +8578,10 @@ describe("Desk app", () => {
     const edit = await app.request("/desk/Note/My%20Note");
     expect(edit.status).toBe(200);
     const editHtml = await edit.text();
-    expect(editHtml).toContain('aria-label="Workflow actions"');
-    expect(editHtml).toContain('formaction="/desk/Note/My%20Note/transition/close"');
+    expect(editHtml).toContain('aria-label="lifecycle workflow actions"');
+    expect(editHtml).toContain('formaction="/desk/Note/My%20Note/workflows/lifecycle/transition/close"');
 
-    const transitioned = await app.request("/desk/Note/My%20Note/transition/close", {
+    const transitioned = await app.request("/desk/Note/My%20Note/workflows/lifecycle/transition/close", {
       method: "POST",
       body: new URLSearchParams({ expectedVersion: "1" }),
       headers: { "content-type": "application/x-www-form-urlencoded" }
@@ -8478,12 +8594,12 @@ describe("Desk app", () => {
     });
     await expect(services.events.readStream("acme:Note:My%20Note")).resolves.toMatchObject([
       expect.anything(),
-      { metadata: { method: "POST", url: "http://localhost/desk/Note/My%20Note/transition/close" } }
+      { metadata: { method: "POST", url: "http://localhost/desk/Note/My%20Note/workflows/lifecycle/transition/close" } }
     ]);
 
     const closed = await app.request("/desk/Note/My%20Note");
     expect(closed.status).toBe(200);
-    await expect(closed.text()).resolves.not.toContain("/transition/close");
+    await expect(closed.text()).resolves.not.toContain("/workflows/lifecycle/transition/close");
   });
 
   it("ignores workflow state fields on generated Desk form saves", async () => {

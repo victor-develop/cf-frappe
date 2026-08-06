@@ -2,6 +2,25 @@ import { FrameworkError } from "./errors.js";
 import { cloneJsonValue, isJsonValue } from "./json.js";
 import type { DomainEvent, NewDomainEvent } from "./types.js";
 
+export type CurrentWorkflowTransitionPayload = Extract<
+  DomainEvent["payload"],
+  { readonly kind: "WorkflowTransitioned" }
+>;
+
+export interface DomainEventWorkflowTransition {
+  readonly workflow: string;
+  readonly stateField: string;
+  readonly action: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+export interface DomainEventWorkflowIdentity {
+  readonly workflowName?: string;
+  readonly workflowAction?: string;
+  readonly workflowTransitions?: readonly DomainEventWorkflowTransition[];
+}
+
 export function sequenceEvents(
   expectedVersion: number,
   events: readonly NewDomainEvent[]
@@ -26,6 +45,47 @@ export function domainEventPayloadKind(event: DomainEvent): DomainEvent["payload
   return event.payload.kind;
 }
 
+export function domainEventWorkflowIdentity(event: DomainEvent): DomainEventWorkflowIdentity {
+  if (event.payload.kind === "WorkflowTransitioned") {
+    if (!isCurrentWorkflowTransitionPayload(event.payload)) {
+      return Object.freeze({});
+    }
+    const transition = Object.freeze({
+      workflow: event.payload.workflow,
+      stateField: event.payload.stateField,
+      action: event.payload.action,
+      from: event.payload.from,
+      to: event.payload.to
+    });
+    return Object.freeze({
+      workflowName: event.payload.workflow,
+      workflowAction: event.payload.action,
+      workflowTransitions: Object.freeze([transition])
+    });
+  }
+  if (event.payload.kind !== "DomainCommandApplied" || event.payload.transitions === undefined ||
+    event.payload.transitions.length === 0) {
+    return Object.freeze({});
+  }
+  const transitions = Object.freeze(event.payload.transitions.map((transition) => Object.freeze({ ...transition })));
+  const only = transitions.length === 1 ? transitions[0] : undefined;
+  return Object.freeze({
+    ...(only === undefined ? {} : { workflowName: only.workflow, workflowAction: only.action }),
+    workflowTransitions: transitions
+  });
+}
+
+export function isCurrentWorkflowTransitionPayload(value: unknown): value is CurrentWorkflowTransitionPayload {
+  return isRecord(value) &&
+    value.kind === "WorkflowTransitioned" &&
+    isRequiredString(value.workflow) &&
+    isRequiredString(value.stateField) &&
+    isRequiredString(value.action) &&
+    typeof value.from === "string" &&
+    typeof value.to === "string" &&
+    isJsonObject(value.patch);
+}
+
 export function hasDomainEventPayloadKind<TValue>(value: TValue): value is TValue & {
   readonly payload: { readonly kind: string };
 } {
@@ -41,4 +101,12 @@ function cloneDomainEventObject(value: unknown, field: "payload" | "metadata"): 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRequiredString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && isJsonValue(value);
 }

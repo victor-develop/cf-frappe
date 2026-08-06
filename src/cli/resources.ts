@@ -68,6 +68,7 @@ export interface ResourceRemoteCommand {
   readonly externalId?: string;
   readonly permissions?: readonly string[];
   readonly label?: string;
+  readonly workflow?: string;
   readonly transition?: string;
   readonly command?: string;
   readonly data?: Record<string, unknown>;
@@ -489,11 +490,12 @@ export async function runRemoteResourceCommand(
     );
   }
   if (command.action === "transition") {
+    const workflow = requiredResourceWorkflow(command);
     const transition = requiredResourceTransition(command);
     const data = await requestRemoteResource<DocumentSnapshotResponse>(command, io, {
       body: versionBody(command),
       method: "POST",
-      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "transition"))}/transition/${encodeURIComponent(transition)}`
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/${encodeURIComponent(requiredResourceName(command, "transition"))}/workflows/${encodeURIComponent(workflow)}/transition/${encodeURIComponent(transition)}`
     });
     return formatResourceDetail(command.url, command.doctype, "Transitioned resource", data);
   }
@@ -515,10 +517,11 @@ export async function runRemoteResourceCommand(
     return formatBulkResourceCommand(command.url, bulkResourceTitle(command.action), data);
   }
   if (command.action === "bulk-transition") {
+    const workflow = requiredResourceWorkflow(command);
     const data = await requestRemoteResource<BulkResourceCommandResponse>(command, io, {
       body: bulkBody(command),
       method: "POST",
-      path: `/api/resource/${encodeURIComponent(command.doctype)}/bulk-transition/${encodeURIComponent(requiredResourceTransition(command))}`
+      path: `/api/resource/${encodeURIComponent(command.doctype)}/workflows/${encodeURIComponent(workflow)}/bulk-transition/${encodeURIComponent(requiredResourceTransition(command))}`
     });
     return formatBulkResourceCommand(command.url, "Transitioned resources", data);
   }
@@ -1123,6 +1126,13 @@ function requiredResourceTransition(command: ResourceRemoteCommand): string {
     throw new ResourceRemoteError(`Resource ${command.action} requires --transition`);
   }
   return command.transition;
+}
+
+function requiredResourceWorkflow(command: ResourceRemoteCommand): string {
+  if (command.workflow === undefined) {
+    throw new ResourceRemoteError(`Resource ${command.action} requires --workflow`);
+  }
+  return command.workflow;
 }
 
 function requiredResourceCommand(command: ResourceRemoteCommand): string {

@@ -25,16 +25,18 @@ import {
   planDocumentStatusChangePolicy,
   planDocumentUpdatePolicy,
   planDomainCommandPolicy,
+  planDomainCommandTransitions,
   planWorkflowTransitionPolicy,
   pickCommandFields,
   requireDomainCommandDefinition,
   requireMergeBaseSnapshot,
-  requireWorkflowDefinition,
+  requireNamedWorkflowDefinition,
   workflowTransitionEventCommand,
   type Actor,
   type DocTypeDefinition,
   type DocumentSnapshot
 } from "../../src";
+import { beforeField } from "../predicate-fixtures.js";
 
 const actor: Actor = { id: "user@example.com", roles: ["User"], tenantId: "acme" };
 
@@ -388,6 +390,7 @@ describe("document command policy", () => {
     ).toEqual({
       input: { title: "Updated", ignored: "nope" },
       patch: { title: "Updated" },
+      transitions: [],
       permissionAction: "update",
       allowReadOnlyFields: false,
       bypassFieldPermissions: false
@@ -414,6 +417,7 @@ describe("document command policy", () => {
     ).toEqual({
       input: { title: "Reviewed" },
       patch: { title: "Reviewed @ 2026-06-28T02:00:00.000Z" },
+      transitions: [],
       permissionAction: "metadata",
       allowReadOnlyFields: true,
       bypassFieldPermissions: false
@@ -447,7 +451,8 @@ describe("document command policy", () => {
         kind: "DomainCommandApplied",
         command: "close",
         input: { reason: "done" },
-        patch: { status: "Closed" }
+        patch: { status: "Closed" },
+        transitions: []
       },
       metadata: { requestId: "req-1" }
     });
@@ -506,15 +511,19 @@ describe("document command policy", () => {
 
   it("resolves workflow definitions from DocType metadata", () => {
     const workflow = {
+      name: "lifecycle",
+      stateField: "workflow_state",
       initialState: "Open",
       states: ["Open", "Closed"],
       transitions: [{ action: "close", from: "Open", to: "Closed" }]
     };
-    expect(requireWorkflowDefinition({ name: "Note", workflow })).toBe(workflow);
+    expect(requireNamedWorkflowDefinition({ name: "Note", workflows: [workflow] }, "lifecycle")).toBe(workflow);
   });
 
   it("rejects DocTypes without workflow definitions", () => {
-    expect(() => requireWorkflowDefinition({ name: "Note" })).toThrow("Note has no workflow");
+    expect(() => requireNamedWorkflowDefinition({ name: "Note" }, "lifecycle")).toThrow(
+      "Note has no workflow 'lifecycle'"
+    );
   });
 
   it("plans workflow transition patches and default event types", () => {
@@ -525,16 +534,21 @@ describe("document command policy", () => {
         doctypeName: "Note",
         document: { ...snapshot, data: { ...snapshot.data, workflow_state: "Open" } },
         workflow: {
+          name: "lifecycle",
+          stateField: "workflow_state",
           initialState: "Open",
           states: ["Open", "Closed"],
           transitions: [{ action: "close", from: "Open", to: "Closed" }]
         }
       })
     ).toEqual({
+      workflow: "lifecycle",
+      stateField: "workflow_state",
+      action: "close",
       from: "Open",
       to: "Closed",
       patch: { workflow_state: "Closed" },
-      eventType: "NoteClose"
+      eventType: "NoteLifecycleClose"
     });
   });
 
@@ -546,6 +560,7 @@ describe("document command policy", () => {
         doctypeName: "Expense Claim",
         document: { ...snapshot, data: { ...snapshot.data, status: "Review" } },
         workflow: {
+          name: "approval",
           stateField: "status",
           initialState: "Draft",
           states: ["Draft", "Review", "Approved"],
@@ -555,11 +570,73 @@ describe("document command policy", () => {
         }
       })
     ).toEqual({
+      workflow: "approval",
+      stateField: "status",
+      action: "approve",
       from: "Review",
       to: "Approved",
       patch: { status: "Approved" },
       eventType: "ExpenseApproved"
     });
+  });
+
+  it("validates composite command transitions against a progressive proposed snapshot", () => {
+    const doctype = {
+      name: "Task",
+      workflows: [
+        {
+          name: "lifecycle",
+          stateField: "lifecycle_state",
+          initialState: "Open",
+          states: ["Open", "Done"],
+          transitions: [{ action: "finish", from: "Open", to: "Done" }]
+        },
+        {
+          name: "review",
+          stateField: "review_state",
+          initialState: "Pending",
+          states: ["Pending", "Approved"],
+          transitions: [{
+            action: "approve",
+            from: "Pending",
+            to: "Approved",
+            allowWhen: beforeField("lifecycle_state", "Done")
+          }]
+        }
+      ]
+    } satisfies Pick<DocTypeDefinition, "name" | "workflows">;
+    const document = {
+      ...snapshot,
+      doctype: "Task",
+      data: { title: "Ship", lifecycle_state: "Open", review_state: "Pending" }
+    };
+
+    expect(planDomainCommandTransitions({
+      actor,
+      doctype,
+      document,
+      patch: { title: "Shipped", lifecycle_state: "Done", review_state: "Approved" },
+      transitions: [
+        { workflow: "lifecycle", action: "finish" },
+        { workflow: "review", action: "approve" }
+      ],
+      commandInput: { reason: "ready" }
+    })).toEqual({
+      patch: { title: "Shipped", lifecycle_state: "Done", review_state: "Approved" },
+      transitions: [
+        { workflow: "lifecycle", stateField: "lifecycle_state", action: "finish", from: "Open", to: "Done" },
+        { workflow: "review", stateField: "review_state", action: "approve", from: "Pending", to: "Approved" }
+      ]
+    });
+
+    expect(() => planDomainCommandTransitions({
+      actor,
+      doctype,
+      document,
+      patch: { review_state: "Approved" },
+      transitions: [],
+      commandInput: {}
+    })).toThrow("can only be changed by an explicit 'review' transition intent");
   });
 
   it("rejects workflow transitions that are not allowed from the current state", () => {
@@ -570,13 +647,14 @@ describe("document command policy", () => {
         doctypeName: "Expense Claim",
         document: { ...snapshot, data: { ...snapshot.data, status: "Review" } },
         workflow: {
+          name: "approval",
           stateField: "status",
           initialState: "Draft",
           states: ["Draft", "Review", "Approved"],
           transitions: [{ action: "approve", from: "Review", to: "Approved", roles: ["System Manager"] }]
         }
       })
-    ).toThrow("Transition 'approve' is not allowed from 'Review'");
+    ).toThrow("cannot execute 'approval.approve'");
   });
 
   it("shapes workflow transition event commands from policy plans", () => {
@@ -595,6 +673,8 @@ describe("document command policy", () => {
           doctypeName: "Note",
           document: { ...snapshot, data: { ...snapshot.data, workflow_state: "Open" } },
           workflow: {
+            name: "lifecycle",
+            stateField: "workflow_state",
             initialState: "Open",
             states: ["Open", "Closed"],
             transitions: [{ action: "close", from: "Open", to: "Closed" }]
@@ -605,13 +685,15 @@ describe("document command policy", () => {
     ).toEqual({
       tenantId: "acme",
       stream: "tenant/acme/document/Note/NOTE-1",
-      type: "NoteClose",
+      type: "NoteLifecycleClose",
       doctype: "Note",
       documentName: "NOTE-1",
       actorId: "user@example.com",
       occurredAt: "2026-06-28T02:00:00.000Z",
       payload: {
         kind: "WorkflowTransitioned",
+        workflow: "lifecycle",
+        stateField: "workflow_state",
         action: "close",
         from: "Open",
         to: "Closed",
@@ -632,10 +714,13 @@ describe("document command policy", () => {
         occurredAt: "2026-06-28T02:00:00.000Z",
         action: "close",
         plan: {
+          workflow: "lifecycle",
+          stateField: "workflow_state",
+          action: "close",
           from: "Open",
           to: "Closed",
           patch: { workflow_state: "Closed" },
-          eventType: "NoteClose"
+          eventType: "NoteLifecycleClose"
         }
       }).metadata
     ).toEqual({});

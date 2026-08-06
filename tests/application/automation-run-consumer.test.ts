@@ -34,7 +34,7 @@ describe("AutomationRunConsumer", () => {
       delivered: 1,
       failed: 0,
       dead: 0,
-      outcomes: [{ runId: "evt_source-update:Mirror Status:0", status: "delivered", attempts: 1 }]
+      outcomes: [{ runId: "evt_source-update:mirror-status:mirror", status: "delivered", attempts: 1 }]
     });
     await expect(store.get("acme", "Target", "Target One")).resolves.toMatchObject({
       version: 2,
@@ -46,9 +46,9 @@ describe("AutomationRunConsumer", () => {
     });
     await expect(store.readStream(documentStream("acme", "Target", "Target One"))).resolves.toMatchObject([
       { payload: { kind: "DocumentCreated" } },
-      { metadata: { automationActionId: "evt_source-update:Mirror Status:0" } }
+      { metadata: { automationActionId: "evt_source-update:mirror-status:mirror" } }
     ]);
-    await expect(runs.get("acme", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({ status: "delivered" });
+    await expect(runs.get("acme", "evt_source-update:mirror-status:mirror")).resolves.toMatchObject({ status: "delivered" });
   });
 
   it("recognizes an already-applied action after a worker crash and does not duplicate updates", async () => {
@@ -131,7 +131,7 @@ describe("AutomationRunConsumer", () => {
       failed: 1,
       dead: 0,
       outcomes: [{
-        runId: "evt_source-update:Mirror Missing:0",
+        runId: "evt_source-update:mirror-missing:mirror",
         status: "failed",
         attempts: 1,
         retryAt
@@ -144,7 +144,7 @@ describe("AutomationRunConsumer", () => {
       delivered: 0,
       failed: 0,
       dead: 1,
-      outcomes: [{ runId: "evt_source-update:Mirror Missing:0", status: "dead", attempts: 2 }]
+      outcomes: [{ runId: "evt_source-update:mirror-missing:mirror", status: "dead", attempts: 2 }]
     });
   });
 
@@ -230,7 +230,7 @@ describe("AutomationRunConsumer", () => {
     });
     await expect(store.readStream(documentStream("acme", "Target", "Target One"))).resolves.toMatchObject([
       {},
-      { actorId: "automation:evt_source-update:Mirror Status:0" }
+      { actorId: "automation:evt_source-update:mirror-status:mirror" }
     ]);
   });
 
@@ -431,9 +431,9 @@ const sourceDocType = defineDocType({
     { name: "status", type: "select", options: ["Open", "Done"] }
   ],
   automationRules: [{
+    id: "mirror-status",
     name: "Mirror Status",
-    events: ["DocumentUpdated"],
-    changedFields: ["status"],
+    trigger: { events: ["DocumentUpdated"], changes: [{ field: "status" }] },
     actions: [mirrorAction("Mirror Status")]
   }],
   permissions: [{ roles: ["User"], actions: ["read", "create", "update"] }]
@@ -447,10 +447,11 @@ const missingTargetSourceDocType = defineDocType({
     { name: "status", type: "select", options: ["Open", "Done"] }
   ],
   automationRules: [{
+    id: "mirror-missing",
     name: "Mirror Missing",
-    events: ["DocumentUpdated"],
-    changedFields: ["status"],
+    trigger: { events: ["DocumentUpdated"], changes: [{ field: "status" }] },
     actions: [{
+      id: "mirror",
       kind: "updateDocument",
       target: { doctype: "Target", name: { kind: "literal", value: "Missing Target" } },
       patch: { mirrored_status: { kind: "field", field: "status" } }
@@ -461,6 +462,7 @@ const missingTargetSourceDocType = defineDocType({
 
 function mirrorAction(_ruleName: string) {
   return {
+    id: "mirror",
     kind: "updateDocument" as const,
     target: {
       doctype: "Target",
@@ -483,14 +485,19 @@ function automationRecord(overrides: Partial<AutomationRunRecord> = {}): Automat
     sourceDoctype: "Source",
     sourceDocumentName: "Source One",
     sourceActorId: owner.id,
+    ruleId: "mirror",
     ruleName: "Mirror",
-    actionIndex: 0,
+    actionId: "update",
     action: {
       kind: "updateDocument",
       target: { doctype: "Target", name: "Target One" },
       patch: { mirrored_status: "Done" }
     },
     retry: { maxAttempts: 2, baseDelaySeconds: 60, maxDelaySeconds: 60 },
+    causationId: "evt_source",
+    correlationId: "evt_source",
+    automationDepth: 1,
+    automationPath: ["mirror:update"],
     status: "claimed",
     attempts: 1,
     enqueuedAt: now,

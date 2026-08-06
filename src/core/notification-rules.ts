@@ -1,6 +1,6 @@
 import { FrameworkError } from "./errors.js";
-import { domainEventPayloadKind } from "./domain-events.js";
-import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
+import { domainEventPayloadKind, domainEventWorkflowIdentity, type DomainEventWorkflowIdentity } from "./domain-events.js";
+import { evaluatePredicateExpression, normalizePredicateExpression } from "./predicates.js";
 import type {
   DocTypeName,
   DocTypeDefinition,
@@ -86,7 +86,7 @@ export interface NotificationRuleEvaluationContext {
   readonly rules: readonly NotificationRuleDefinition[];
 }
 
-export interface DocumentEmailNotificationPayload {
+export interface DocumentEmailNotificationPayload extends DomainEventWorkflowIdentity {
   readonly kind: "DocumentEmailNotification";
   readonly eventId: string;
   readonly eventType: string;
@@ -165,7 +165,10 @@ export function normalizeNotificationRule(
   const channels = normalizeChannels(rule.channels);
   const condition = rule.condition === undefined
     ? undefined
-    : normalizeListFilterExpression(doctype, rule.condition, { errorCode: "NOTIFICATION_RULE_INVALID" });
+    : normalizePredicateExpression(doctype, rule.condition, {
+        availableScopes: ["after", "event"],
+        errorCode: "NOTIFICATION_RULE_INVALID"
+      });
   const subject = optionalTrimmedString(rule.subject, "Notification rule subject");
   const enabled = optionalBoolean(rule.enabled, "Notification rule enabled");
   const excludeActor = optionalBoolean(rule.excludeActor, "Notification rule excludeActor");
@@ -191,6 +194,7 @@ export function notificationRuleUserNotificationsFromDomainEvent(
   }
   const notifications: DocumentUserNotificationPayload[] = [];
   const seen = new Set<string>();
+  const workflowIdentity = domainEventWorkflowIdentity(context.event);
   for (const rule of context.rules) {
     if (!ruleMatches(rule, context.event, snapshot, "inbox")) {
       continue;
@@ -215,7 +219,8 @@ export function notificationRuleUserNotificationsFromDomainEvent(
         actorId: context.event.actorId,
         recipientId,
         subject: renderRuleSubject(rule, context.event, snapshot),
-        ruleName: rule.name
+        ruleName: rule.name,
+        ...workflowIdentity
       });
     }
   }
@@ -232,6 +237,7 @@ export function notificationRuleEmailNotificationsFromDomainEvent(
   }
   const notifications: DocumentEmailNotificationPayload[] = [];
   const seen = new Set<string>();
+  const workflowIdentity = domainEventWorkflowIdentity(context.event);
   for (const rule of context.rules) {
     if (!ruleMatches(rule, context.event, snapshot, "email")) {
       continue;
@@ -258,7 +264,8 @@ export function notificationRuleEmailNotificationsFromDomainEvent(
         recipientId,
         subject,
         text: renderRuleEmailText(subject, rule, context.event),
-        ruleName: rule.name
+        ruleName: rule.name,
+        ...workflowIdentity
       });
     }
   }
@@ -429,7 +436,12 @@ function ruleMatches(
   const payloadKind = domainEventPayloadKind(event);
   return (rule.enabled ?? true) !== false &&
     rule.events.includes(payloadKind as NotificationRuleEventKind) &&
-    matchesListFilterExpression(snapshot, rule.condition) &&
+    evaluatePredicateExpression(rule.condition, {
+      before: null,
+      after: snapshot,
+      input: {},
+      event
+    }) &&
     ruleChannels(rule).includes(channel);
 }
 

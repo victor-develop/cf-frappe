@@ -3,11 +3,13 @@ import {
   createRegistry,
   CustomFieldService,
   deterministicIds,
+  defineDocType,
   DocumentService,
   fieldPropertyOverridesStream,
   FieldPropertyService,
   fixedClock,
   InMemoryDocumentStore,
+  NamingService,
   QueryService,
   SYSTEM_MANAGER_ROLE,
   type DocumentData,
@@ -16,6 +18,7 @@ import {
 } from "../../src";
 import type { FieldPropertyEventPayload } from "../../src";
 import { data, noteDocType, now, owner } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const admin = {
   id: "admin@example.com",
@@ -24,6 +27,24 @@ const admin = {
 };
 
 describe("FieldPropertyService", () => {
+  it("covers default runtime options and clear decision boundaries", async () => {
+    const service = new FieldPropertyService({
+      registry: createRegistry({ doctypes: [noteDocType] }),
+      events: new InMemoryDocumentStore()
+    });
+    await expect(service.list(admin, "Note")).resolves.toMatchObject({ version: 0 });
+    await expect(service.clear({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "missing"
+    })).rejects.toMatchObject({ code: "FIELD_PROPERTY_INVALID" });
+    await expect(service.clear({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "priority"
+    })).resolves.toMatchObject({ version: 0 });
+  });
+
   it("registers field property payloads through the domain event extension map", () => {
     const payload = fieldPropertyPayload({
       kind: "FieldPropertyOverrideSaved",
@@ -75,6 +96,74 @@ describe("FieldPropertyService", () => {
     await expect(new AuditService({ events }).search(admin, { kind: "FieldPropertyOverrideSaved" })).resolves.toMatchObject({
       events: [{ payload: { kind: "FieldPropertyOverrideSaved", overrides: { label: "Urgency" } } }]
     });
+  });
+
+  it("blocks saves and clears that would invalidate runtime naming targets", async () => {
+    const ImmutableReceipt = defineDocType({
+      name: "Immutable Receipt",
+      fields: [{ name: "receipt_number", type: "text", readOnly: true, noCopy: true }]
+    });
+    const immutableRegistry = createRegistry({ doctypes: [ImmutableReceipt] });
+    const immutableStore = new InMemoryDocumentStore();
+    const immutableNaming = new NamingService({
+      registry: immutableRegistry,
+      events: immutableStore,
+      store: immutableStore,
+      clock: fixedClock(now)
+    });
+    await immutableNaming.save({
+      actor: admin,
+      doctype: "Immutable Receipt",
+      strategy: { kind: "series", pattern: "IMM-{sequence:4}", targetField: "receipt_number" }
+    });
+    const immutableProperties = new FieldPropertyService({
+      registry: immutableRegistry,
+      events: immutableStore,
+      clock: fixedClock(now)
+    });
+    await expect(immutableProperties.save({
+      actor: admin,
+      doctype: "Immutable Receipt",
+      fieldName: "receipt_number",
+      overrides: { readOnly: false }
+    })).rejects.toMatchObject({ code: "NAMING_INVALID" });
+
+    const OverrideReceipt = defineDocType({
+      name: "Override Receipt",
+      fields: [{ name: "receipt_number", type: "text", readOnly: false, noCopy: true }]
+    });
+    const overrideRegistry = createRegistry({ doctypes: [OverrideReceipt] });
+    const overrideStore = new InMemoryDocumentStore();
+    const overrideProperties = new FieldPropertyService({
+      registry: overrideRegistry,
+      events: overrideStore,
+      clock: fixedClock(now)
+    });
+    await overrideProperties.save({
+      actor: admin,
+      doctype: "Override Receipt",
+      fieldName: "receipt_number",
+      overrides: { readOnly: true }
+    });
+    const overrideNaming = new NamingService({
+      registry: overrideRegistry,
+      events: overrideStore,
+      store: overrideStore,
+      clock: fixedClock(now),
+      preNamingDocTypeResolver: (base, context) =>
+        overrideProperties.effectiveDocType(base.name, context.tenantId)
+    });
+    await overrideNaming.save({
+      actor: admin,
+      doctype: "Override Receipt",
+      strategy: { kind: "series", pattern: "OVR-{sequence:4}", targetField: "receipt_number" }
+    });
+    await expect(overrideProperties.clear({
+      actor: admin,
+      doctype: "Override Receipt",
+      fieldName: "receipt_number",
+      expectedVersion: 1
+    })).rejects.toMatchObject({ code: "NAMING_INVALID" });
   });
 
   it("requires admin authority, tenant ownership, expected versions, and valid field metadata", async () => {
@@ -176,19 +265,15 @@ describe("FieldPropertyService", () => {
       doctype: "Note",
       fieldName: "body",
       overrides: {
-        mandatoryDependsOn: { field: "title", operator: "eq", value: "Required" },
-        readOnlyDependsOn: { field: "title", operator: "contains", value: "Closed" },
-        hiddenDependsOn: { field: "title", operator: "eq", value: "Hidden" }
+        mandatoryDependsOn: afterField("title", "Required"),
+        readOnlyDependsOn: afterField("title", "Closed", "contains"),
+        hiddenDependsOn: afterField("title", "Hidden")
       }
     });
 
-    expect(saved.fields[0]?.overrides.mandatoryDependsOn).toEqual({ field: "title", value: "Required" });
-    expect(saved.fields[0]?.overrides.readOnlyDependsOn).toEqual({
-      field: "title",
-      operator: "contains",
-      value: "Closed"
-    });
-    expect(saved.fields[0]?.overrides.hiddenDependsOn).toEqual({ field: "title", value: "Hidden" });
+    expect(saved.fields[0]?.overrides.mandatoryDependsOn).toEqual(afterField("title", "Required"));
+    expect(saved.fields[0]?.overrides.readOnlyDependsOn).toEqual(afterField("title", "Closed", "contains"));
+    expect(saved.fields[0]?.overrides.hiddenDependsOn).toEqual(afterField("title", "Hidden"));
   });
 
   it("rejects non-serializable field-property default values before persisting metadata events", async () => {

@@ -6,10 +6,11 @@ import {
   createRegistry,
   defineDocType,
   deterministicIds,
+  documentChangeContext,
   documentStream,
   fixedClock
 } from "../../src";
-import type { DocumentSnapshot, DomainEvent, ListDocumentsQuery } from "../../src";
+import type { DocumentData, DocumentSnapshot, DomainEvent, ListDocumentsQuery } from "../../src";
 import { owner, now } from "../helpers";
 
 const later = "2026-01-01T00:01:00.000Z";
@@ -20,16 +21,20 @@ describe("AutomationRunService", () => {
       ids: deterministicIds(["run-event-1"]),
       retry: { maxAttempts: 2, baseDelaySeconds: 5, maxDelaySeconds: 30 }
     });
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
     const plan = planner.planEnqueueFromDomainEvent({
       event: sourceEvent("evt_source", { status: "Done" }),
-      snapshot: sourceSnapshot({ status: "Done", target: "Target One" }),
+      change: documentChangeContext(before, after, ["status"]),
+      input: { status: "Done" },
+      actor: owner,
       rules: [mirrorRule()]
     });
 
     expect(plan.entries).toHaveLength(1);
-    expect(plan.runIds).toEqual(["evt_source:Mirror Status:0"]);
+    expect(plan.runIds).toEqual(["evt_source:mirror-status:mirror"]);
     expect(plan.entries[0]).toMatchObject({
-      stream: "acme:__AutomationRuns:evt_source%3AMirror%20Status%3A0",
+      stream: "acme:__AutomationRuns:evt_source%3Amirror-status%3Amirror",
       expectedVersion: 0
     });
     const saved = [{
@@ -38,10 +43,89 @@ describe("AutomationRunService", () => {
     }] as readonly DomainEvent[];
     expect(plan.auxiliarySnapshots(saved)).toMatchObject([{
       doctype: "__AutomationRuns",
-      name: "evt_source:Mirror Status:0",
+      name: "evt_source:mirror-status:mirror",
       data: {
+        ruleId: "mirror-status",
+        actionId: "mirror",
+        causationId: "evt_source",
+        correlationId: "evt_source",
+        automationDepth: 1,
+        automationPath: ["mirror-status:mirror"],
         status: "pending",
         retry: { maxAttempts: 2, baseDelaySeconds: 5, maxDelaySeconds: 30 }
+      }
+    }]);
+  });
+
+  it("assigns distinct deterministic streams to delimiter-bearing rule and action ids", () => {
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
+    const plan = new AutomationRunPlanner({
+      ids: deterministicIds(["run-event-1", "run-event-2"])
+    }).planEnqueueFromDomainEvent({
+      event: sourceEvent("evt_collision", { status: "Done" }),
+      change: documentChangeContext(before, after, ["status"]),
+      input: { status: "Done" },
+      actor: owner,
+      rules: [
+        { ...mirrorRule(), id: "a:b", actions: [{ ...mirrorRule().actions[0]!, id: "c" }] },
+        { ...mirrorRule(), id: "a", actions: [{ ...mirrorRule().actions[0]!, id: "b:c" }] }
+      ]
+    });
+
+    expect(plan.runIds).toEqual(["evt_collision:a%3Ab:c", "evt_collision:a:b%3Ac"]);
+    expect(new Set(plan.entries.map((entry) => entry.stream)).size).toBe(2);
+  });
+
+  it("snapshots named workflow identity into durable automation runs", () => {
+    const planner = new AutomationRunPlanner({ ids: deterministicIds(["workflow-run-event"]) });
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
+    const transition = {
+      workflow: "lifecycle",
+      stateField: "status",
+      action: "finish",
+      from: "Open",
+      to: "Done"
+    };
+    const event = {
+      ...sourceEvent("evt_workflow", { status: "Done" }),
+      type: "SourceWorkflowTransitioned",
+      payload: { kind: "WorkflowTransitioned", ...transition, patch: { status: "Done" } }
+    } as DomainEvent;
+    const plan = planner.planEnqueueFromDomainEvent({
+      event,
+      change: documentChangeContext(before, after, ["status"]),
+      input: { workflow: "lifecycle", action: "finish" },
+      actor: owner,
+      rules: [{
+        ...mirrorRule(),
+        trigger: {
+          events: ["WorkflowTransitioned"],
+          workflow: "lifecycle",
+          workflowAction: "finish"
+        }
+      }]
+    });
+
+    expect(plan.entries[0]?.events[0]).toMatchObject({
+      payload: {
+        workflowName: "lifecycle",
+        workflowAction: "finish",
+        workflowTransitions: [transition]
+      },
+      metadata: {
+        workflowName: "lifecycle",
+        workflowAction: "finish",
+        workflowTransitions: [transition]
+      }
+    });
+    const saved = [{ ...plan.entries[0]!.events[0]!, sequence: 1 }] as readonly DomainEvent[];
+    expect(plan.auxiliarySnapshots(saved)).toMatchObject([{
+      data: {
+        workflowName: "lifecycle",
+        workflowAction: "finish",
+        workflowTransitions: [transition]
       }
     }]);
   });
@@ -51,19 +135,69 @@ describe("AutomationRunService", () => {
 
     expect(planner.planEnqueueFromDomainEvent({
       event: sourceEvent("evt_source", { status: "Done" }),
-      snapshot: sourceSnapshot({ status: "Done" }),
+      change: documentChangeContext(null, sourceSnapshot({ status: "Done" }, 1), ["status"]),
+      input: { status: "Done" },
+      actor: owner,
       rules: undefined
     }).entries).toEqual([]);
     expect(planner.planEnqueueFromDomainEvent({
       event: sourceEvent("evt_source", { status: "Done" }),
-      snapshot: null,
+      change: documentChangeContext(sourceSnapshot({ status: "Open" }, 1), null, ["status"]),
+      input: { status: "Done" },
+      actor: owner,
       rules: [mirrorRule()]
     }).entries).toEqual([]);
     expect(planner.planEnqueueFromDomainEvent({
       event: sourceEvent("evt_source", { title: "Only title" }),
-      snapshot: sourceSnapshot({ status: "Open" }),
+      change: documentChangeContext(
+        sourceSnapshot({ status: "Open" }, 1),
+        sourceSnapshot({ status: "Open" }, 2),
+        ["title"]
+      ),
+      input: { title: "Only title" },
+      actor: owner,
       rules: [mirrorRule()]
     }).entries).toEqual([]);
+  });
+
+  it("records depth and repeated-path loops as terminal runs", () => {
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
+    const base = {
+      change: documentChangeContext(before, after, ["status"]),
+      input: { status: "Done" },
+      actor: owner,
+      rules: [mirrorRule()]
+    };
+    const depthPlan = new AutomationRunPlanner({
+      ids: deterministicIds(["depth-enqueued", "depth-suppressed"]),
+      maxDepth: 1
+    }).planEnqueueFromDomainEvent({
+      ...base,
+      event: sourceEvent("evt_depth", { status: "Done" }, { automationDepth: 1 })
+    });
+    const pathPlan = new AutomationRunPlanner({
+      ids: deterministicIds(["path-enqueued", "path-suppressed"]),
+      maxPathRepeats: 1
+    }).planEnqueueFromDomainEvent({
+      ...base,
+      event: sourceEvent("evt_path", { status: "Done" }, { automationPath: ["mirror-status:mirror"] })
+    });
+
+    expect(depthPlan.entries[0]?.events.map((event) => event.payload.kind)).toEqual([
+      "AutomationRunEnqueued",
+      "AutomationRunSuppressed"
+    ]);
+    expect(pathPlan.entries[0]?.events[1]?.payload).toMatchObject({
+      kind: "AutomationRunSuppressed",
+      error: expect.stringContaining("repeat limit")
+    });
+    const saved = depthPlan.entries[0]!.events.map((event, index) => ({ ...event, sequence: index + 1 })) as DomainEvent[];
+    expect(depthPlan.auxiliarySnapshots(saved)).toMatchObject([{
+      docstatus: "cancelled",
+      data: { status: "dead", attempts: 0, error: expect.stringContaining("depth") }
+    }]);
+    expect(() => new AutomationRunPlanner({ maxDepth: 0 })).toThrow("positive integer");
   });
 
   it("enqueues runs atomically with document commits through DocumentService", async () => {
@@ -91,13 +225,13 @@ describe("AutomationRunService", () => {
       expectedVersion: 1
     });
 
-    await expect(store.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({
+    await expect(store.get("acme", "__AutomationRuns", "evt_source-update:mirror-status:mirror")).resolves.toMatchObject({
       doctype: "__AutomationRuns",
-      name: "evt_source-update:Mirror Status:0",
+      name: "evt_source-update:mirror-status:mirror",
       data: { status: "pending", sourceDoctype: "Source", sourceDocumentName: "Source One" }
     });
     await expect(store.readStream(documentStream("acme", "Source", "Source One"))).resolves.toHaveLength(2);
-    await expect(store.readStream(documentStream("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0"))).resolves.toHaveLength(1);
+    await expect(store.readStream(documentStream("acme", "__AutomationRuns", "evt_source-update:mirror-status:mirror"))).resolves.toHaveLength(1);
   });
 
   it("claims pending, failed-due, and expired-lease runs in deterministic order", async () => {
@@ -121,7 +255,7 @@ describe("AutomationRunService", () => {
 
     const [claimed] = await runs.claimPending({ tenantId: "acme", claimId: "claim-1", now, leaseSeconds: 30 });
     expect(claimed).toMatchObject({
-      id: "evt_source-update:Mirror Status:0",
+      id: "evt_source-update:mirror-status:mirror",
       status: "claimed",
       claimId: "claim-1",
       attempts: 1,
@@ -254,7 +388,7 @@ describe("AutomationRunService", () => {
       "automation-enqueue"
     ]);
     await enqueueOneRun(documents);
-    const pendingSnapshot = await store.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0");
+    const pendingSnapshot = await store.get("acme", "__AutomationRuns", "evt_source-update:mirror-status:mirror");
     expect(pendingSnapshot).not.toBeNull();
 
     const liveRuns = new AutomationRunService({
@@ -350,10 +484,14 @@ const sourceDocType = defineDocType({
 
 function mirrorRule() {
   return {
+    id: "mirror-status",
     name: "Mirror Status",
-    events: ["DocumentUpdated"] as const,
-    changedFields: ["status"],
+    trigger: {
+      events: ["DocumentUpdated"] as const,
+      changes: [{ field: "status" }]
+    },
     actions: [{
+      id: "mirror",
       kind: "updateDocument" as const,
       target: {
         doctype: "Target",
@@ -367,7 +505,7 @@ function mirrorRule() {
   };
 }
 
-function sourceEvent(id: string, patch: Record<string, unknown>): DomainEvent {
+function sourceEvent(id: string, patch: Record<string, unknown>, metadata: DocumentData = {}): DomainEvent {
   return {
     id,
     tenantId: "acme",
@@ -379,16 +517,16 @@ function sourceEvent(id: string, patch: Record<string, unknown>): DomainEvent {
     actorId: owner.id,
     occurredAt: now,
     payload: { kind: "DocumentUpdated", patch: patch as DomainEvent["metadata"] },
-    metadata: {}
+    metadata
   } as DomainEvent;
 }
 
-function sourceSnapshot(data: Record<string, unknown>) {
+function sourceSnapshot(data: Record<string, unknown>, version = 2) {
   return {
     tenantId: "acme",
     doctype: "Source",
     name: "Source One",
-    version: 2,
+    version,
     docstatus: "draft" as const,
     data: data as DomainEvent["metadata"],
     createdAt: now,

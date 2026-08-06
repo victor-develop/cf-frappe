@@ -11,6 +11,7 @@ import {
   unsafeHeaderActorResolver
 } from "../../src";
 import { createChildTableServices, createServices, now } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const adminHeaders = {
   "content-type": "application/json",
@@ -37,9 +38,9 @@ describe("custom field api", () => {
           description: "Show review status on task forms.",
           placeholder: "yes/no",
           type: "boolean",
-          mandatoryDependsOn: { field: "priority", value: "High" },
-          readOnlyDependsOn: { field: "priority", value: "Low" },
-          hiddenDependsOn: { field: "priority", operator: "is", value: "not set" },
+          mandatoryDependsOn: afterField("priority", "High"),
+          readOnlyDependsOn: afterField("priority", "Low"),
+          hiddenDependsOn: afterField("priority", "not set", "is"),
           printHide: true,
           printHideIfNoValue: true,
           unique: true,
@@ -63,9 +64,9 @@ describe("custom field api", () => {
               description: "Show review status on task forms.",
               placeholder: "yes/no",
               type: "boolean",
-              mandatoryDependsOn: { field: "priority", value: "High" },
-              readOnlyDependsOn: { field: "priority", value: "Low" },
-              hiddenDependsOn: { field: "priority", operator: "is", value: "not set" },
+              mandatoryDependsOn: afterField("priority", "High"),
+              readOnlyDependsOn: afterField("priority", "Low"),
+              hiddenDependsOn: afterField("priority", "not set", "is"),
               printHide: true,
               printHideIfNoValue: true,
               unique: true,

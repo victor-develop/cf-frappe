@@ -134,6 +134,8 @@ describe("cf-frappe CLI remote resources", () => {
       "Task",
       "--name",
       "TASK-1",
+      "--workflow",
+      "lifecycle",
       "--transition",
       "close",
       "--expected-version",
@@ -145,6 +147,7 @@ describe("cf-frappe CLI remote resources", () => {
       headers: [],
       doctype: "Task",
       name: "TASK-1",
+      workflow: "lifecycle",
       transition: "close",
       expectedVersion: 4
     });
@@ -572,6 +575,8 @@ describe("cf-frappe CLI remote resources", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--transition",
       "close",
       "--document",
@@ -584,6 +589,7 @@ describe("cf-frappe CLI remote resources", () => {
       url: "https://app.example",
       headers: [],
       doctype: "Task",
+      workflow: "lifecycle",
       transition: "close",
       documents: [
         { name: "TASK-1" },
@@ -1219,6 +1225,8 @@ describe("cf-frappe CLI remote resources", () => {
         "Task Type",
         "--name",
         "TASK-1",
+        "--workflow",
+        "lifecycle",
         "--transition",
         "close now"
       ],
@@ -1233,7 +1241,9 @@ describe("cf-frappe CLI remote resources", () => {
     );
 
     expect(transitionExit).toBe(0);
-    expect(transitionCalls[0]?.url).toBe("https://app.example/api/resource/Task%20Type/TASK-1/transition/close%20now");
+    expect(transitionCalls[0]?.url).toBe(
+      "https://app.example/api/resource/Task%20Type/TASK-1/workflows/lifecycle/transition/close%20now"
+    );
     expect(transitionCalls[0]?.body).toBe("{}");
     expect(transitionStdout.text()).toContain("Transitioned resource Task Type at https://app.example");
 
@@ -1360,6 +1370,8 @@ describe("cf-frappe CLI remote resources", () => {
         "https://app.example",
         "--doctype",
         "Task",
+        "--workflow",
+        "lifecycle",
         "--transition",
         "close",
         "--document",
@@ -1383,7 +1395,7 @@ describe("cf-frappe CLI remote resources", () => {
     );
 
     expect(bulkExit).toBe(0);
-    expect(bulkCalls[0]?.url).toBe("https://app.example/api/resource/Task/bulk-transition/close");
+    expect(bulkCalls[0]?.url).toBe("https://app.example/api/resource/Task/workflows/lifecycle/bulk-transition/close");
     expect(bulkCalls[0]?.body).toBe("{\"documents\":[{\"name\":\"TASK-1\"},{\"name\":\"TASK/2\",\"expectedVersion\":7}]}");
     expect(bulkStdout.text()).toContain("Transitioned resources at https://app.example");
     expect(bulkStdout.text()).toContain("Succeeded: 1");

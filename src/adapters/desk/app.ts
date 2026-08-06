@@ -54,6 +54,7 @@ import { ensureJobScheduleServiceAvailable } from "../../application/job-schedul
 import type { JobScheduleService } from "../../application/job-schedule-service.js";
 import { ensureKanbanServiceAvailable } from "../../application/kanban-policy.js";
 import type { KanbanService } from "../../application/kanban-service.js";
+import type { NamingService, NamingPreview } from "../../application/naming-service.js";
 import type { NotificationRuleService } from "../../application/notification-rule-service.js";
 import { ensureNotificationRuleServiceAvailable } from "../../application/notification-rule-policy.js";
 import { ensurePrintPdfRendererAvailable, ensurePrintServiceAvailable } from "../../application/print-policy.js";
@@ -83,6 +84,7 @@ import { ensureWorkflowServiceAvailable } from "../../application/workflow-polic
 import { DOCUMENT_SHARE_PERMISSIONS, documentSharePermissionsForActor } from "../../core/document-shares.js";
 import { FrameworkError, badRequest, conflict } from "../../core/errors.js";
 import { isListFilterOperator } from "../../core/list-view.js";
+import { isJsonValue } from "../../core/json.js";
 import { can } from "../../core/permissions.js";
 import type { ModelRegistry } from "../../core/registry.js";
 import { normalizeRoleName } from "../../core/roles.js";
@@ -101,7 +103,6 @@ import {
   type WorkspaceDefinition,
   type WorkspaceShortcutDefinition
 } from "../../core/workspace.js";
-import { allowedWorkflowTransitions } from "../../core/workflow.js";
 import { MAX_JOB_QUEUE_DELAY_SECONDS, MAX_JOB_QUEUE_IDEMPOTENCY_KEY_LENGTH } from "../../ports/job-queue.js";
 import type { PrintPdfRenderer } from "../../ports/print-pdf-renderer.js";
 import {
@@ -136,9 +137,13 @@ import {
   type NotificationRuleDefinition,
   type NotificationRuleEventKind,
   type NotificationRuleRecipientDefinition,
-  type ResolvedFormView,
-  type WorkflowDefinition,
-  type WorkflowTransition
+  type NamedWorkflowDefinition,
+  type NamedWorkflowTransition,
+  type NamingSeriesExclusion,
+  type NamingSeriesReset,
+  type NamingSeriesStrategy,
+  type PredicateExpression,
+  type ResolvedFormView
 } from "../../core/types.js";
 import { fileContentHeaders } from "../file-content.js";
 import type { ActorResolver } from "../http/actor.js";
@@ -147,6 +152,7 @@ import {
   listFiltersFromUrl,
   listOrderFromUrl,
   parseOptionalInteger,
+  predicateExpressionFromValue,
   readBoundedText
 } from "../http/request.js";
 import { writeCsvDownloadHeaders, writeCsvExportHeaders, writeReportCsvHeaders } from "../http/report-export.js";
@@ -201,6 +207,7 @@ import {
   renderNotFound,
   renderAssignmentRuleAdmin,
   renderNotificationRuleAdmin,
+  renderNamingAdmin,
   renderPrintSettingsAdmin,
   renderReportList,
   renderReportView,
@@ -280,6 +287,25 @@ interface ParsedDeskAssignmentRuleClear {
   readonly expectedVersion?: number;
 }
 
+interface ParsedDeskNamingStrategy {
+  readonly doctype: string;
+  readonly strategy: NamingSeriesStrategy;
+  readonly expectedVersion?: number;
+}
+
+interface ParsedDeskNamingPreview {
+  readonly doctype: string;
+  readonly data: DocumentData;
+  readonly count: number;
+}
+
+interface ParsedDeskNamingCounter {
+  readonly doctype: string;
+  readonly data: DocumentData;
+  readonly current: number;
+  readonly expectedVersion?: number;
+}
+
 interface ParsedDeskCsvImport {
   readonly mode?: DocumentImportMode;
   readonly csv: string;
@@ -303,6 +329,7 @@ export interface DeskAppOptions {
   readonly customFields?: CustomFieldService;
   readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
+  readonly naming?: NamingService;
   readonly userAccounts?: UserAccountService;
   readonly notifications?: UserNotificationService;
   readonly notificationRules?: NotificationRuleService;
@@ -919,8 +946,21 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     const url = new URL(c.req.url);
     const doctypes = await listDeskDoctypes(options, actor);
     const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const selectedWorkflowName = url.searchParams.get("workflow")?.trim() || undefined;
     const state = selectedDoctype ? await workflows.list(actor, selectedDoctype) : undefined;
-    return renderDeskWorkflowPage(options, actor, selectedDoctype, state);
+    return renderDeskWorkflowPage(options, actor, selectedDoctype, state, 200, undefined, selectedWorkflowName);
+  });
+
+  app.get("/desk/admin/naming", async (c) => {
+    const naming = requireNaming(options);
+    const actor = await options.actor(c.req.raw);
+    naming.authorizeAdministration(actor);
+    const url = new URL(c.req.url);
+    const doctypes = await listDeskDoctypes(options, actor);
+    const selectedDoctype = url.searchParams.get("doctype")?.trim() || doctypes[0]?.name || "";
+    const state = selectedDoctype ? await naming.get(actor, selectedDoctype) : undefined;
+    const preview = selectedDoctype ? await optionalNamingPreview(naming, actor, selectedDoctype) : undefined;
+    return renderDeskNamingPage(options, actor, selectedDoctype, state, preview);
   });
 
   app.get("/desk/admin/notification-rules", async (c) => {
@@ -1716,13 +1756,13 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
         metadata: requestMetadata(c.req.raw)
       });
-      return c.redirect(workflowAdminHref(form.doctype), 303);
+      return c.redirect(workflowAdminHref(form.doctype, form.workflow.name), 303);
     } catch (error) {
       return renderDeskWorkflowFailure(options, actor, workflows, form?.doctype ?? "", error, form?.workflow);
     }
   });
 
-  app.post("/desk/admin/workflows/:doctype/clear", async (c) => {
+  app.post("/desk/admin/workflows/:doctype/:workflow/clear", async (c) => {
     const workflows = requireWorkflows(options);
     const actor = await options.actor(c.req.raw);
     workflows.authorizeAdministration(actor);
@@ -1731,12 +1771,87 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       await workflows.clear({
         actor,
         doctype: c.req.param("doctype"),
+        workflowName: c.req.param("workflow"),
         ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
         metadata: requestMetadata(c.req.raw)
       });
-      return c.redirect(workflowAdminHref(c.req.param("doctype")), 303);
+      return c.redirect(workflowAdminHref(c.req.param("doctype"), c.req.param("workflow")), 303);
     } catch (error) {
       return renderDeskWorkflowFailure(options, actor, workflows, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/naming", async (c) => {
+    const naming = requireNaming(options);
+    const actor = await options.actor(c.req.raw);
+    naming.authorizeAdministration(actor);
+    let form: ParsedDeskNamingStrategy | undefined;
+    try {
+      form = await parseDeskNamingStrategy(c.req.raw);
+      await naming.save({
+        actor,
+        doctype: form.doctype,
+        strategy: form.strategy,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(namingAdminHref(form.doctype), 303);
+    } catch (error) {
+      return renderDeskNamingFailure(options, actor, naming, form?.doctype ?? "", error, form?.strategy);
+    }
+  });
+
+  app.post("/desk/admin/naming/:doctype/clear", async (c) => {
+    const naming = requireNaming(options);
+    const actor = await options.actor(c.req.raw);
+    naming.authorizeAdministration(actor);
+    try {
+      const form = await parseDeskNamingClear(c.req.raw);
+      await naming.clear({
+        actor,
+        doctype: c.req.param("doctype"),
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(namingAdminHref(c.req.param("doctype")), 303);
+    } catch (error) {
+      return renderDeskNamingFailure(options, actor, naming, c.req.param("doctype"), error);
+    }
+  });
+
+  app.post("/desk/admin/naming/preview", async (c) => {
+    const naming = requireNaming(options);
+    const actor = await options.actor(c.req.raw);
+    naming.authorizeAdministration(actor);
+    let form: ParsedDeskNamingPreview | undefined;
+    try {
+      form = await parseDeskNamingPreview(c.req.raw);
+      const state = await naming.get(actor, form.doctype);
+      const preview = await naming.preview({ actor, doctype: form.doctype, data: form.data, count: form.count });
+      return renderDeskNamingPage(options, actor, form.doctype, state, preview, 200, undefined, undefined, form.data);
+    } catch (error) {
+      return renderDeskNamingFailure(options, actor, naming, form?.doctype ?? "", error, undefined, form?.data);
+    }
+  });
+
+  app.post("/desk/admin/naming/counter", async (c) => {
+    const naming = requireNaming(options);
+    const actor = await options.actor(c.req.raw);
+    naming.authorizeAdministration(actor);
+    let form: ParsedDeskNamingCounter | undefined;
+    try {
+      form = await parseDeskNamingCounter(c.req.raw);
+      await naming.adjust({
+        actor,
+        doctype: form.doctype,
+        data: form.data,
+        current: form.current,
+        ...(form.expectedVersion === undefined ? {} : { expectedVersion: form.expectedVersion }),
+        metadata: requestMetadata(c.req.raw)
+      });
+      return c.redirect(namingAdminHref(form.doctype), 303);
+    } catch (error) {
+      return renderDeskNamingFailure(options, actor, naming, form?.doctype ?? "", error, undefined, form?.data);
     }
   });
 
@@ -2336,7 +2451,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
-  app.post("/desk/:doctype/bulk-transition/:action", async (c) => {
+  app.post("/desk/:doctype/workflows/:workflow/bulk-transition/:action", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     try {
@@ -2344,6 +2459,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       const result = await options.documents.bulkTransition({
         actor,
         doctype: doctype.name,
+        workflow: c.req.param("workflow"),
         action: c.req.param("action"),
         documents: form.documents,
         metadata: requestMetadata(c.req.raw)
@@ -2696,8 +2812,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/:doctype/:name", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
+    const formView = await options.queries.getEffectiveDocumentFormView(actor, doctype.name, name);
     const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "update");
     try {
       const form = await parseDeskForm(c.req.raw, doctype, formView, tableDefinitions);
@@ -2718,8 +2834,8 @@ export function createDeskApp(options: DeskAppOptions): Hono {
   app.post("/desk/:doctype/:name/command/:command", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = await options.queries.getEffectiveMeta(actor, c.req.param("doctype"));
-    const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
     const name = c.req.param("name");
+    const formView = await options.queries.getEffectiveDocumentFormView(actor, doctype.name, name);
     const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "update");
     try {
       const commandName = c.req.param("command");
@@ -2745,7 +2861,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
     }
   });
 
-  app.post("/desk/:doctype/:name/transition/:action", async (c) => {
+  app.post("/desk/:doctype/:name/workflows/:workflow/transition/:action", async (c) => {
     const actor = await options.actor(c.req.raw);
     const doctype = options.queries.getMeta(actor, c.req.param("doctype"));
     const name = c.req.param("name");
@@ -2755,6 +2871,7 @@ export function createDeskApp(options: DeskAppOptions): Hono {
         actor,
         doctype: doctype.name,
         name,
+        workflow: c.req.param("workflow"),
         action: c.req.param("action"),
         ...(expectedVersion !== undefined ? { expectedVersion } : {}),
         metadata: requestMetadata(c.req.raw)
@@ -2859,7 +2976,7 @@ async function renderDeskListPage(
   };
   const limit = parseOptionalInteger(url.searchParams.get("limit") ?? undefined);
   const offset = parseOptionalInteger(url.searchParams.get("offset") ?? undefined);
-  const { listView, filters: effectiveFilters, filterExpression, result: listResult } =
+  const { listView, filters: effectiveFilters, result: listResult } =
     await options.queries.listDocumentsForView(actor, doctype.name, {
       filters: filterInput.filters,
       ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
@@ -2869,7 +2986,7 @@ async function renderDeskListPage(
       ...(offset !== undefined ? { offset } : {})
     });
   const savedFilters = await options.savedFilters?.list(actor, doctype.name);
-  const bulkActions = listBulkActionsFor(actor, doctype, listResult.data);
+  const bulkActions = await listBulkActionsFor(options, actor, doctype, listResult.data);
   const importModes = deskCsvImportModesFor(actor, doctype);
   const exportHref = `/desk/${encodeURIComponent(doctype.name)}/export.csv${url.search}`;
   const listReturnHref = `/desk/${encodeURIComponent(doctype.name)}${url.search}`;
@@ -2881,7 +2998,7 @@ async function renderDeskListPage(
       doctypes,
       reports,
       body: renderListView(doctype, listView, listResult.data, effectiveFilters, {
-        ...(filterExpression === undefined ? {} : { filterExpression }),
+        ...(filterInput.filterExpression === undefined ? {} : { filterExpression: filterInput.filterExpression }),
         ...(savedFilters ? { savedFilters } : {}),
         ...(savedFilter ? { selectedSavedFilterId: savedFilter.id } : {}),
         exportHref,
@@ -2940,12 +3057,14 @@ async function renderDeskError(
 ): Promise<Response> {
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
+  const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const formView = mode === "create"
     ? await options.queries.getEffectiveCreateFormView(actor, doctype.name)
-    : await options.queries.getEffectiveFormView(actor, doctype.name);
+    : document === undefined || name === undefined
+      ? await options.queries.getEffectiveFormView(actor, doctype.name)
+      : await options.queries.getEffectiveDocumentFormView(actor, doctype.name, name, document.tenantId);
   const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, mode === "create" ? "create" : "read");
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
-  const document = name ? await options.queries.getDocument(actor, doctype.name, name).catch(() => undefined) : undefined;
   const canUpdate = document ? await options.queries.canActOnDocument(actor, doctype, "update", document) : false;
   const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
   return html(
@@ -2963,7 +3082,7 @@ async function renderDeskError(
         canUpdate,
         ...(document ? { domainCommands: await domainCommandActionsFor(options, actor, doctype, document) } : {}),
         ...(document ? { lifecycleActions: lifecycleActionsFor(actor, doctype, document) } : {}),
-        ...(document ? { workflowActions: workflowActionsFor(actor, doctype, document) } : {}),
+        ...(document ? { workflowActions: await workflowActionsFor(options, actor, doctype, document) } : {}),
         ...(document ? { printFormats: listPrintFormats(options, actor, doctype.name) } : {}),
         printPdfEnabled: options.printPdfRenderer !== undefined,
         clientScripts: options.registry.listClientScripts(doctype.name, "form"),
@@ -3021,6 +3140,9 @@ function adminLinksFor(options: DeskAppOptions, actor: Actor): readonly DeskNavL
     ...(options.workflows === undefined
       ? []
       : [{ id: "workflows", label: "Workflows", href: "/desk/admin/workflows" }]),
+    ...(options.naming === undefined
+      ? []
+      : [{ id: "naming", label: "Naming", href: "/desk/admin/naming" }]),
     ...(options.notificationRules === undefined
       ? []
       : [{ id: "notification-rules", label: "Notification Rules", href: "/desk/admin/notification-rules" }]),
@@ -3077,7 +3199,10 @@ function addRegistryRoleSuggestions(suggestions: Set<string>, registry: ModelReg
         addRoleNames(suggestions, rule.roles);
       }
     }
-    addRoleNames(suggestions, doctype.workflow?.transitions.flatMap((transition) => transition.roles ?? []));
+    addRoleNames(
+      suggestions,
+      doctype.workflows?.flatMap((workflow) => workflow.transitions.flatMap((transition) => transition.roles ?? []))
+    );
     for (const command of doctype.commands ?? []) {
       addRoleNames(suggestions, command.roles);
     }
@@ -3377,6 +3502,13 @@ function requireFieldProperties(options: DeskAppOptions): FieldPropertyService {
 function requireWorkflows(options: DeskAppOptions): WorkflowService {
   ensureWorkflowServiceAvailable(options.workflows);
   return options.workflows;
+}
+
+function requireNaming(options: DeskAppOptions): NamingService {
+  if (options.naming === undefined) {
+    throw new FrameworkError("BAD_REQUEST", "Naming administration is not configured", { status: 501 });
+  }
+  return options.naming;
 }
 
 function requireNotificationRules(options: DeskAppOptions): NotificationRuleService {
@@ -4025,7 +4157,8 @@ async function renderDeskWorkflowPage(
   state: Awaited<ReturnType<WorkflowService["list"]>> | undefined,
   status = 200,
   error?: string,
-  draftWorkflow?: WorkflowDefinition
+  selectedWorkflowName?: string,
+  draftWorkflow?: NamedWorkflowDefinition
 ): Promise<Response> {
   const doctypes = await listDeskDoctypes(options, actor);
   const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
@@ -4041,6 +4174,7 @@ async function renderDeskWorkflowPage(
       body: renderWorkflowAdmin({
         doctypes,
         selectedDoctype,
+        ...(selectedWorkflowName === undefined ? {} : { selectedWorkflowName }),
         ...(doctype === undefined ? {} : { doctype }),
         roleSuggestions,
         ...(draftWorkflow === undefined ? {} : { draftWorkflow }),
@@ -4058,7 +4192,7 @@ async function renderDeskWorkflowFailure(
   workflows: WorkflowService,
   selectedDoctype: string,
   error: unknown,
-  draftWorkflow?: WorkflowDefinition
+  draftWorkflow?: NamedWorkflowDefinition
 ): Promise<Response> {
   if (error instanceof FrameworkError && error.status === 403) {
     throw error;
@@ -4080,8 +4214,98 @@ async function renderDeskWorkflowFailure(
     state,
     error instanceof FrameworkError ? error.status : 500,
     message,
+    draftWorkflow?.name,
     draftWorkflow
   );
+}
+
+async function renderDeskNamingPage(
+  options: DeskAppOptions,
+  actor: Actor,
+  selectedDoctype: string,
+  state: Awaited<ReturnType<NamingService["get"]>> | undefined,
+  preview: NamingPreview | undefined,
+  status = 200,
+  error?: string,
+  draftStrategy?: NamingSeriesStrategy,
+  previewData: DocumentData = {}
+): Promise<Response> {
+  const doctypes = await listDeskDoctypes(options, actor);
+  const doctype = selectedDoctype ? doctypes.find((item) => item.name === selectedDoctype) : undefined;
+  const reports = listReports(options, actor);
+  return html(
+    renderDeskLayoutFor(options, {
+      title: "Naming",
+      activeAdmin: "naming",
+      adminLinks: adminLinksFor(options, actor),
+      doctypes,
+      reports,
+      body: renderNamingAdmin({
+        doctypes,
+        selectedDoctype,
+        ...(doctype === undefined ? {} : { doctype }),
+        ...(state === undefined ? {} : { state }),
+        ...(preview === undefined ? {} : { preview }),
+        ...(draftStrategy === undefined ? {} : { draftStrategy }),
+        previewData,
+        ...(error === undefined ? {} : { error })
+      })
+    }),
+    status
+  );
+}
+
+async function renderDeskNamingFailure(
+  options: DeskAppOptions,
+  actor: Actor,
+  naming: NamingService,
+  selectedDoctype: string,
+  error: unknown,
+  draftStrategy?: NamingSeriesStrategy,
+  previewData: DocumentData = {}
+): Promise<Response> {
+  if (error instanceof FrameworkError && error.status === 403) {
+    throw error;
+  }
+  const fallbackDoctype = selectedDoctype || (await listDeskDoctypes(options, actor))[0]?.name || "";
+  let state: Awaited<ReturnType<NamingService["get"]>> | undefined;
+  let preview: NamingPreview | undefined;
+  try {
+    state = fallbackDoctype ? await naming.get(actor, fallbackDoctype) : undefined;
+    preview = fallbackDoctype ? await optionalNamingPreview(naming, actor, fallbackDoctype, previewData) : undefined;
+  } catch (loadError) {
+    if (!(loadError instanceof FrameworkError && loadError.status === 404)) {
+      preview = undefined;
+    }
+  }
+  const message = error instanceof FrameworkError ? error.message : error instanceof Error ? error.message : "Request failed";
+  return renderDeskNamingPage(
+    options,
+    actor,
+    fallbackDoctype,
+    state,
+    preview,
+    error instanceof FrameworkError ? error.status : 500,
+    message,
+    draftStrategy,
+    previewData
+  );
+}
+
+async function optionalNamingPreview(
+  naming: NamingService,
+  actor: Actor,
+  doctype: string,
+  data: DocumentData = {}
+): Promise<NamingPreview | undefined> {
+  try {
+    return await naming.preview({ actor, doctype, data, count: 5 });
+  } catch (error) {
+    if (error instanceof FrameworkError && error.code === "NAMING_INVALID") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 async function renderDeskNotificationRulePage(
@@ -4305,8 +4529,13 @@ function fieldPropertyAdminHref(doctype: string, fieldName: string): string {
   return `/desk/admin/field-properties?doctype=${encodeURIComponent(doctype)}&field=${encodeURIComponent(fieldName)}`;
 }
 
-function workflowAdminHref(doctype: string): string {
-  return `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}`;
+function workflowAdminHref(doctype: string, workflowName?: string): string {
+  const base = `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}`;
+  return workflowName === undefined ? base : `${base}&workflow=${encodeURIComponent(workflowName)}`;
+}
+
+function namingAdminHref(doctype: string): string {
+  return `/desk/admin/naming?doctype=${encodeURIComponent(doctype)}`;
 }
 
 function notificationRuleAdminHref(doctype: string, ruleName?: string): string {
@@ -4329,12 +4558,12 @@ async function renderDeskDocumentPage(
   const doctypes = await listDeskDoctypes(options, actor);
   const reports = listReports(options, actor);
   const printFormats = listPrintFormats(options, actor, doctype.name);
-  const formView = await options.queries.getEffectiveFormView(actor, doctype.name);
   const document = await options.queries.getDocument(actor, doctype.name, name);
+  const formView = await options.queries.getEffectiveDocumentFormView(actor, doctype.name, name, document.tenantId);
   const tableDefinitions = await tableDefinitionsForForm(options, actor, doctype, formView, "read");
   const linkOptions = await linkOptionsForForm(options, actor, doctype, formView, tableDefinitions);
   const lifecycleActions = lifecycleActionsFor(actor, doctype, document);
-  const workflowActions = workflowActionsFor(actor, doctype, document);
+  const workflowActions = await workflowActionsFor(options, actor, doctype, document);
   const timeline = await options.timeline?.getTimeline(actor, doctype.name, document.name, { limit: 25 });
   const assignments = await options.timeline?.getAssignments(actor, doctype.name, document.name);
   const tags = await options.timeline?.getTags(actor, doctype.name, document.name);
@@ -4417,11 +4646,12 @@ function lifecycleActionsFor(
   return [];
 }
 
-function listBulkActionsFor(
+async function listBulkActionsFor(
+  options: DeskAppOptions,
   actor: Actor,
   doctype: DocTypeDefinition,
   documents: readonly DocumentSnapshot[]
-): readonly ListBulkAction[] {
+): Promise<readonly ListBulkAction[]> {
   const base = `/desk/${encodeURIComponent(doctype.name)}`;
   const actions: ListBulkAction[] = [];
   const deleteNames = documents
@@ -4438,61 +4668,69 @@ function listBulkActionsFor(
       names: deleteNames
     });
   }
-  if (!doctype.workflow) {
-    const submitNames = documents
-      .filter((document) => document.docstatus === "draft" && can(actor, doctype, "submit", document))
-      .map((document) => document.name);
-    if (submitNames.length > 0) {
-      actions.push({
-        id: "submit",
-        label: "Submit selected",
-        action: `${base}/bulk-submit`,
-        names: submitNames
-      });
-    }
-    const cancelNames = documents
-      .filter((document) => document.docstatus === "submitted" && can(actor, doctype, "cancel", document))
-      .map((document) => document.name);
-    if (cancelNames.length > 0) {
-      actions.push({
-        id: "cancel",
-        label: "Cancel selected",
-        action: `${base}/bulk-cancel`,
-        names: cancelNames
-      });
-    }
+  const submitNames = documents
+    .filter((document) => document.docstatus === "draft" && can(actor, doctype, "submit", document))
+    .map((document) => document.name);
+  if (submitNames.length > 0) {
+    actions.push({
+      id: "submit",
+      label: "Submit selected",
+      action: `${base}/bulk-submit`,
+      names: submitNames
+    });
   }
-  for (const action of listBulkWorkflowActions(actor, doctype, documents, base)) {
+  const cancelNames = documents
+    .filter((document) => document.docstatus === "submitted" && can(actor, doctype, "cancel", document))
+    .map((document) => document.name);
+  if (cancelNames.length > 0) {
+    actions.push({
+      id: "cancel",
+      label: "Cancel selected",
+      action: `${base}/bulk-cancel`,
+      names: cancelNames
+    });
+  }
+  for (const action of await listBulkWorkflowActions(options, actor, doctype, documents, base)) {
     actions.push(action);
   }
   return actions;
 }
 
-function listBulkWorkflowActions(
+async function listBulkWorkflowActions(
+  options: DeskAppOptions,
   actor: Actor,
   doctype: DocTypeDefinition,
   documents: readonly DocumentSnapshot[],
   base: string
-): readonly ListBulkAction[] {
-  const workflow = doctype.workflow;
-  if (!workflow) {
-    return [];
-  }
-  const actions = new Map<string, string[]>();
+): Promise<readonly ListBulkAction[]> {
+  const actions = new Map<string, {
+    readonly workflow: string;
+    readonly workflowLabel: string;
+    readonly action: string;
+    readonly names: string[];
+  }>();
   for (const document of documents) {
-    if (document.docstatus !== "draft" || !can(actor, doctype, "transition", document)) {
-      continue;
-    }
-    for (const transition of allowedWorkflowTransitions({ actor, workflow, document })) {
-      const names = actions.get(transition.action) ?? [];
-      names.push(document.name);
-      actions.set(transition.action, names);
+    for (const available of await options.queries.listAvailableWorkflowActions(
+      actor,
+      doctype.name,
+      document.name,
+      document.tenantId
+    )) {
+      const key = `${available.workflow}\u0000${available.action}`;
+      const entry = actions.get(key) ?? {
+        workflow: available.workflow,
+        workflowLabel: available.workflowLabel,
+        action: available.action,
+        names: []
+      };
+      entry.names.push(document.name);
+      actions.set(key, entry);
     }
   }
-  return [...actions.entries()].map(([action, names]) => ({
-    id: `transition:${action}`,
-    label: `${capitalizeAction(action)} selected`,
-    action: `${base}/bulk-transition/${encodeURIComponent(action)}`,
+  return [...actions.values()].map(({ workflow, workflowLabel, action, names }) => ({
+    id: `transition:${workflow}:${action}`,
+    label: `${workflowLabel}: ${capitalizeAction(action)} selected`,
+    action: `${base}/workflows/${encodeURIComponent(workflow)}/bulk-transition/${encodeURIComponent(action)}`,
     names
   }));
 }
@@ -4526,21 +4764,18 @@ async function documentSharesForDesk(
   }
 }
 
-function workflowActionsFor(
+async function workflowActionsFor(
+  options: DeskAppOptions,
   actor: Actor,
   doctype: DocTypeDefinition,
   document: DocumentSnapshot
-): readonly FormWorkflowAction[] {
-  const workflow = doctype.workflow;
-  if (!workflow || document.docstatus !== "draft" || !can(actor, doctype, "transition", document)) {
-    return [];
-  }
-  return allowedWorkflowTransitions({ actor, workflow, document })
-    .map((transition) => ({
-      action: transition.action,
-      label: transition.action,
-      to: transition.to
-    }));
+): Promise<readonly FormWorkflowAction[]> {
+  return options.queries.listAvailableWorkflowActions(
+    actor,
+    doctype.name,
+    document.name,
+    document.tenantId
+  );
 }
 
 async function domainCommandActionsFor(
@@ -4773,7 +5008,7 @@ interface ParsedDeskFieldPropertyOverrideClear {
 
 interface ParsedDeskWorkflow {
   readonly doctype: string;
-  readonly workflow: WorkflowDefinition;
+  readonly workflow: NamedWorkflowDefinition;
   readonly expectedVersion?: number;
 }
 
@@ -5607,11 +5842,13 @@ async function parseDeskFieldPropertyOverrideClear(
 async function parseDeskWorkflow(request: Request): Promise<ParsedDeskWorkflow> {
   const form = await readUrlEncodedDeskForm(request);
   const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
-  const stateField = stringSearchParamValue(form, "stateField");
+  const label = stringSearchParamValue(form, "label");
   return {
     doctype: requiredSearchParamValue(form, "doctype", "DocType"),
     workflow: {
-      ...(stateField === undefined ? {} : { stateField }),
+      name: requiredSearchParamValue(form, "name", "Workflow name"),
+      ...(label === undefined ? {} : { label }),
+      stateField: requiredSearchParamValue(form, "stateField", "State field"),
       initialState: requiredSearchParamValue(form, "initialState", "Initial state"),
       states: workflowStatesFormValue(form.get("states")),
       transitions: workflowTransitionsFormValue(form)
@@ -5626,6 +5863,161 @@ async function parseDeskWorkflowClear(request: Request): Promise<ParsedDeskWorkf
   return {
     ...(expectedVersion !== undefined ? { expectedVersion } : {})
   };
+}
+
+async function parseDeskNamingStrategy(request: Request): Promise<ParsedDeskNamingStrategy> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  const targetField = stringSearchParamValue(form, "targetField");
+  const counter = stringSearchParamValue(form, "counter");
+  const padding = optionalSafeIntegerSearchParamValue(form, "padding", "Padding");
+  const start = optionalSafeIntegerSearchParamValue(form, "start", "Start");
+  const step = optionalSafeIntegerSearchParamValue(form, "step", "Step");
+  const maxAttempts = optionalSafeIntegerSearchParamValue(form, "maxAttempts", "Max attempts");
+  const reset = namingResetFormValue(form.get("reset"));
+  const exclusions = namingExclusionsFormValue(form.get("exclusions"));
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    strategy: {
+      kind: "series",
+      pattern: requiredSearchParamValue(form, "pattern", "Pattern"),
+      ...(targetField === undefined ? {} : { targetField }),
+      ...(counter === undefined ? {} : { counter }),
+      ...(padding === undefined ? {} : { padding }),
+      ...(start === undefined ? {} : { start }),
+      ...(step === undefined ? {} : { step }),
+      reset,
+      ...(form.getAll("scopeField").length === 0 ? {} : { scopeFields: form.getAll("scopeField") }),
+      ...(exclusions.length === 0 ? {} : { exclusions }),
+      ...(maxAttempts === undefined ? {} : { maxAttempts })
+    },
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+async function parseDeskNamingClear(request: Request): Promise<{ readonly expectedVersion?: number }> {
+  const form = await readUrlEncodedDeskForm(request);
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return expectedVersion === undefined ? {} : { expectedVersion };
+}
+
+async function parseDeskNamingPreview(request: Request): Promise<ParsedDeskNamingPreview> {
+  const form = await readUrlEncodedDeskForm(request);
+  const count = optionalSafeIntegerSearchParamValue(form, "count", "Preview count") ?? 5;
+  if (count < 1 || count > 100) {
+    throw badRequest("Preview count must be between 1 and 100");
+  }
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    data: namingDocumentDataFormValue(form.get("data")),
+    count
+  };
+}
+
+async function parseDeskNamingCounter(request: Request): Promise<ParsedDeskNamingCounter> {
+  const form = await readUrlEncodedDeskForm(request);
+  const current = optionalSafeIntegerSearchParamValue(form, "current", "Current value");
+  if (current === undefined || current < 0) {
+    throw badRequest("Current value must be a non-negative safe integer");
+  }
+  const expectedVersion = coerceExpectedVersion(form.get("expectedVersion"));
+  return {
+    doctype: requiredSearchParamValue(form, "doctype", "DocType"),
+    data: namingDocumentDataFormValue(form.get("data")),
+    current,
+    ...(expectedVersion === undefined ? {} : { expectedVersion })
+  };
+}
+
+function namingResetFormValue(value: string | null): NamingSeriesReset {
+  if (value === null || value === "" || value === "never") {
+    return "never";
+  }
+  if (value === "year" || value === "month" || value === "day") {
+    return value;
+  }
+  throw badRequest(`Naming reset '${value}' is invalid`);
+}
+
+function namingExclusionsFormValue(value: string | null): readonly NamingSeriesExclusion[] {
+  if (value === null || value.trim().length === 0) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw badRequest("Naming exclusions must be valid JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw badRequest("Naming exclusions must be a JSON array");
+  }
+  return parsed.map((entry, index) => namingExclusionFormValue(entry, index));
+}
+
+function namingExclusionFormValue(value: unknown, index: number): NamingSeriesExclusion {
+  if (!isJsonObject(value) || typeof value.type !== "string") {
+    throw badRequest(`Naming exclusion ${String(index + 1)} must be an object with a type`);
+  }
+  if (value.type === "range") {
+    if (!Number.isSafeInteger(value.from) || !Number.isSafeInteger(value.to)) {
+      throw badRequest(`Naming exclusion ${String(index + 1)} range requires integer from/to values`);
+    }
+    return { type: "range", from: value.from as number, to: value.to as number };
+  }
+  if (value.type === "regex") {
+    if (typeof value.pattern !== "string" || (value.flags !== undefined && value.flags !== "i")) {
+      throw badRequest(`Naming exclusion ${String(index + 1)} regex is invalid`);
+    }
+    return {
+      type: "regex",
+      pattern: value.pattern,
+      ...(value.flags === undefined ? {} : { flags: "i" as const })
+    };
+  }
+  if (
+    (value.type === "exact" || value.type === "prefix" || value.type === "suffix" || value.type === "contains") &&
+    typeof value.value === "string"
+  ) {
+    return { type: value.type, value: value.value };
+  }
+  throw badRequest(`Naming exclusion ${String(index + 1)} is invalid`);
+}
+
+function namingDocumentDataFormValue(value: string | null): DocumentData {
+  if (value === null || value.trim().length === 0) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw badRequest("Naming scope data must be valid JSON");
+  }
+  if (!isJsonObject(parsed) || !isJsonValue(parsed)) {
+    throw badRequest("Naming scope data must be a JSON object");
+  }
+  return parsed;
+}
+
+function optionalSafeIntegerSearchParamValue(
+  form: URLSearchParams,
+  key: string,
+  label: string
+): number | undefined {
+  const value = stringSearchParamValue(form, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw badRequest(`${label} must be a safe integer`);
+  }
+  return parsed;
+}
+
+function isJsonObject(value: unknown): value is Record<string, JsonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function parseDeskNotificationRule(request: Request): Promise<ParsedDeskNotificationRule> {
@@ -5696,10 +6088,10 @@ async function parseDeskForm(
 ): Promise<ParsedDeskForm> {
   const form = await request.formData();
   const fields = new Set(doctype.fields.map((field) => field.name));
-  const protectedWorkflowStateField = doctype.workflow?.stateField ?? (doctype.workflow ? "workflow_state" : undefined);
+  const protectedWorkflowStateFields = new Set((doctype.workflows ?? []).map((workflow) => workflow.stateField));
   const entries = formView.fields
     .filter((field) => fields.has(field.name))
-    .filter((field) => field.name !== protectedWorkflowStateField)
+    .filter((field) => !protectedWorkflowStateFields.has(field.name))
     .filter((field) => !field.hidden && !field.readOnly)
     .map((field) => {
       const child = field.type === "table" && field.tableOf ? tableDefinitions[field.name] : undefined;
@@ -5741,47 +6133,34 @@ function workflowStatesFormValue(value: string | null): readonly string[] {
     .filter(Boolean);
 }
 
-function workflowTransitionsFormValue(form: URLSearchParams): readonly WorkflowTransition[] {
-  const rows = workflowTransitionRowsFormValue(form);
-  if (rows !== undefined) {
-    return rows;
-  }
-  return workflowTransitionLinesFormValue(form.getAll("transitions"));
+function workflowTransitionsFormValue(form: URLSearchParams): readonly NamedWorkflowTransition[] {
+  return workflowTransitionRowsFormValue(form) ?? [];
 }
 
-function workflowTransitionLinesFormValue(values: readonly string[]): readonly WorkflowTransition[] {
-  return values
-    .flatMap((value) => value
-    .split("\n")
-    .map((line) => line.trim())
-      .filter(Boolean))
-    .map((line) => {
-      const [action = "", from = "", to = "", roles = "", eventType = ""] = line.split("|").map((part) => part.trim());
-      return {
-        action,
-        from,
-        to,
-        ...optionalWorkflowRoles(roles),
-        ...(eventType === "" ? {} : { eventType })
-      };
-    });
-}
-
-function workflowTransitionRowsFormValue(form: URLSearchParams): readonly WorkflowTransition[] | undefined {
+function workflowTransitionRowsFormValue(form: URLSearchParams): readonly NamedWorkflowTransition[] | undefined {
   const actions = form.getAll("transitionAction");
   const fromStates = form.getAll("transitionFrom");
   const toStates = form.getAll("transitionTo");
   const roles = form.getAll("transitionRoles");
+  const allowWhenValues = form.getAll("transitionAllowWhen");
   const eventTypes = form.getAll("transitionEventType");
-  const length = Math.max(actions.length, fromStates.length, toStates.length, roles.length, eventTypes.length);
-  const rows: WorkflowTransition[] = [];
+  const length = Math.max(
+    actions.length,
+    fromStates.length,
+    toStates.length,
+    roles.length,
+    allowWhenValues.length,
+    eventTypes.length
+  );
+  const rows: NamedWorkflowTransition[] = [];
   for (let index = 0; index < length; index += 1) {
     const action = (actions[index] ?? "").trim();
     const from = (fromStates[index] ?? "").trim();
     const to = (toStates[index] ?? "").trim();
     const roleList = (roles[index] ?? "").trim();
+    const allowWhenValue = (allowWhenValues[index] ?? "").trim();
     const eventType = (eventTypes[index] ?? "").trim();
-    if (!action && !from && !to && !roleList && !eventType) {
+    if (!action && !from && !to && !roleList && !allowWhenValue && !eventType) {
       continue;
     }
     if (!action || !from || !to) {
@@ -5792,6 +6171,9 @@ function workflowTransitionRowsFormValue(form: URLSearchParams): readonly Workfl
       from,
       to,
       ...optionalWorkflowRoles(roleList),
+      ...(allowWhenValue === ""
+        ? {}
+        : { allowWhen: predicateExpressionFromValue(parseJsonValue(allowWhenValue, "Workflow transition allowWhen")) }),
       ...(eventType === "" ? {} : { eventType })
     });
   }
@@ -5807,13 +6189,13 @@ function notificationRuleChannelsFormValue(form: URLSearchParams): readonly Noti
   return channels.length === 0 ? undefined : channels;
 }
 
-function notificationRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+function notificationRuleConditionFormValue(form: URLSearchParams): PredicateExpression | undefined {
   const value = optionalJsonSearchParamValue(form, "condition", "Notification rule condition");
   if (value === undefined) {
     return undefined;
   }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as unknown as ListFilterExpression;
+    return predicateExpressionFromValue(value, "Notification rule condition");
   }
   throw new FrameworkError("BAD_REQUEST", "Notification rule condition must be a JSON object", { status: 400 });
 }
@@ -5882,46 +6264,46 @@ function assignmentRuleEventsFormValue(form: URLSearchParams): readonly Assignme
   return lineListFormValues(form, "events") as readonly AssignmentRuleEventKind[];
 }
 
-function assignmentRuleConditionFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+function assignmentRuleConditionFormValue(form: URLSearchParams): PredicateExpression | undefined {
   const value = optionalJsonSearchParamValue(form, "condition", "Assignment rule condition");
   if (value === undefined) {
     return undefined;
   }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as unknown as ListFilterExpression;
+    return predicateExpressionFromValue(value, "Assignment rule condition");
   }
   throw new FrameworkError("BAD_REQUEST", "Assignment rule condition must be a JSON object", { status: 400 });
 }
 
-function mandatoryDependsOnFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+function mandatoryDependsOnFormValue(form: URLSearchParams): PredicateExpression | undefined {
   const value = optionalJsonSearchParamValue(form, "mandatoryDependsOn", "Mandatory depends on");
   if (value === undefined) {
     return undefined;
   }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as unknown as ListFilterExpression;
+    return predicateExpressionFromValue(value, "Mandatory depends on");
   }
   throw new FrameworkError("BAD_REQUEST", "Mandatory depends on must be a JSON object", { status: 400 });
 }
 
-function readOnlyDependsOnFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+function readOnlyDependsOnFormValue(form: URLSearchParams): PredicateExpression | undefined {
   const value = optionalJsonSearchParamValue(form, "readOnlyDependsOn", "Read only depends on");
   if (value === undefined) {
     return undefined;
   }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as unknown as ListFilterExpression;
+    return predicateExpressionFromValue(value, "Read only depends on");
   }
   throw new FrameworkError("BAD_REQUEST", "Read only depends on must be a JSON object", { status: 400 });
 }
 
-function hiddenDependsOnFormValue(form: URLSearchParams): ListFilterExpression | undefined {
+function hiddenDependsOnFormValue(form: URLSearchParams): PredicateExpression | undefined {
   const value = optionalJsonSearchParamValue(form, "hiddenDependsOn", "Hidden depends on");
   if (value === undefined) {
     return undefined;
   }
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as unknown as ListFilterExpression;
+    return predicateExpressionFromValue(value, "Hidden depends on");
   }
   throw new FrameworkError("BAD_REQUEST", "Hidden depends on must be a JSON object", { status: 400 });
 }
@@ -6140,6 +6522,10 @@ function optionalJsonSearchParamValue(form: URLSearchParams, key: string, label:
   if (value === undefined) {
     return undefined;
   }
+  return parseJsonValue(value, label);
+}
+
+function parseJsonValue(value: string, label: string): JsonValue {
   try {
     return JSON.parse(value) as JsonValue;
   } catch {

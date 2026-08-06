@@ -15,6 +15,7 @@ import {
   documentStream
 } from "../../src";
 import { manager, now, owner } from "../helpers";
+import { afterField, predicateGroup } from "../predicate-fixtures.js";
 import type {
   AssignmentRuleEventPayload,
   DocTypeDefinition,
@@ -62,7 +63,7 @@ describe("assignment rules", () => {
             { kind: "user", userId: " manager@example.com " },
             { kind: "field", field: "reviewer" }
           ],
-          condition: { field: "priority", value: "High" }
+          condition: afterField("priority", "High")
         }
       ]
     });
@@ -75,7 +76,7 @@ describe("assignment rules", () => {
           { kind: "user", userId: "manager@example.com" },
           { kind: "field", field: "reviewer" }
         ],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       }
     ]);
     expect(Object.isFrozen(doctype.assignmentRules)).toBe(true);
@@ -246,7 +247,7 @@ describe("assignment rules", () => {
         name: "High priority triage",
         events: ["DocumentCreated"],
         assignees: [{ kind: "user", userId: "manager@example.com" }],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       },
       expectedVersion: 0
     });
@@ -257,7 +258,7 @@ describe("assignment rules", () => {
         name: "High priority triage",
         events: ["DocumentCreated"],
         assignees: [{ kind: "user", userId: "manager@example.com" }],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       },
       expectedVersion: 1
     });
@@ -334,7 +335,7 @@ describe("assignment rules", () => {
             { kind: "user", userId: "manager@example.com" },
             { kind: "field", field: "reviewer" }
           ],
-          condition: { field: "priority", value: "High" }
+          condition: afterField("priority", "High")
         }
       ]
     });
@@ -413,7 +414,7 @@ describe("assignment rules", () => {
         name: "Runtime triage",
         events: ["DocumentCreated"],
         assignees: [{ kind: "user", userId: "manager@example.com" }],
-        condition: { field: "priority", value: "High" }
+        condition: afterField("priority", "High")
       }
     });
     const created = await documents.create({
@@ -507,14 +508,11 @@ describe("assignment rules", () => {
           name: "Ready for review",
           events: ["DocumentUpdated"],
           assignees: [{ kind: "field", field: "reviewer" }],
-          condition: {
-            kind: "group",
-            match: "all",
-            filters: [
-              { field: "priority", value: "High" },
-              { field: "status", value: "Ready" }
-            ]
-          }
+          condition: predicateGroup(
+            "all",
+            afterField("priority", "High"),
+            afterField("status", "Ready")
+          )
         }
       ]
     });
@@ -632,7 +630,23 @@ describe("assignment rules", () => {
             }
           ]
         })
-      ).toEqual([{ assigneeId: "reviewer@example.com", ruleName: `${kind} reviewer` }]);
+      ).toEqual([{
+        assigneeId: "reviewer@example.com",
+        ruleName: `${kind} reviewer`,
+        ...(kind === "WorkflowTransitioned"
+          ? {
+              workflowName: "lifecycle",
+              workflowAction: "review",
+              workflowTransitions: [{
+                workflow: "lifecycle",
+                stateField: "status",
+                action: "review",
+                from: "Open",
+                to: "Ready"
+              }]
+            }
+          : {})
+      }]);
     }
   });
 
@@ -798,9 +812,17 @@ function ticketPayload(kind: DomainEvent["payload"]["kind"]): DomainEvent["paylo
     case "DocumentCancelled":
       return { kind };
     case "WorkflowTransitioned":
-      return { kind, action: "review", from: "Open", to: "Ready", patch: { status: "Ready" } };
+      return {
+        kind,
+        workflow: "lifecycle",
+        stateField: "status",
+        action: "review",
+        from: "Open",
+        to: "Ready",
+        patch: { status: "Ready" }
+      };
     case "DomainCommandApplied":
-      return { kind, command: "markReady", input: {}, patch: { status: "Ready" } };
+      return { kind, command: "markReady", input: {}, patch: { status: "Ready" }, transitions: [] };
     default:
       throw new Error(`Unsupported ticket event kind '${kind}'`);
   }

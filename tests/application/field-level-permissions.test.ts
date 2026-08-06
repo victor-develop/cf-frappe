@@ -159,6 +159,24 @@ describe("field-level permissions", () => {
     ]);
   });
 
+  it("projects document update forms from authoritative field and record permissions", async () => {
+    const { documents, queries } = createFieldPermissionServices();
+    await createEmployeeRecord(documents, "Alice Record", alice.id, 120_000);
+    await createEmployeeRecord(documents, "Bob Record", bob.id, 130_000);
+
+    const own = await queries.getEffectiveDocumentFormView(alice, "Employee Record", "Alice Record");
+    const other = await queries.getEffectiveDocumentFormView(alice, "Employee Record", "Bob Record");
+    const ownFields = new Map(own.fields.map((field) => [field.name, field]));
+    const otherFields = new Map(other.fields.map((field) => [field.name, field]));
+
+    expect(ownFields.get("self_review")?.readOnly).not.toBe(true);
+    expect(ownFields.get("salary")?.readOnly).toBe(true);
+    expect(ownFields.has("internal_notes")).toBe(false);
+    expect(otherFields.get("self_review")?.readOnly).toBe(true);
+    expect(otherFields.get("salary")?.readOnly).toBe(true);
+    expect(otherFields.get("department")?.readOnly).not.toBe(true);
+  });
+
   it("blocks filters and ordering on fields that are only conditionally readable", async () => {
     const { documents, queries } = createFieldPermissionServices();
     await createEmployeeRecord(documents, "Alice Record", alice.id, 120_000);

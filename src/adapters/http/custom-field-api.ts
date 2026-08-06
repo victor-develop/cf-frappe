@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { CustomFieldService } from "../../application/custom-field-service.js";
 import { badRequest } from "../../core/errors.js";
-import { FIELD_TYPES, type FieldDefinition, type FieldType, type JsonValue, type ListFilterExpression } from "../../core/types.js";
+import { FIELD_TYPES, type FieldDefinition, type FieldType, type JsonValue, type PredicateExpression } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
-import { readJsonObject, requestMetadata } from "./request.js";
+import { predicateExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
 
 export interface CustomFieldApiOptions {
   readonly customFields: CustomFieldService;
@@ -68,11 +68,11 @@ function fieldValue(value: JsonValue | undefined): FieldDefinition {
     ...optionalString(value.description, "field.description", "description"),
     ...optionalString(value.placeholder, "field.placeholder", "placeholder"),
     ...optionalBoolean(value.required, "field.required", "required"),
-    ...optionalListFilterExpression(value.mandatoryDependsOn, "field.mandatoryDependsOn", "mandatoryDependsOn"),
+    ...optionalPredicateExpression(value.mandatoryDependsOn, "field.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "field.readOnly", "readOnly"),
-    ...optionalListFilterExpression(value.readOnlyDependsOn, "field.readOnlyDependsOn", "readOnlyDependsOn"),
+    ...optionalPredicateExpression(value.readOnlyDependsOn, "field.readOnlyDependsOn", "readOnlyDependsOn"),
     ...optionalBoolean(value.hidden, "field.hidden", "hidden"),
-    ...optionalListFilterExpression(value.hiddenDependsOn, "field.hiddenDependsOn", "hiddenDependsOn"),
+    ...optionalPredicateExpression(value.hiddenDependsOn, "field.hiddenDependsOn", "hiddenDependsOn"),
     ...optionalBoolean(value.printHide, "field.printHide", "printHide"),
     ...optionalBoolean(value.printHideIfNoValue, "field.printHideIfNoValue", "printHideIfNoValue"),
     ...optionalBoolean(value.unique, "field.unique", "unique"),
@@ -99,18 +99,15 @@ function fieldTypeValue(value: JsonValue | undefined): FieldType {
   return value as FieldType;
 }
 
-function optionalListFilterExpression<TKey extends string>(
+function optionalPredicateExpression<TKey extends string>(
   value: JsonValue | undefined,
   field: string,
   key: TKey
-): { readonly [K in TKey]?: ListFilterExpression } {
+): { readonly [K in TKey]?: PredicateExpression } {
   if (value === undefined) {
     return {};
   }
-  if (!isRecord(value)) {
-    throw badRequest(`${field} must be an object`);
-  }
-  return { [key]: value } as unknown as { readonly [K in TKey]: ListFilterExpression };
+  return { [key]: predicateExpressionFromValue(value, field) } as { readonly [K in TKey]: PredicateExpression };
 }
 
 function requiredString(value: JsonValue | undefined, field: string): string {

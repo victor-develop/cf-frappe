@@ -490,7 +490,7 @@ describe("CloudFrappe Worker jobs", () => {
     expect(source.status).toBe(201);
     expect(update.status).toBe(200);
     const projections = new D1ProjectionStore(env.DB);
-    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({
+    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:mirror-status:mirror")).resolves.toMatchObject({
       data: { status: "pending", sourceDoctype: "Source", sourceDocumentName: "Source One" }
     });
 
@@ -525,7 +525,7 @@ describe("CloudFrappe Worker jobs", () => {
 
     expect(queueMessage.ack).toHaveBeenCalledOnce();
     expect(queueMessage.retry).not.toHaveBeenCalled();
-    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:Mirror Status:0")).resolves.toMatchObject({
+    await expect(projections.get("acme", "__AutomationRuns", "evt_source-update:mirror-status:mirror")).resolves.toMatchObject({
       data: { status: "delivered", claimId: "claim-automation" }
     });
     await expect(projections.get("acme", "Target", "Target One")).resolves.toMatchObject({
@@ -995,10 +995,11 @@ function automationRegistry(): ModelRegistry {
       { name: "status", type: "select", options: ["Open", "Done"] }
     ],
     automationRules: [{
+      id: "mirror-status",
       name: "Mirror Status",
-      events: ["DocumentUpdated"],
-      changedFields: ["status"],
+      trigger: { events: ["DocumentUpdated"], changes: [{ field: "status" }] },
       actions: [{
+        id: "mirror",
         kind: "updateDocument",
         target: { doctype: "Target", name: { kind: "field", field: "target" } },
         patch: {

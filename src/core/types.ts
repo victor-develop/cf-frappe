@@ -62,11 +62,11 @@ export interface FieldDefinition {
   readonly placeholder?: string;
   readonly type: FieldType;
   readonly required?: boolean;
-  readonly mandatoryDependsOn?: ListFilterExpression;
+  readonly mandatoryDependsOn?: PredicateExpression;
   readonly readOnly?: boolean;
-  readonly readOnlyDependsOn?: ListFilterExpression;
+  readonly readOnlyDependsOn?: PredicateExpression;
   readonly hidden?: boolean;
-  readonly hiddenDependsOn?: ListFilterExpression;
+  readonly hiddenDependsOn?: PredicateExpression;
   readonly printHide?: boolean;
   readonly printHideIfNoValue?: boolean;
   readonly unique?: boolean;
@@ -97,11 +97,11 @@ export interface FieldPropertyOverrides {
   readonly description?: string;
   readonly placeholder?: string;
   readonly required?: boolean;
-  readonly mandatoryDependsOn?: ListFilterExpression;
+  readonly mandatoryDependsOn?: PredicateExpression;
   readonly readOnly?: boolean;
-  readonly readOnlyDependsOn?: ListFilterExpression;
+  readonly readOnlyDependsOn?: PredicateExpression;
   readonly hidden?: boolean;
-  readonly hiddenDependsOn?: ListFilterExpression;
+  readonly hiddenDependsOn?: PredicateExpression;
   readonly printHide?: boolean;
   readonly printHideIfNoValue?: boolean;
   readonly noCopy?: boolean;
@@ -159,19 +159,33 @@ export interface PermissionRule {
 
 export type DocStatus = "draft" | "submitted" | "cancelled" | "deleted";
 
-export interface WorkflowTransition {
+export interface NamedWorkflowTransition {
   readonly action: string;
   readonly from: string;
   readonly to: string;
   readonly roles?: readonly string[];
+  readonly allowWhen?: PredicateExpression;
   readonly eventType?: string;
 }
 
-export interface WorkflowDefinition {
-  readonly stateField?: string;
+export interface NamedWorkflowDefinition {
+  readonly name: string;
+  readonly label?: string;
+  readonly stateField: string;
   readonly initialState: string;
   readonly states: readonly string[];
-  readonly transitions: readonly WorkflowTransition[];
+  readonly transitions: readonly NamedWorkflowTransition[];
+}
+
+export interface FieldTransitionPolicyDefinition {
+  readonly name: string;
+  readonly field: string;
+  readonly action: string;
+  readonly from: JsonPrimitive | readonly JsonPrimitive[];
+  readonly to: JsonPrimitive;
+  readonly roles?: readonly string[];
+  readonly allowWhen?: PredicateExpression;
+  readonly eventType?: string;
 }
 
 export type AssignmentRuleEventKind =
@@ -197,7 +211,7 @@ export interface AssignmentRuleDefinition {
   readonly enabled?: boolean;
   readonly events: readonly AssignmentRuleEventKind[];
   readonly assignees: readonly AssignmentRuleAssigneeDefinition[];
-  readonly condition?: ListFilterExpression;
+  readonly condition?: PredicateExpression;
   readonly excludeActor?: boolean;
 }
 
@@ -241,7 +255,7 @@ export interface NotificationRuleDefinition {
   readonly events: readonly NotificationRuleEventKind[];
   readonly recipients: readonly NotificationRuleRecipientDefinition[];
   readonly channels?: readonly NotificationRuleChannel[];
-  readonly condition?: ListFilterExpression;
+  readonly condition?: PredicateExpression;
   readonly subject?: string;
   readonly excludeActor?: boolean;
 }
@@ -276,6 +290,7 @@ export interface AutomationDocumentTargetDefinition {
 }
 
 export interface AutomationUpdateDocumentActionDefinition {
+  readonly id: string;
   readonly kind: "updateDocument";
   readonly target: AutomationDocumentTargetDefinition;
   readonly patch: Readonly<Record<string, AutomationValueExpression>>;
@@ -283,12 +298,27 @@ export interface AutomationUpdateDocumentActionDefinition {
 
 export type AutomationActionDefinition = AutomationUpdateDocumentActionDefinition;
 
+export interface AutomationChangeSelectorDefinition {
+  readonly field: string;
+  readonly from?: JsonValue;
+  readonly to?: JsonValue;
+}
+
+export interface AutomationTriggerDefinition {
+  readonly events: readonly AutomationRuleEventKind[];
+  readonly touchedFields?: readonly string[];
+  readonly changes?: readonly AutomationChangeSelectorDefinition[];
+  readonly workflow?: string;
+  readonly workflowAction?: string;
+  readonly domainCommand?: string;
+}
+
 export interface AutomationRuleDefinition {
+  readonly id: string;
   readonly name: string;
   readonly enabled?: boolean;
-  readonly events: readonly AutomationRuleEventKind[];
-  readonly changedFields?: readonly string[];
-  readonly condition?: ListFilterExpression;
+  readonly trigger: AutomationTriggerDefinition;
+  readonly runWhen?: PredicateExpression;
   readonly actions: readonly AutomationActionDefinition[];
 }
 
@@ -297,6 +327,16 @@ export interface DomainCommandContext {
   readonly document: DocumentSnapshot;
   readonly input: DocumentData;
   readonly now: string;
+}
+
+export interface DomainCommandTransitionIntent {
+  readonly workflow: string;
+  readonly action: string;
+}
+
+export interface DomainCommandPlan {
+  readonly patch: DocumentData;
+  readonly transitions?: readonly DomainCommandTransitionIntent[];
 }
 
 export interface DomainCommandDefinition {
@@ -309,13 +349,38 @@ export interface DomainCommandDefinition {
   readonly roles?: readonly string[];
   readonly permissionAction?: PermissionAction;
   readonly buildPatch?: (context: DomainCommandContext) => DocumentData;
+  readonly buildPlan?: (context: DomainCommandContext) => DomainCommandPlan;
+}
+
+export type NamingSeriesReset = "never" | "year" | "month" | "day";
+
+export type NamingSeriesExclusion =
+  | { readonly type: "exact"; readonly value: string }
+  | { readonly type: "prefix"; readonly value: string }
+  | { readonly type: "suffix"; readonly value: string }
+  | { readonly type: "contains"; readonly value: string }
+  | { readonly type: "range"; readonly from: number; readonly to: number }
+  | { readonly type: "regex"; readonly pattern: string; readonly flags?: "i" };
+
+export interface NamingSeriesStrategy {
+  readonly kind: "series";
+  readonly pattern: string;
+  readonly targetField?: string;
+  readonly counter?: string;
+  readonly padding?: number;
+  readonly start?: number;
+  readonly step?: number;
+  readonly reset?: NamingSeriesReset;
+  readonly scopeFields?: readonly string[];
+  readonly exclusions?: readonly NamingSeriesExclusion[];
+  readonly maxAttempts?: number;
 }
 
 export type NamingStrategy =
   | { readonly kind: "uuid" }
   | { readonly kind: "field"; readonly field: string }
   | { readonly kind: "provided"; readonly field?: string }
-  | { readonly kind: "series"; readonly pattern: string };
+  | NamingSeriesStrategy;
 
 export type RetiredIndexDefinition =
   | readonly string[]
@@ -333,7 +398,7 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly formView?: FormViewDefinition;
   readonly listView?: ListViewDefinition;
   readonly permissions?: readonly PermissionRule[];
-  readonly workflow?: WorkflowDefinition;
+  readonly workflows?: readonly NamedWorkflowDefinition[];
   readonly assignmentRules?: readonly AssignmentRuleDefinition[];
   readonly automationRules?: readonly AutomationRuleDefinition[];
   readonly commands?: readonly DomainCommandDefinition[];
@@ -400,7 +465,7 @@ export interface DomainEvent<TPayload extends DocumentEventPayload = DocumentEve
 export type NewDomainEvent<TPayload extends DocumentEventPayload = DocumentEventPayload> =
   Omit<DomainEvent<TPayload>, "sequence">;
 
-export type ListFilterOperator =
+export type PredicateOperator =
   | "eq"
   | "ne"
   | "in"
@@ -415,6 +480,55 @@ export type ListFilterOperator =
   | "lte"
   | "between"
   | "not_between";
+export type ListFilterOperator = PredicateOperator;
+
+export type PredicateScope = "before" | "after" | "input" | "event" | "actor";
+
+export type PredicateOperand =
+  | {
+      readonly kind: "literal";
+      readonly value: JsonValue;
+    }
+  | {
+      readonly kind: "field";
+      readonly scope: "before" | "after";
+      readonly field: string;
+    }
+  | {
+      readonly kind: "path";
+      readonly scope: "input" | "event" | "actor";
+      readonly path: readonly string[];
+    };
+
+export type PredicateExpression =
+  | {
+      readonly kind: "compare";
+      readonly left: PredicateOperand;
+      readonly operator: PredicateOperator;
+      readonly right: PredicateOperand;
+    }
+  | {
+      readonly kind: "group";
+      readonly match: "all" | "any";
+      readonly predicates: readonly PredicateExpression[];
+    }
+  | {
+      readonly kind: "not";
+      readonly predicate: PredicateExpression;
+    };
+
+export interface DocumentFieldChange {
+  readonly before: JsonValue | undefined;
+  readonly after: JsonValue | undefined;
+}
+
+export interface DocumentChangeContext {
+  readonly before: DocumentSnapshot | null;
+  readonly after: DocumentSnapshot | null;
+  readonly touchedFields: readonly string[];
+  readonly changedFields: readonly string[];
+  readonly changes: Readonly<Record<string, DocumentFieldChange>>;
+}
 export type ListFilterInputType = "text" | "number" | "date" | "datetime-local" | "select" | "boolean";
 export type ListOrderDirection = "asc" | "desc";
 export type ListFilterValue = JsonPrimitive | readonly JsonPrimitive[];
@@ -505,8 +619,7 @@ export interface ResolvedListView {
 export interface ListDocumentsQuery {
   readonly tenantId: TenantId;
   readonly doctype: DocTypeName;
-  readonly filters?: readonly ListDocumentsFilter[];
-  readonly filterExpression?: ListFilterExpression;
+  readonly predicate?: PredicateExpression;
   readonly orderBy?: string;
   readonly order?: ListOrderDirection;
   readonly limit?: number;

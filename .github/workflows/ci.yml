@@ -39,5 +39,11 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Architecture-critical coverage
+        run: npm run coverage
+
+      - name: Naming reliability per-file coverage
+        run: npm run coverage:naming
+
       - name: Build
         run: npm run build

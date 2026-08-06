@@ -172,6 +172,24 @@ describe("resource api", () => {
     });
   }
 
+  it("does not mount removed action-only workflow transition routes", async () => {
+    const app = makeApp();
+
+    const single = await app.request("/api/resource/Note/Legacy/transition/close", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-cf-frappe-user": owner.id, "x-cf-frappe-roles": "User", "x-cf-frappe-tenant": "acme" },
+      body: "{}"
+    });
+    const bulk = await app.request("/api/resource/Note/bulk-transition/close", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-cf-frappe-user": owner.id, "x-cf-frappe-roles": "User", "x-cf-frappe-tenant": "acme" },
+      body: JSON.stringify({ documents: [{ name: "Legacy" }] })
+    });
+
+    expect(single.status).toBe(404);
+    expect(bulk.status).toBe(404);
+  });
+
   function makeFilterCollisionApp() {
     const FilterCollision = defineDocType({
       name: "FilterCollision",
@@ -489,7 +507,7 @@ describe("resource api", () => {
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({ data: { version: 2, data: { body: "Updated" } } });
 
-    const transitioned = await app.request("/api/resource/Note/HTTP%20Note/transition/close", {
+    const transitioned = await app.request("/api/resource/Note/HTTP%20Note/workflows/lifecycle/transition/close", {
       method: "POST",
       headers: userHeaders,
       body: "{}"
@@ -841,7 +859,7 @@ describe("resource api", () => {
       body: JSON.stringify({ title: "HTTP Bulk Transition Stale", body: "Stale" })
     });
 
-    const response = await app.request("/api/resource/Note/bulk-transition/close", {
+    const response = await app.request("/api/resource/Note/workflows/lifecycle/bulk-transition/close", {
       method: "POST",
       headers: userHeaders,
       body: JSON.stringify({
@@ -1467,7 +1485,7 @@ describe("resource api", () => {
       headers: userHeaders,
       body: JSON.stringify({ title: "HTTP Closed High", priority: "High", body: "Closed", count: 3 })
     });
-    await app.request("/api/resource/Note/HTTP%20Closed%20High/transition/close", {
+    await app.request("/api/resource/Note/HTTP%20Closed%20High/workflows/lifecycle/transition/close", {
       method: "POST",
       headers: userHeaders,
       body: "{}"

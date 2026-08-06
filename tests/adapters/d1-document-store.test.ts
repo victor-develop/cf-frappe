@@ -159,6 +159,33 @@ describe("D1DocumentStore", () => {
     expect(db.documents.size).toBe(0);
   });
 
+  it("rejects stale document batches and translates D1 constraint races", async () => {
+    const db = new FakeD1Database();
+    const store = new D1DocumentStore(db as unknown as D1Database);
+    await store.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!));
+    await expect(store.commit(stream, 0, [{ ...event, id: "evt-stale" }], ([saved]) => snapshotFrom(saved!)))
+      .rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+
+    const racingStore = new D1DocumentStore(
+      new FakeD1Database({ failEventInsertAsConstraint: true }) as unknown as D1Database
+    );
+    await expect(racingStore.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!)))
+      .rejects.toMatchObject({
+        code: "DOCUMENT_CONFLICT",
+        message: "One or more streams changed while committing"
+      });
+  });
+
+  it("treats a missing D1 version row as an empty stream", async () => {
+    const db = {
+      prepare: () => ({
+        bind: () => ({ first: () => Promise.resolve(undefined) })
+      })
+    };
+    const store = new D1DocumentStore(db as unknown as D1Database);
+    await expect(store.currentVersion("missing")).resolves.toBe(0);
+  });
+
   it("rolls back multi-stream event inserts when a batch projection upsert fails", async () => {
     const db = new FakeD1Database({ failDocumentUpsert: true });
     const store = new D1DocumentStore(db as unknown as D1Database);
@@ -199,6 +226,45 @@ describe("D1DocumentStore", () => {
     expect(read?.sql).toContain("sequence <= ?");
     expect(read?.sql).toContain("ORDER BY sequence DESC LIMIT ?");
     expect(read?.params).toEqual([stream, 3, 2]);
+  });
+
+  it("appends independent event streams in one D1 batch", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    const otherStream = "acme:__NamedWorkflowFields:Note%3Aworkflow_state";
+    const saved = await store.appendBatch([
+      { stream, expectedVersion: 0, events: [event] },
+      {
+        stream: otherStream,
+        expectedVersion: 0,
+        events: [{ ...event, id: "evt-field", stream: otherStream, doctype: "__NamedWorkflowFields" }]
+      }
+    ]);
+
+    expect(saved).toMatchObject([
+      { id: event.id, stream, sequence: 1 },
+      { id: "evt-field", stream: otherStream, sequence: 1 }
+    ]);
+    await expect(store.readStream(stream)).resolves.toHaveLength(1);
+    await expect(store.readStream(otherStream)).resolves.toHaveLength(1);
+  });
+
+  it("does not partially append a D1 event batch when one expected version is stale", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    const otherStream = "acme:__NamedWorkflowFields:Note%3Aworkflow_state";
+    await store.append(stream, 0, [event]);
+
+    await expect(store.appendBatch([
+      { stream, expectedVersion: 0, events: [updateEvent("evt-stale", "Stale")] },
+      {
+        stream: otherStream,
+        expectedVersion: 0,
+        events: [{ ...event, id: "evt-field", stream: otherStream, doctype: "__NamedWorkflowFields" }]
+      }
+    ])).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+    await expect(store.readStream(stream)).resolves.toHaveLength(1);
+    await expect(store.readStream(otherStream)).resolves.toEqual([]);
   });
 
   it("snapshots D1 event payloads and metadata across append and reads", async () => {
@@ -394,6 +460,43 @@ describe("D1DocumentStore", () => {
     });
   });
 
+  it("rejects pre-cutover workflow payloads and reads current workflow payloads", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [event]);
+    const row = db.events[0]!;
+
+    row.payload_json = JSON.stringify({
+      kind: "WorkflowTransitioned",
+      action: "close",
+      from: "Open",
+      to: "Closed",
+      patch: { workflow_state: "Closed" }
+    });
+    await expect(store.readStream(stream)).rejects.toMatchObject({
+      code: "D1_EVENT_INVALID",
+      status: 409
+    });
+
+    row.payload_json = JSON.stringify({
+      kind: "WorkflowTransitioned",
+      workflow: "lifecycle",
+      stateField: "workflow_state",
+      action: "close",
+      from: "Open",
+      to: "Closed",
+      patch: { workflow_state: "Closed" }
+    });
+    await expect(store.readStream(stream)).resolves.toMatchObject([{
+      payload: {
+        kind: "WorkflowTransitioned",
+        workflow: "lifecycle",
+        stateField: "workflow_state",
+        patch: { workflow_state: "Closed" }
+      }
+    }]);
+  });
+
   it("rejects stored D1 event payloads with non-finite JSON numbers", async () => {
     const db = new FakeD1Database();
     const store = new D1EventStore(db as unknown as D1Database);
@@ -503,10 +606,15 @@ function automationRunEvent(
       sourceDoctype: "Note",
       sourceDocumentName: "One",
       sourceActorId: "owner",
+      ruleId: "mirror",
       ruleName: "Mirror",
-      actionIndex: 0,
+      actionId: "update",
       action: { kind: "updateDocument", target: { doctype: "Note", name: "One" }, patch: { title: "Two" } },
-      retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 }
+      retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 },
+      causationId: "evt-source",
+      correlationId: "evt-source",
+      automationDepth: 1,
+      automationPath: ["mirror:update"]
     },
     metadata: {}
   };
@@ -531,10 +639,15 @@ function automationRunSnapshot(
       sourceDoctype: "Note",
       sourceDocumentName: "One",
       sourceActorId: "owner",
+      ruleId: "mirror",
       ruleName: "Mirror",
-      actionIndex: 0,
+      actionId: "update",
       action: { kind: "updateDocument", target: { doctype: "Note", name: "One" }, patch: { title: "Two" } },
       retry: { maxAttempts: 3, baseDelaySeconds: 30, maxDelaySeconds: 300 },
+      causationId: "evt-source",
+      correlationId: "evt-source",
+      automationDepth: 1,
+      automationPath: ["mirror:update"],
       status,
       attempts: 0,
       enqueuedAt: data.enqueuedAt,

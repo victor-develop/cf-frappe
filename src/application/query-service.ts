@@ -6,6 +6,8 @@ import {
   normalizeListOrder,
   resolveListView
 } from "../core/list-view.js";
+import { andPredicateExpressions } from "../core/predicates.js";
+import { allowedWorkflowTransitions } from "../core/workflow.js";
 import type {
   DocumentSharePermission,
   DocumentShareProvider
@@ -37,6 +39,7 @@ import {
   type LinkOption,
   type LinkOptionsResult,
   type PermissionAction,
+  type PredicateExpression,
   type ResolvedFormView,
   type ResolvedListView
 } from "../core/types.js";
@@ -67,6 +70,7 @@ import {
 } from "./document-tenant-policy.js";
 import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
 import {
+  projectDocTypeForDocumentFormAccess,
   projectDocTypeForFieldAccess,
   projectDocTypeForFieldQueries,
   readableDocumentFieldNames,
@@ -88,6 +92,10 @@ interface QueryServiceDocTypeContext {
   readonly relatedDocType: RelatedDocTypeResolver;
 }
 
+interface QueryServiceDocumentContext extends QueryServiceDocTypeContext {
+  readonly document: DocumentSnapshot;
+}
+
 export interface DocumentCsvExportOptions {
   readonly tenantId?: string;
   readonly filters?: readonly ListDocumentsFilter[];
@@ -106,6 +114,14 @@ export interface DocumentCsvExport {
   readonly total: number;
   readonly truncated: boolean;
   readonly limit: number;
+}
+
+export interface AvailableWorkflowAction {
+  readonly workflow: string;
+  readonly workflowLabel: string;
+  readonly action: string;
+  readonly label: string;
+  readonly to: string;
 }
 
 export class QueryService {
@@ -159,22 +175,13 @@ export class QueryService {
     name: string,
     tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
   ): Promise<DocumentSnapshot> {
-    const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
-    const document = await this.projections.get(tenantId, doctype.name, name);
-    const projection = planDocumentReadProjection({ doctype, name, document });
-    if (projection.status === "not-found") {
-      throw notFound(projection.message);
-    }
-    const access = planDocumentReadAccess({
+    const { doctype, relatedDocType, document } = await this.documentContextForRead(
       actor,
-      doctype,
+      doctypeName,
       name,
-      readable: await this.canReadDocument(actor, doctype, projection.document)
-    });
-    if (access.status === "deny") {
-      throw permissionDenied(access.message);
-    }
-    return redactDocumentSnapshot({ actor, doctype, document: projection.document, relatedDocType });
+      tenantId
+    );
+    return redactDocumentSnapshot({ actor, doctype, document, relatedDocType });
   }
 
   async redactDocument(
@@ -193,6 +200,33 @@ export class QueryService {
     const { doctype } = await this.doctypeContext(actor, document.doctype, document.tenantId);
     this.requireDocTypeAction(actor, doctype, "read");
     return readableDocumentFieldNames({ actor, doctype, document });
+  }
+
+  async listAvailableWorkflowActions(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<readonly AvailableWorkflowAction[]> {
+    const { doctype } = await this.doctypeContext(actor, doctypeName, tenantId);
+    const document = await this.projections.get(tenantId, doctype.name, name);
+    const projection = planDocumentReadProjection({ doctype, name, document });
+    if (projection.status === "not-found") {
+      throw notFound(projection.message);
+    }
+    if (projection.document.docstatus !== "draft" ||
+      !(await this.canActOnDocument(actor, doctype, "transition", projection.document))) {
+      return [];
+    }
+    return (doctype.workflows ?? []).flatMap((workflow) =>
+      allowedWorkflowTransitions({ actor, workflow, document: projection.document }).map((transition) => ({
+        workflow: workflow.name,
+        workflowLabel: workflow.label ?? workflow.name,
+        action: transition.action,
+        label: transition.action,
+        to: transition.to
+      }))
+    );
   }
 
   async listDocuments(
@@ -217,24 +251,26 @@ export class QueryService {
     const offset = Math.max(0, options.offset ?? 0);
     const order = normalizeListOrder(queryDoctype, options.orderBy, options.order);
     const filters = normalizeListFilters(queryDoctype, options.filters ?? []);
-    const filterExpression = options.filterExpression === undefined
+    const filterPredicate = options.filterExpression === undefined
       ? undefined
       : normalizeListFilterExpression(queryDoctype, options.filterExpression);
-    const result = await this.projections.list({
+    const filtersPredicate = filters.length === 0
+      ? undefined
+      : normalizeListFilterExpression(queryDoctype, {
+          kind: "group",
+          match: "all",
+          filters
+        });
+    const predicate = andPredicateExpressions([filtersPredicate, filterPredicate]);
+    return this.listReadableDocumentPage(actor, doctype, relatedDocType, {
       tenantId,
       doctype: doctype.name,
-      filters,
-      ...(filterExpression === undefined ? {} : { filterExpression }),
+      ...(predicate === undefined ? {} : { predicate }),
       orderBy: order.orderBy,
       order: order.order,
       limit,
       offset
     });
-    const data = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType);
-    return {
-      ...result,
-      data
-    };
   }
 
   getListView(actor: Actor, doctypeName: string): ResolvedListView {
@@ -338,6 +374,22 @@ export class QueryService {
     return resolveFormView(await this.getEffectiveMeta(actor, doctypeName, tenantId));
   }
 
+  async getEffectiveDocumentFormView(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<ResolvedFormView> {
+    const { doctype, document } = await this.documentContextForRead(actor, doctypeName, name, tenantId);
+    const canUpdateDocument = await this.canActOnDocument(actor, doctype, "update", document);
+    return resolveFormView(projectDocTypeForDocumentFormAccess({
+      actor,
+      doctype,
+      document,
+      canUpdateDocument
+    }));
+  }
+
   async getEffectiveCreateFormView(
     actor: Actor,
     doctypeName: string,
@@ -436,7 +488,6 @@ export class QueryService {
   ): Promise<{
     readonly listView: ResolvedListView;
     readonly filters: readonly ListDocumentsFilter[];
-    readonly filterExpression?: ListFilterExpression;
     readonly result: ListDocumentsResult;
   }> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
@@ -449,9 +500,10 @@ export class QueryService {
       options.useDefaultFilters === false ? [] : listView.filters,
       options.filters ?? []
     );
-    const filterExpression = options.filterExpression === undefined
-      ? undefined
-      : normalizeListFilterExpression(queryDoctype, options.filterExpression);
+    if (options.filterExpression !== undefined) {
+      normalizeListFilterExpression(queryDoctype, options.filterExpression);
+    }
+    const filterExpression = options.filterExpression;
     const order = normalizeListOrder(
       queryDoctype,
       options.orderBy ?? listView.orderBy,
@@ -470,7 +522,6 @@ export class QueryService {
     return {
       listView: { ...listView, orderBy: order.orderBy, order: order.order },
       filters,
-      ...(filterExpression === undefined ? {} : { filterExpression }),
       result
     };
   }
@@ -545,7 +596,6 @@ export class QueryService {
       const result = await this.projections.list({
         tenantId,
         doctype: target.name,
-        filters: [],
         limit: pageSize,
         offset
       });
@@ -590,7 +640,6 @@ export class QueryService {
       const result = await this.projections.list({
         tenantId,
         doctype: doctype.name,
-        filters: [],
         limit: pageSize,
         offset
       });
@@ -631,11 +680,82 @@ export class QueryService {
       .map((entry) => redactDocumentSnapshot({ actor, doctype, document: entry.document, relatedDocType }));
   }
 
+  private async listReadableDocumentPage(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    relatedDocType: RelatedDocTypeResolver,
+    query: {
+      readonly tenantId: string;
+      readonly doctype: string;
+      readonly predicate?: PredicateExpression;
+      readonly orderBy: string;
+      readonly order: ListOrderDirection;
+      readonly limit: number;
+      readonly offset: number;
+    }
+  ): Promise<ListDocumentsResult> {
+    const data: DocumentSnapshot[] = [];
+    const scanPageSize = 200;
+    let readableTotal = 0;
+    for (let scanOffset = 0; ;) {
+      const result = await this.projections.list({
+        tenantId: query.tenantId,
+        doctype: query.doctype,
+        ...(query.predicate === undefined ? {} : { predicate: query.predicate }),
+        orderBy: query.orderBy,
+        order: query.order,
+        limit: scanPageSize,
+        offset: scanOffset
+      });
+      const readable = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType);
+      for (const document of readable) {
+        if (readableTotal >= query.offset && data.length < query.limit) {
+          data.push(document);
+        }
+        readableTotal += 1;
+      }
+      const scan = planProjectionPageScan({ offset: scanOffset, pageSize: scanPageSize, total: result.total });
+      if (scan.status === "complete") {
+        return {
+          data,
+          limit: query.limit,
+          offset: query.offset,
+          total: readableTotal
+        };
+      }
+      scanOffset = scan.nextOffset;
+    }
+  }
+
   private requireDocTypeAction(actor: Actor, doctype: DocTypeDefinition, action: PermissionAction): void {
     const decision = planDocTypeActionAccess({ actor, doctype, action });
     if (decision.status === "deny") {
       throw permissionDenied(decision.message);
     }
+  }
+
+  private async documentContextForRead(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    tenantId: string
+  ): Promise<QueryServiceDocumentContext> {
+    const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
+    const stored = await this.projections.get(tenantId, doctype.name, name);
+    const projection = planDocumentReadProjection({ doctype, name, document: stored });
+    if (projection.status === "not-found") {
+      throw notFound(projection.message);
+    }
+    const access = planDocumentReadAccess({
+      actor,
+      doctype,
+      name,
+      readable: await this.canReadDocument(actor, doctype, projection.document)
+    });
+    if (access.status === "deny") {
+      throw permissionDenied(access.message);
+    }
+    return { doctype, relatedDocType, document: projection.document };
   }
 
   async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {

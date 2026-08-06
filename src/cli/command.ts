@@ -1510,6 +1510,7 @@ function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
   const headers: WorkflowHeaderOption[] = [];
   let doctype: string | undefined;
   let tenant: string | undefined;
+  let workflowName: string | undefined;
   let workflow: Record<string, unknown> | undefined;
   let expectedVersion: number | undefined;
 
@@ -1574,6 +1575,18 @@ function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--workflow") {
+      if (action === "list") {
+        return { kind: "invalid", message: "Cannot use --workflow with workflows list" };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      workflowName = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--workflow-json") {
       if (action !== "save") {
         return { kind: "invalid", message: `Cannot use --workflow-json with workflows ${action}` };
@@ -1591,8 +1604,8 @@ function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
       continue;
     }
     if (arg === "--expected-version") {
-      if (action === "get") {
-        return { kind: "invalid", message: "Cannot use --expected-version with workflows get" };
+      if (action === "get" || action === "list") {
+        return { kind: "invalid", message: `Cannot use --expected-version with workflows ${action}` };
       }
       const value = parseRequiredOption(rest, index, arg);
       if (typeof value !== "string") {
@@ -1618,6 +1631,9 @@ function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
   if (action === "save" && workflow === undefined) {
     return { kind: "invalid", message: "Workflow save requires --workflow-json" };
   }
+  if (action !== "list" && workflowName === undefined) {
+    return { kind: "invalid", message: `Workflow ${action} requires --workflow` };
+  }
 
   return {
     kind: "workflows",
@@ -1626,6 +1642,7 @@ function parseWorkflowsArgs(argv: readonly string[]): ParsedCommand {
     headers,
     doctype,
     ...(tenant === undefined ? {} : { tenant }),
+    ...(workflowName === undefined ? {} : { workflowName }),
     ...(workflow === undefined ? {} : { workflow }),
     ...(expectedVersion === undefined ? {} : { expectedVersion })
   };
@@ -5916,6 +5933,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   let externalId: string | undefined;
   const permissions: string[] = [];
   let label: string | undefined;
+  let workflowName: string | undefined;
   let transition: string | undefined;
   let commandName: string | undefined;
   let data: Record<string, unknown> | undefined;
@@ -6196,6 +6214,18 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
       index += 1;
       continue;
     }
+    if (arg === "--workflow") {
+      if (action !== "transition" && action !== "bulk-transition") {
+        return { kind: "invalid", message: `Cannot use --workflow with resources ${action}` };
+      }
+      const value = parseRequiredOption(rest, index, arg);
+      if (typeof value !== "string") {
+        return value;
+      }
+      workflowName = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--command") {
       if (action !== "command") {
         return { kind: "invalid", message: `Cannot use --command with resources ${action}` };
@@ -6469,6 +6499,9 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
   if ((action === "transition" || action === "bulk-transition") && transition === undefined) {
     return { kind: "invalid", message: `Resource ${action} requires --transition` };
   }
+  if ((action === "transition" || action === "bulk-transition") && workflowName === undefined) {
+    return { kind: "invalid", message: `Resource ${action} requires --workflow` };
+  }
   if (action === "command" && commandName === undefined) {
     return { kind: "invalid", message: "Resource command requires --command" };
   }
@@ -6511,6 +6544,7 @@ function parseResourcesArgs(argv: readonly string[]): ParsedCommand {
     ...(externalId === undefined ? {} : { externalId }),
     ...(permissions.length === 0 ? {} : { permissions }),
     ...(label === undefined ? {} : { label }),
+    ...(workflowName === undefined ? {} : { workflow: workflowName }),
     ...(transition === undefined ? {} : { transition }),
     ...(commandName === undefined ? {} : { command: commandName }),
     ...(data === undefined ? {} : { data }),
@@ -6573,7 +6607,7 @@ function notificationRuleAction(value: string): NotificationRuleRemoteAction | u
 }
 
 function workflowAction(value: string): WorkflowRemoteAction | undefined {
-  return value === "clear" || value === "get" || value === "save" ? value : undefined;
+  return value === "clear" || value === "get" || value === "list" || value === "save" ? value : undefined;
 }
 
 function assignmentRuleAction(value: string): AssignmentRuleRemoteAction | undefined {
@@ -7246,9 +7280,10 @@ function helpText(): string {
     "  cf-frappe assignment-rules enable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe assignment-rules disable --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe assignment-rules clear --url <origin> --doctype <doctype> --rule <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe workflows get --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe workflows clear --url <origin> --doctype <doctype> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows list --url <origin> --doctype <doctype> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows get --url <origin> --doctype <doctype> --workflow <name> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows save --url <origin> --doctype <doctype> --workflow <name> --workflow-json <json> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe workflows clear --url <origin> --doctype <doctype> --workflow <name> [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe roles list --url <origin> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe roles get --url <origin> --role <role> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe roles create --url <origin> --role <role> [--description <text>] [--enabled|--disabled] [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -7279,7 +7314,7 @@ function helpText(): string {
     "  cf-frappe resources delete --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources submit --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources cancel --url <origin> --doctype <doctype> --name <docname> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe resources transition --url <origin> --doctype <doctype> --name <docname> --transition <action> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources transition --url <origin> --doctype <doctype> --name <docname> --workflow <name> --transition <action> [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources command --url <origin> --doctype <doctype> --name <docname> --command <name> [--data-json <json>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources duplicate --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources amend --url <origin> --doctype <doctype> --name <docname> [--data-json <json>] [--new-name <docname>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
@@ -7307,7 +7342,7 @@ function helpText(): string {
     "  cf-frappe resources bulk-delete --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-submit --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe resources bulk-cancel --url <origin> --doctype <doctype> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
-    "  cf-frappe resources bulk-transition --url <origin> --doctype <doctype> --transition <action> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
+    "  cf-frappe resources bulk-transition --url <origin> --doctype <doctype> --workflow <name> --transition <action> (--document <docname>|--document-version <docname:version>)... [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe user-permissions list --url <origin> --user-id <user> [--tenant <tenant>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe user-permissions allow --url <origin> --user-id <user> --target-doctype <doctype> --target-name <docname> [--applicable-doctype <doctype>]... [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",
     "  cf-frappe user-permissions revoke --url <origin> --user-id <user> --target-doctype <doctype> --target-name <docname> [--applicable-doctype <doctype>]... [--tenant <tenant>] [--expected-version <n>] [--header <name:value>] [--header-env <name=ENV>]",

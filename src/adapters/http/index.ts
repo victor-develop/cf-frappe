@@ -14,6 +14,7 @@ export * from "./job-api.js";
 export * from "./jwt.js";
 export * from "./notification-api.js";
 export * from "./notification-rule-api.js";
+export * from "./naming-api.js";
 export * from "./oidc.js";
 export * from "./oidc-providers.js";
 export * from "./print-api.js";

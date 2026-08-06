@@ -168,7 +168,12 @@ interface DeskClientRuntime {
     readonly role: (role: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly roles: (options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly userPermissions: (userId: string, options?: { readonly tenant?: string }) => Promise<unknown>;
-    readonly workflow: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly workflow: (
+      doctype: string,
+      workflow: string,
+      options?: { readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly workflows: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly workspace: (workspace: string) => Promise<unknown>;
     readonly workspaces: () => Promise<unknown>;
   };
@@ -400,8 +405,17 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
   };
   readonly workflows: {
-    readonly clear: (doctype: string, options?: { readonly expectedVersion?: number; readonly tenant?: string }) => Promise<unknown>;
-    readonly get: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
+    readonly clear: (
+      doctype: string,
+      workflow: string,
+      options?: { readonly expectedVersion?: number; readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly get: (
+      doctype: string,
+      workflow: string,
+      options?: { readonly tenant?: string }
+    ) => Promise<unknown>;
+    readonly list: (doctype: string, options?: { readonly tenant?: string }) => Promise<unknown>;
     readonly save: (
       doctype: string,
       workflow: Record<string, unknown>,
@@ -474,6 +488,7 @@ interface DeskClientRuntime {
     ) => Promise<unknown>;
     readonly bulkTransition: (
       doctype: string,
+      workflow: string,
       action: string,
       documents: readonly DeskBulkDocumentSelection[],
       options?: { readonly returnTo?: string }
@@ -527,6 +542,7 @@ interface DeskClientRuntime {
     readonly bulkSubmit: (doctype: string, documents: readonly DeskBulkDocumentSelection[]) => Promise<unknown>;
     readonly bulkTransition: (
       doctype: string,
+      workflow: string,
       action: string,
       documents: readonly DeskBulkDocumentSelection[]
     ) => Promise<unknown>;
@@ -594,6 +610,7 @@ interface DeskClientRuntime {
     readonly transition: (
       doctype: string,
       name: string,
+      workflow: string,
       action: string,
       options: { readonly expectedVersion: number }
     ) => Promise<unknown>;
@@ -744,11 +761,11 @@ describe("Desk client runtime", () => {
     });
 
     await expect(
-      runtime.resource.transition("Task Type", "TASK/1", "close now", { expectedVersion: 7 })
+      runtime.resource.transition("Task Type", "TASK/1", "lifecycle", "close now", { expectedVersion: 7 })
     ).resolves.toEqual({ ok: true });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("/api/resource/Task%20Type/TASK%2F1/transition/close%20now");
+    expect(calls[0]?.url).toBe("/api/resource/Task%20Type/TASK%2F1/workflows/lifecycle/transition/close%20now");
     expect(calls[0]?.init.method).toBe("POST");
     expect((calls[0]?.init.headers as Headers).get("content-type")).toBe("application/json");
     expect(calls[0]?.init.body).toBe(JSON.stringify({ expectedVersion: 7 }));
@@ -1084,7 +1101,7 @@ describe("Desk client runtime", () => {
     await runtime.desk.bulkDelete("Task Type", documents);
     await runtime.desk.bulkSubmit("Task Type", documents);
     await runtime.desk.bulkCancel("Task Type", documents);
-    await runtime.desk.bulkTransition("Task Type", "close now", documents, {
+    await runtime.desk.bulkTransition("Task Type", "lifecycle", "close now", documents, {
       returnTo: "/desk/Task%20Type?default_filters=0"
     });
 
@@ -1092,7 +1109,7 @@ describe("Desk client runtime", () => {
       "POST /desk/Task%20Type/bulk-delete",
       "POST /desk/Task%20Type/bulk-submit",
       "POST /desk/Task%20Type/bulk-cancel",
-      "POST /desk/Task%20Type/bulk-transition/close%20now"
+      "POST /desk/Task%20Type/workflows/lifecycle/bulk-transition/close%20now"
     ]);
     expect(calls.map((call) => new Headers(call.init.headers).get("content-type"))).toEqual([
       "application/x-www-form-urlencoded; charset=utf-8",
@@ -1893,13 +1910,13 @@ describe("Desk client runtime", () => {
     await runtime.resource.bulkDelete("Task Type", documents);
     await runtime.resource.bulkSubmit("Task Type", documents);
     await runtime.resource.bulkCancel("Task Type", documents);
-    await runtime.resource.bulkTransition("Task Type", "close now", documents);
+    await runtime.resource.bulkTransition("Task Type", "lifecycle", "close now", documents);
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
       "POST /api/resource/Task%20Type/delete",
       "POST /api/resource/Task%20Type/bulk-submit",
       "POST /api/resource/Task%20Type/bulk-cancel",
-      "POST /api/resource/Task%20Type/bulk-transition/close%20now"
+      "POST /api/resource/Task%20Type/workflows/lifecycle/bulk-transition/close%20now"
     ]);
     expect(calls.map((call) => (call.init.headers as Headers).get("content-type"))).toEqual([
       "application/json",
@@ -3379,6 +3396,7 @@ describe("Desk client runtime", () => {
       });
     });
     const expectedWorkflow = {
+      name: "lifecycle",
       stateField: "status",
       initialState: "Open",
       states: ["Open", "Closed"],
@@ -3389,18 +3407,18 @@ describe("Desk client runtime", () => {
       expectedVersion: 99
     };
 
-    await expect(runtime.workflows.get("Task Type", { tenant: "acme/east" })).resolves.toEqual({
+    await expect(runtime.workflows.get("Task Type", "lifecycle", { tenant: "acme/east" })).resolves.toEqual({
       doctype: "Task Type",
       version: 4,
       workflow: { initialState: "Open" }
     });
     await runtime.workflows.save("Task Type", workflow, { expectedVersion: 1, tenant: "acme/east" });
-    await runtime.workflows.clear("Task Type", { expectedVersion: 2, tenant: "acme/east" });
+    await runtime.workflows.clear("Task Type", "lifecycle", { expectedVersion: 2, tenant: "acme/east" });
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
-      "GET /api/workflows/Task%20Type?tenant=acme%2Feast",
-      "PUT /api/workflows/Task%20Type?tenant=acme%2Feast",
-      "DELETE /api/workflows/Task%20Type?tenant=acme%2Feast"
+      "GET /api/workflows/Task%20Type/lifecycle?tenant=acme%2Feast",
+      "PUT /api/workflows/Task%20Type/lifecycle?tenant=acme%2Feast",
+      "DELETE /api/workflows/Task%20Type/lifecycle?tenant=acme%2Feast"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin", "same-origin", "same-origin"]);
     expect(calls.map((call) => call.init.body)).toEqual([
@@ -3417,7 +3435,13 @@ describe("Desk client runtime", () => {
 
   it("exposes workflow definition reads through the metadata namespace", async () => {
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
-    const result = { tenantId: "acme/east", doctypeName: "Task Type", version: 4, workflow: { initialState: "Open" } };
+    const result = {
+      tenantId: "acme/east",
+      doctypeName: "Task Type",
+      workflowName: "lifecycle",
+      version: 4,
+      workflow: { name: "lifecycle", initialState: "Open" }
+    };
     const runtime = evaluateDeskClient(async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });
       return new Response(JSON.stringify({ data: result }), {
@@ -3425,10 +3449,10 @@ describe("Desk client runtime", () => {
       });
     });
 
-    await expect(runtime.meta.workflow("Task Type", { tenant: "acme/east" })).resolves.toEqual(result);
+    await expect(runtime.meta.workflow("Task Type", "lifecycle", { tenant: "acme/east" })).resolves.toEqual(result);
 
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url}`)).toEqual([
-      "GET /api/workflows/Task%20Type?tenant=acme%2Feast"
+      "GET /api/workflows/Task%20Type/lifecycle?tenant=acme%2Feast"
     ]);
     expect(calls.map((call) => call.init.credentials)).toEqual(["same-origin"]);
     expect(calls.map((call) => call.init.body)).toEqual([undefined]);
@@ -5664,9 +5688,19 @@ describe("Desk client runtime", () => {
     reason.dataset.cfFrappeHiddenDependsOn = JSON.stringify({
       kind: "group",
       match: "any",
-      filters: [
-        { field: "status", operator: "is", value: "not set" },
-        { field: "status", operator: "ne", value: "Closed" }
+      predicates: [
+        {
+          kind: "compare",
+          left: { kind: "field", scope: "after", field: "status" },
+          operator: "is",
+          right: { kind: "literal", value: "not set" }
+        },
+        {
+          kind: "compare",
+          left: { kind: "field", scope: "after", field: "status" },
+          operator: "ne",
+          right: { kind: "literal", value: "Closed" }
+        }
       ]
     });
     const form = new FakeForm([status, reason, new FakeField("expectedVersion", "0", "hidden")]);

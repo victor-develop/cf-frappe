@@ -371,8 +371,11 @@ export function renderDeskClientScript(): string {
     return withQuery("/api/field-properties/" + encodePart(doctype) + (field === undefined ? "" : "/" + encodePart(field)), tenantParams(options || {}));
   }
 
-  function workflowPath(doctype, options) {
-    return withQuery("/api/workflows/" + encodePart(doctype), tenantParams(options || {}));
+  function workflowPath(doctype, workflow, options) {
+    return withQuery(
+      "/api/workflows/" + encodePart(doctype) + (workflow === undefined ? "" : "/" + encodePart(workflow)),
+      tenantParams(options || {})
+    );
   }
 
   function userPermissionPath(userId, options) {
@@ -2596,7 +2599,7 @@ export function renderDeskClientScript(): string {
       if (!expression) {
         return;
       }
-      setFieldHidden(field, matchesFormFilterExpression(binding, expression));
+      setFieldHidden(field, matchesFormPredicateExpression(binding, expression));
     });
   }
 
@@ -2608,70 +2611,91 @@ export function renderDeskClientScript(): string {
     }
   }
 
-  function matchesFormFilterExpression(binding, expression) {
+  function matchesFormPredicateExpression(binding, expression) {
     if (!expression || typeof expression !== "object") {
       return false;
     }
     if (expression.kind === "group") {
-      var filters = Array.isArray(expression.filters) ? expression.filters : [];
+      var predicates = Array.isArray(expression.predicates) ? expression.predicates : [];
       return expression.match === "any"
-        ? filters.some(function (filter) { return matchesFormFilterExpression(binding, filter); })
-        : filters.every(function (filter) { return matchesFormFilterExpression(binding, filter); });
+        ? predicates.some(function (predicate) { return matchesFormPredicateExpression(binding, predicate); })
+        : predicates.every(function (predicate) { return matchesFormPredicateExpression(binding, predicate); });
     }
-    return matchesFormFilterPredicate(binding, expression);
-  }
-
-  function matchesFormFilterPredicate(binding, filter) {
-    if (!filter || typeof filter.field !== "string") {
+    if (expression.kind === "not") {
+      return !matchesFormPredicateExpression(binding, expression.predicate);
+    }
+    if (expression.kind !== "compare") {
       return false;
     }
-    var actual = formConditionValue(binding, filter.field);
-    var operator = filter.operator || "eq";
+    return matchesFormPredicateComparison(binding, expression);
+  }
+
+  function matchesFormPredicateComparison(binding, expression) {
+    var actual = formPredicateOperandValue(binding, expression.left);
+    var expected = formPredicateOperandValue(binding, expression.right);
+    var operator = expression.operator;
     if (operator === "eq") {
-      return actual === filter.value;
+      return jsonConditionValuesEqual(actual, expected);
     }
     if (operator === "ne") {
-      return actual !== undefined && actual !== null && actual !== filter.value;
+      return actual !== undefined && actual !== null && !jsonConditionValuesEqual(actual, expected);
     }
     if (operator === "in") {
-      return actual !== undefined && actual !== null && Array.isArray(filter.value) && filter.value.indexOf(actual) >= 0;
+      return actual !== undefined && actual !== null && Array.isArray(expected) &&
+        expected.some(function (value) { return jsonConditionValuesEqual(actual, value); });
     }
     if (operator === "not_in") {
-      return actual !== undefined && actual !== null && Array.isArray(filter.value) && filter.value.indexOf(actual) < 0;
+      return actual !== undefined && actual !== null && Array.isArray(expected) &&
+        !expected.some(function (value) { return jsonConditionValuesEqual(actual, value); });
     }
     if (operator === "is") {
-      return filter.value === "set" ? actual !== undefined && actual !== null : actual === undefined || actual === null;
+      return expected === "set" ? actual !== undefined && actual !== null :
+        expected === "not set" && (actual === undefined || actual === null);
     }
     if (operator === "contains") {
-      return actual !== undefined && actual !== null &&
-        String(actual).toLowerCase().indexOf(String(filter.value).toLowerCase()) >= 0;
+      return actual !== undefined && actual !== null && expected !== undefined && expected !== null &&
+        String(actual).toLowerCase().indexOf(String(expected).toLowerCase()) >= 0;
     }
     if (operator === "like" || operator === "not_like") {
-      if (actual === undefined || actual === null) {
+      if (actual === undefined || actual === null || typeof expected !== "string") {
         return false;
       }
-      var matched = likePatternMatches(actual, String(filter.value));
+      var matched = likePatternMatches(actual, expected);
       return operator === "like" ? matched : !matched;
     }
     if (operator === "gt" || operator === "gte" || operator === "lt" || operator === "lte") {
-      if (actual === undefined || actual === null) {
+      if (!comparableConditionValues(actual, expected)) {
         return false;
       }
-      var compared = compareConditionValues(actual, filter.value);
+      var compared = compareConditionValues(actual, expected);
       return operator === "gt" ? compared > 0 :
         operator === "gte" ? compared >= 0 :
         operator === "lt" ? compared < 0 :
         compared <= 0;
     }
     if (operator === "between" || operator === "not_between") {
-      if (actual === undefined || actual === null || !Array.isArray(filter.value) || filter.value.length !== 2) {
+      if (actual === undefined || actual === null || !Array.isArray(expected) || expected.length !== 2 ||
+        !comparableConditionValues(actual, expected[0]) || !comparableConditionValues(actual, expected[1])) {
         return false;
       }
-      var between = compareConditionValues(actual, filter.value[0]) >= 0 &&
-        compareConditionValues(actual, filter.value[1]) <= 0;
+      var between = compareConditionValues(actual, expected[0]) >= 0 &&
+        compareConditionValues(actual, expected[1]) <= 0;
       return operator === "between" ? between : !between;
     }
     return false;
+  }
+
+  function formPredicateOperandValue(binding, operand) {
+    if (!operand || typeof operand !== "object") {
+      return undefined;
+    }
+    if (operand.kind === "literal") {
+      return operand.value;
+    }
+    if (operand.kind === "field" && operand.scope === "after" && typeof operand.field === "string") {
+      return formConditionValue(binding, operand.field);
+    }
+    return undefined;
   }
 
   function formConditionValue(binding, fieldname) {
@@ -2692,6 +2716,32 @@ export function renderDeskClientScript(): string {
       return left - right;
     }
     return String(left).localeCompare(String(right));
+  }
+
+  function comparableConditionValues(left, right) {
+    return left !== undefined && left !== null && right !== undefined && right !== null &&
+      typeof left !== "object" && typeof right !== "object";
+  }
+
+  function jsonConditionValuesEqual(left, right) {
+    if (left === right) {
+      return true;
+    }
+    if (left === undefined || right === undefined || left === null || right === null) {
+      return false;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+      return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+        left.every(function (value, index) { return jsonConditionValuesEqual(value, right[index]); });
+    }
+    if (typeof left !== "object" || typeof right !== "object") {
+      return false;
+    }
+    var leftKeys = Object.keys(left).sort();
+    var rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every(function (key, index) {
+      return key === rightKeys[index] && jsonConditionValuesEqual(left[key], right[key]);
+    });
   }
 
   function likePatternMatches(actual, pattern) {
@@ -3685,14 +3735,17 @@ export function renderDeskClientScript(): string {
       }
     }),
     workflows: Object.freeze({
-      clear: function (doctype, options) {
-        return request(workflowPath(doctype, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
+      clear: function (doctype, workflow, options) {
+        return request(workflowPath(doctype, workflow, options || {}), { method: "DELETE", body: versionBody(options) }).then(unwrapData);
       },
-      get: function (doctype, options) {
-        return request(workflowPath(doctype, options || {})).then(unwrapData);
+      get: function (doctype, workflow, options) {
+        return request(workflowPath(doctype, workflow, options || {})).then(unwrapData);
+      },
+      list: function (doctype, options) {
+        return request(workflowPath(doctype, undefined, options || {})).then(unwrapData);
       },
       save: function (doctype, workflow, options) {
-        return request(workflowPath(doctype, options || {}), { method: "PUT", body: workflowBody(workflow, options) }).then(unwrapData);
+        return request(workflowPath(doctype, workflow && workflow.name, options || {}), { method: "PUT", body: workflowBody(workflow, options) }).then(unwrapData);
       }
     }),
     userPermissions: Object.freeze({
@@ -4059,8 +4112,11 @@ export function renderDeskClientScript(): string {
       userPermissions: function (userId, options) {
         return request(userPermissionPath(userId, options || {})).then(unwrapData);
       },
-      workflow: function (doctype, options) {
-        return request(workflowPath(doctype, options || {})).then(unwrapData);
+      workflow: function (doctype, workflow, options) {
+        return request(workflowPath(doctype, workflow, options || {})).then(unwrapData);
+      },
+      workflows: function (doctype, options) {
+        return request(workflowPath(doctype, undefined, options || {})).then(unwrapData);
       },
       workspace: function (workspace) {
         return request("/api/meta/workspaces/" + encodePart(workspace)).then(unwrapData);
@@ -4393,8 +4449,8 @@ export function renderDeskClientScript(): string {
           body: deskBulkDocumentsBody(doctype, documents, options || {})
         });
       },
-      bulkTransition: function (doctype, action, documents, options) {
-        return request(deskPath(doctype) + "/bulk-transition/" + encodePart(action), {
+      bulkTransition: function (doctype, workflow, action, documents, options) {
+        return request(deskPath(doctype) + "/workflows/" + encodePart(workflow) + "/bulk-transition/" + encodePart(action), {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
           body: deskBulkDocumentsBody(doctype, documents, options || {})
@@ -4423,8 +4479,8 @@ export function renderDeskClientScript(): string {
       bulkSubmit: function (doctype, documents) {
         return request(resourcePath(doctype) + "/bulk-submit", { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
       },
-      bulkTransition: function (doctype, action, documents) {
-        return request(resourcePath(doctype) + "/bulk-transition/" + encodePart(action), { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
+      bulkTransition: function (doctype, workflow, action, documents) {
+        return request(resourcePath(doctype) + "/workflows/" + encodePart(workflow) + "/bulk-transition/" + encodePart(action), { method: "POST", body: bulkDocumentsBody(documents) }).then(unwrapData);
       },
       amend: function (doctype, name, input, options) {
         return request(resourcePath(doctype, name) + "/amend", { method: "POST", body: commandBody(input || {}, options) }).then(unwrapData);
@@ -4505,8 +4561,8 @@ export function renderDeskClientScript(): string {
       merge: function (doctype, name, input) {
         return request(resourcePath(doctype, name) + "/merge", { method: "POST", body: input || {} }).then(unwrapData);
       },
-      transition: function (doctype, name, action, options) {
-        return request(resourcePath(doctype, name) + "/transition/" + encodePart(action), { method: "POST", body: versionBody(options) }).then(unwrapData);
+      transition: function (doctype, name, workflow, action, options) {
+        return request(resourcePath(doctype, name) + "/workflows/" + encodePart(workflow) + "/transition/" + encodePart(action), { method: "POST", body: versionBody(options) }).then(unwrapData);
       },
       unassign: function (doctype, name, assignee, options) {
         return request(resourceMemberPath(doctype, name, "assignments", assignee), { method: "DELETE", body: versionBody(options) }).then(unwrapData);

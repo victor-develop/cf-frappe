@@ -26,6 +26,7 @@ import { defineDocType } from "../../src/core/schema.js";
 import { SYSTEM_MANAGER_ROLE, type DocTypeDefinition, type DomainEvent, type FieldDefinition } from "../../src/core/types.js";
 import type { CustomFieldState } from "../../src/core/custom-fields.js";
 import { noteDocType } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const admin = { id: "admin@example.com", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" };
 const owner = { id: "owner@example.com", roles: ["User"], tenantId: "acme" };
@@ -122,11 +123,11 @@ describe("custom field policy", () => {
       normalizeCustomField({
         name: "approval_note",
         type: "text",
-        mandatoryDependsOn: { field: "title", operator: "eq", value: "Needs approval" }
+        mandatoryDependsOn: afterField("title", "Needs approval")
       })
     );
 
-    expect(normalized.mandatoryDependsOn).toEqual({ field: "title", value: "Needs approval" });
+    expect(normalized.mandatoryDependsOn).toEqual(afterField("title", "Needs approval"));
     expect(() =>
       assertCustomFieldDefaultValueValid(
         noteDocType,

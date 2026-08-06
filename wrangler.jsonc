@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "cf-frappe-starter",
-  "main": "examples/todos/worker.ts",
+  "name": "cf-frappe-returns-demo",
+  "main": "examples/returns/worker.ts",
   "compatibility_date": "2026-06-21",
   "placement": {
     "mode": "smart"
@@ -14,6 +14,27 @@
       "migrations_dir": "migrations"
     }
   ],
+  "vars": {
+    "RETURNS_DEMO_MODE": "true"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "RETURNS_JOBS",
+        "queue": "cf-frappe-returns-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "cf-frappe-returns-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "durable_objects": {
     "bindings": [
       {

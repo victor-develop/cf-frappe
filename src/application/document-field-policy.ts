@@ -1,4 +1,4 @@
-import { matchesListFilterExpression } from "../core/list-view.js";
+import { evaluatePredicateExpression } from "../core/predicates.js";
 import { compactData } from "../core/schema.js";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
@@ -6,6 +6,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type FieldDefinition,
+  type JsonValue,
   type MutableDocumentData,
   type ValidationIssue
 } from "../core/types.js";
@@ -80,34 +81,30 @@ export function workflowStateCreateIssues(
   doctype: DocTypeDefinition,
   data: DocumentData
 ): readonly ValidationIssue[] {
-  const stateField = workflowStateFieldName(doctype);
-  if (stateField === undefined) {
-    return [];
-  }
-  const initialState = doctype.workflow?.initialState;
-  if (String(data[stateField] ?? initialState) === initialState) {
-    return [];
-  }
-  return [workflowStateProtectedIssue(stateField)];
+  return (doctype.workflows ?? []).flatMap((workflow) =>
+    String(data[workflow.stateField] ?? workflow.initialState) === workflow.initialState
+      ? []
+      : [workflowStateProtectedIssue(workflow.stateField)]
+  );
 }
 
 export function workflowStateMutationIssues(
   doctype: DocTypeDefinition,
   patch: DocumentData,
-  unset: readonly string[] = []
+  unset: readonly string[] = [],
+  authorizedTransitions: Readonly<Record<string, JsonValue>> = {}
 ): readonly ValidationIssue[] {
-  const stateField = workflowStateFieldName(doctype);
-  if (stateField === undefined) {
-    return [];
-  }
-  if (!Object.prototype.hasOwnProperty.call(patch, stateField) && !unset.includes(stateField)) {
-    return [];
-  }
-  return [workflowStateProtectedIssue(stateField)];
-}
-
-export function workflowStateFieldName(doctype: DocTypeDefinition): string | undefined {
-  return doctype.workflow === undefined ? undefined : doctype.workflow.stateField ?? "workflow_state";
+  return (doctype.workflows ?? []).flatMap((workflow) => {
+    const field = workflow.stateField;
+    if (!Object.prototype.hasOwnProperty.call(patch, field) && !unset.includes(field)) {
+      return [];
+    }
+    if (!unset.includes(field) && Object.prototype.hasOwnProperty.call(authorizedTransitions, field) &&
+      patch[field] === authorizedTransitions[field]) {
+      return [];
+    }
+    return [workflowStateProtectedIssue(field)];
+  });
 }
 
 export function allowOnSubmitIssues(
@@ -262,10 +259,10 @@ export function copyDocumentData(
   relatedDocType: (doctype: string) => DocTypeDefinition | undefined,
   options: { readonly skipNoCopy?: boolean } = {}
 ): DocumentData {
-  const protectedWorkflowStateField = workflowStateFieldName(doctype);
+  const protectedWorkflowStateFields = new Set((doctype.workflows ?? []).map((workflow) => workflow.stateField));
   const entries = Object.entries(data)
     .filter(([fieldName]) =>
-      fieldName !== protectedWorkflowStateField &&
+      !protectedWorkflowStateFields.has(fieldName) &&
       !doctype.fields.some((field) =>
         field.name === fieldName && (field.readOnly || (options.skipNoCopy === true && field.noCopy === true))
       )
@@ -304,7 +301,11 @@ function workflowStateProtectedIssue(field: string): ValidationIssue {
 }
 
 function conditionalReadOnlyApplies(field: FieldDefinition, document: DocumentSnapshot): boolean {
-  return field.readOnlyDependsOn !== undefined && matchesListFilterExpression(document, field.readOnlyDependsOn);
+  return field.readOnlyDependsOn !== undefined && evaluatePredicateExpression(field.readOnlyDependsOn, {
+    before: null,
+    after: document,
+    input: {}
+  });
 }
 
 function documentSnapshotForFieldCondition(doctype: DocTypeDefinition, data: DocumentData): DocumentSnapshot {

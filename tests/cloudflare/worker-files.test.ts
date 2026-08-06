@@ -48,7 +48,7 @@ describe("CloudFrappe Worker files", () => {
         }
       }
     });
-    expect(aggregateNames).toEqual(["acme:File:file_object"]);
+    expect(aggregateNames).toEqual(["acme:File:_create"]);
     await expect(new Response((await storage.get("acme/files/file_object-hello.txt"))?.body).text()).resolves.toBe(
       "hello"
     );

@@ -9,10 +9,13 @@ import {
   documentStream,
   fixedClock,
   InMemoryEventStore,
+  InMemoryDocumentStore,
+  NamingService,
   SYSTEM_MANAGER_ROLE
 } from "../../src";
 import type { CustomFieldEventPayload, DocumentData, DocumentEventPayload } from "../../src";
 import { owner, now } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const admin = {
   id: "admin@example.com",
@@ -21,6 +24,36 @@ const admin = {
 };
 
 describe("CustomFieldService", () => {
+  it("covers default runtime options and disable decision boundaries", async () => {
+    const store = new InMemoryDocumentStore();
+    const service = new CustomFieldService({
+      registry: createRegistry({ doctypes: [Note] }),
+      events: store,
+      ids: deterministicIds(["field-one", "field-two", "disable-one"])
+    });
+    await expect(service.list(admin, "Note")).resolves.toMatchObject({ version: 0 });
+    await expect(service.disableField({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "missing"
+    })).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+    await service.saveField({ actor: admin, doctype: "Note", field: { name: "one", type: "text" } });
+    await service.saveField({ actor: admin, doctype: "Note", field: { name: "two", type: "text" } });
+    await expect(service.disableField({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "one",
+      expectedVersion: 2,
+      metadata: { source: "coverage" }
+    })).resolves.toMatchObject({ version: 3 });
+    await expect(service.disableField({
+      actor: admin,
+      doctype: "Note",
+      fieldName: "one",
+      expectedVersion: 3
+    })).resolves.toMatchObject({ version: 3 });
+  });
+
   it("registers custom field payloads through the domain event extension map", () => {
     const payload = customFieldPayload({
       kind: "CustomFieldSaved",
@@ -380,19 +413,15 @@ describe("CustomFieldService", () => {
       field: {
         name: "approval_note",
         type: "text",
-        mandatoryDependsOn: { field: "title", operator: "eq", value: "Needs approval" },
-        readOnlyDependsOn: { field: "title", operator: "contains", value: "Closed" },
-        hiddenDependsOn: { field: "title", operator: "eq", value: "Hidden" }
+        mandatoryDependsOn: afterField("title", "Needs approval"),
+        readOnlyDependsOn: afterField("title", "Closed", "contains"),
+        hiddenDependsOn: afterField("title", "Hidden")
       }
     });
 
-    expect(saved.fields[0]?.field.mandatoryDependsOn).toEqual({ field: "title", value: "Needs approval" });
-    expect(saved.fields[0]?.field.readOnlyDependsOn).toEqual({
-      field: "title",
-      operator: "contains",
-      value: "Closed"
-    });
-    expect(saved.fields[0]?.field.hiddenDependsOn).toEqual({ field: "title", value: "Hidden" });
+    expect(saved.fields[0]?.field.mandatoryDependsOn).toEqual(afterField("title", "Needs approval"));
+    expect(saved.fields[0]?.field.readOnlyDependsOn).toEqual(afterField("title", "Closed", "contains"));
+    expect(saved.fields[0]?.field.hiddenDependsOn).toEqual(afterField("title", "Hidden"));
   });
 
   it("validates custom field default values before persisting metadata events", async () => {
@@ -969,6 +998,54 @@ describe("CustomFieldService", () => {
     ).rejects.toMatchObject({
       code: "CUSTOM_FIELD_INVALID",
       message: "Custom table field 'extra_items' cannot be a list filter"
+    });
+  });
+
+  it("blocks custom field changes that would invalidate a runtime naming strategy", async () => {
+    const Receipt = defineDocType({
+      name: "Receipt",
+      fields: [{ name: "amount", type: "number", required: true }]
+    });
+    const registry = createRegistry({ doctypes: [Receipt] });
+    const store = new InMemoryDocumentStore();
+    const customFields = new CustomFieldService({
+      registry,
+      events: store,
+      ids: deterministicIds(["custom-number"]),
+      clock: fixedClock(now)
+    });
+    await customFields.saveField({
+      actor: admin,
+      doctype: "Receipt",
+      field: { name: "receipt_number", type: "text", readOnly: true, noCopy: true }
+    });
+    const naming = new NamingService({
+      registry,
+      events: store,
+      store,
+      ids: deterministicIds(["naming-save"]),
+      clock: fixedClock(now),
+      preNamingDocTypeResolver: (base, context) => customFields.effectiveDocType(base.name, context.tenantId)
+    });
+    await naming.save({
+      actor: admin,
+      doctype: "Receipt",
+      strategy: {
+        kind: "series",
+        pattern: "RCT-{sequence:4}",
+        targetField: "receipt_number"
+      }
+    });
+
+    await expect(customFields.disableField({
+      actor: admin,
+      doctype: "Receipt",
+      fieldName: "receipt_number",
+      expectedVersion: 1
+    })).rejects.toMatchObject({ code: "NAMING_INVALID" });
+    await expect(customFields.list(admin, "Receipt")).resolves.toMatchObject({
+      version: 1,
+      fields: [expect.objectContaining({ field: expect.objectContaining({ name: "receipt_number" }), enabled: true })]
     });
   });
 

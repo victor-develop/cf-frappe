@@ -1,4 +1,4 @@
-import { createRegistryFromApps, defineApp, defineClientScript, defineDocType, definePrintFormat, defineReport } from "../../src";
+import { createRegistryFromApps, defineApp, defineDocType, definePrintFormat, defineReport } from "../../src";
 
 export const Task = defineDocType({
   name: "Task",
@@ -29,10 +29,23 @@ export const Task = defineDocType({
     },
     {
       name: "workflow_state",
-      label: "Workflow State",
+      label: "Lifecycle State",
       type: "select",
       options: ["Open", "Doing", "Done"],
       defaultValue: "Open"
+    },
+    {
+      name: "review_state",
+      label: "Review State",
+      type: "select",
+      options: ["Pending", "Approved"],
+      defaultValue: "Pending"
+    },
+    {
+      name: "escalated",
+      label: "Escalated",
+      type: "boolean",
+      defaultValue: false
     },
     {
       name: "created_by",
@@ -42,15 +55,65 @@ export const Task = defineDocType({
       defaultValue: ({ actor }) => actor.id
     }
   ],
-  workflow: {
-    initialState: "Open",
-    states: ["Open", "Doing", "Done"],
-    transitions: [
-      { action: "start", from: "Open", to: "Doing", roles: ["User", "Task Manager"] },
-      { action: "finish", from: "Doing", to: "Done", roles: ["User", "Task Manager"] },
-      { action: "reopen", from: "Done", to: "Open", roles: ["Task Manager"] }
-    ]
-  },
+  workflows: [
+    {
+      name: "lifecycle",
+      label: "Lifecycle",
+      stateField: "workflow_state",
+      initialState: "Open",
+      states: ["Open", "Doing", "Done"],
+      transitions: [
+        { action: "start", from: "Open", to: "Doing", roles: ["User", "Task Manager"] },
+        { action: "finish", from: "Doing", to: "Done", roles: ["User", "Task Manager"] },
+        { action: "reopen", from: "Done", to: "Open", roles: ["Task Manager"] }
+      ]
+    },
+    {
+      name: "review",
+      label: "Review",
+      stateField: "review_state",
+      initialState: "Pending",
+      states: ["Pending", "Approved"],
+      transitions: [{
+        action: "approve",
+        from: "Pending",
+        to: "Approved",
+        roles: ["Task Manager"],
+        allowWhen: {
+          kind: "compare",
+          left: { kind: "field", scope: "before", field: "workflow_state" },
+          operator: "eq",
+          right: { kind: "literal", value: "Done" }
+        }
+      }]
+    }
+  ],
+  commands: [{
+    name: "finishAndApprove",
+    eventType: "TaskFinishedAndApproved",
+    roles: ["Task Manager"],
+    buildPlan: () => ({
+      patch: { workflow_state: "Done", review_state: "Approved" },
+      transitions: [
+        { workflow: "lifecycle", action: "finish" },
+        { workflow: "review", action: "approve" }
+      ]
+    })
+  }],
+  automationRules: [{
+    id: "mark-high-priority",
+    name: "Mark high-priority tasks as escalated",
+    trigger: {
+      events: ["DocumentUpdated"],
+      changes: [{ field: "priority", to: "High" }]
+    },
+    actions: [{
+      id: "mark-escalated",
+      kind: "updateDocument",
+      target: { doctype: "Task", name: { kind: "documentName" } },
+      patch: { escalated: { kind: "literal", value: true } }
+    }]
+  }],
   permissions: [
     { roles: ["Guest"], actions: ["read"] },
     { roles: ["User"], actions: ["read", "create", "update", "transition"] },
@@ -97,13 +160,6 @@ export const TaskPrint = definePrintFormat({
   roles: ["Guest", "User", "Task Manager"]
 });
 
-export const TaskFormScript = defineClientScript({
-  name: "task-form",
-  doctype: "Task",
-  src: "/assets/task-form.js",
-  scope: "form"
-});
-
 export const todoApp = defineApp({
   name: "todos",
   label: "Todos",
@@ -112,7 +168,6 @@ export const todoApp = defineApp({
   doctypes: [Task],
   printFormats: [TaskPrint],
   reports: [OpenTasks],
-  clientScripts: [TaskFormScript],
   hooks: {
     Task: [
       {

@@ -144,7 +144,7 @@ describe("DashboardService", () => {
       doctype: "Note",
       data: data({ title: "Visible Closed", priority: "High", count: 3 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", workflow: "lifecycle", action: "close" });
 
     await expect(dashboards.listDashboards(owner)).resolves.toMatchObject([{ name: "Operations" }]);
     await expect(dashboards.runDashboard(owner, "Operations")).resolves.toMatchObject({
@@ -268,7 +268,7 @@ describe("DashboardService", () => {
       doctype: "Note",
       data: data({ title: "Visible Closed", priority: "High", count: 3 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", workflow: "lifecycle", action: "close" });
     await documents.create({
       actor: owner,
       doctype: "Note",

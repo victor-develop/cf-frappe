@@ -3,11 +3,13 @@
 // Runtime types generated with workerd@1.20260617.1 2026-06-21 
 interface __BaseEnv_Env {
 	DB: D1Database;
-	AGGREGATES: DurableObjectNamespace<import("./examples/todos/worker").ExampleAggregateCoordinator>;
+	AGGREGATES: DurableObjectNamespace<import("./examples/returns/worker").ExampleAggregateCoordinator>;
+	RETURNS_DEMO_MODE: "true";
+	RETURNS_JOBS: Queue<import("./src").JobMessage>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
-		mainModule: typeof import("./examples/todos/worker");
+		mainModule: typeof import("./examples/returns/worker");
 		durableNamespaces: "ExampleAggregateCoordinator";
 	}
 	interface Env extends __BaseEnv_Env {}

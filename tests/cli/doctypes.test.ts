@@ -160,7 +160,7 @@ describe("cf-frappe CLI remote doctypes", () => {
             permissions: [{ roles: ["User"], actions: ["read"] }],
             commands: [{ name: "close" }],
             indexes: [["project"]],
-            workflow: { initialState: "Open" }
+            workflows: [{ name: "lifecycle", initialState: "Open" }]
           }
         }),
         stdout,
@@ -180,7 +180,7 @@ describe("cf-frappe CLI remote doctypes", () => {
     expect(stdout.text()).toContain("Permissions: 1");
     expect(stdout.text()).toContain("Commands: 1");
     expect(stdout.text()).toContain("Indexes: 1");
-    expect(stdout.text()).toContain("Workflow: yes");
+    expect(stdout.text()).toContain("Workflows: 1");
   });
 
   it("gets remote DocType list-view metadata through the generated metadata API", async () => {

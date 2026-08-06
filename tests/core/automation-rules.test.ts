@@ -1,29 +1,50 @@
 import {
   automationActionId,
   automationActionsFromDomainEvent,
-  automationChangedFields,
   automationRuleMatches,
-  defineDocType
+  defineDocType,
+  documentChangeContext
 } from "../../src";
-import type { DomainEvent, DocumentSnapshot } from "../../src";
+import type {
+  AutomationRuleDefinition,
+  DomainEvent,
+  DocumentData,
+  DocumentSnapshot,
+  PredicateExpression
+} from "../../src";
+import { owner } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const occurredAt = "2026-01-01T00:00:00.000Z";
 
 describe("automation rules", () => {
-  it("normalizes, freezes, matches, and resolves updateDocument actions", () => {
+  it("normalizes stable ids, matches semantic changes, and resolves snapshotted actions", () => {
     const doctype = defineDocType({
       name: "Source",
-      fields: [
-        { name: "title", type: "text", required: true },
-        { name: "target", type: "link", linkTo: "Target" },
-        { name: "status", type: "select", options: ["Open", "Done"] }
-      ],
+      fields: sourceFields(),
       automationRules: [{
+        id: "mirror-status",
         name: "Mirror Status",
-        events: ["DocumentUpdated"],
-        changedFields: ["status"],
-        condition: { field: "status", value: "Done" },
+        trigger: {
+          events: ["DocumentUpdated"],
+          touchedFields: ["status"],
+          changes: [{ field: "status", from: "Open", to: "Done" }]
+        },
+        runWhen: {
+          kind: "group",
+          match: "all",
+          predicates: [
+            afterField("status", "Done"),
+            {
+              kind: "compare",
+              left: { kind: "path", scope: "actor", path: ["id"] },
+              operator: "eq",
+              right: { kind: "literal", value: owner.id }
+            }
+          ]
+        },
         actions: [{
+          id: "mirror",
           kind: "updateDocument",
           target: {
             doctype: "Target",
@@ -39,20 +60,28 @@ describe("automation rules", () => {
       }]
     });
     const rule = doctype.automationRules?.[0];
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
     const event = updatedEvent({ status: "Done" });
-    const snapshot = sourceSnapshot({ status: "Done", target: "Target One" });
+    const context = {
+      event,
+      change: documentChangeContext(before, after, ["status"]),
+      input: { status: "Done" },
+      actor: owner
+    };
 
     expect(Object.isFrozen(doctype.automationRules)).toBe(true);
+    expect(Object.isFrozen(rule?.trigger.changes)).toBe(true);
     expect(Object.isFrozen(rule?.actions)).toBe(true);
-    expect(rule === undefined ? undefined : automationRuleMatches(rule, event, snapshot)).toBe(true);
+    expect(rule === undefined ? undefined : automationRuleMatches(rule, context)).toBe(true);
     expect(automationActionsFromDomainEvent({
-      event,
-      snapshot,
+      ...context,
       rules: doctype.automationRules ?? []
     })).toEqual([{
-      actionId: "evt_source:Mirror Status:0",
+      runId: "evt_source:mirror-status:mirror",
+      ruleId: "mirror-status",
       ruleName: "Mirror Status",
-      actionIndex: 0,
+      actionId: "mirror",
       action: {
         kind: "updateDocument",
         target: { doctype: "Target", name: "Target One" },
@@ -64,96 +93,157 @@ describe("automation rules", () => {
         }
       }
     }]);
-    expect(automationActionId("evt", "Rule", 2)).toBe("evt:Rule:2");
+    expect(automationActionId("evt", "rule", "action")).toBe("evt:rule:action");
+    expect(automationActionId("evt", "a:b", "c")).toBe("evt:a%3Ab:c");
+    expect(automationActionId("evt", "a", "b:c")).toBe("evt:a:b%3Ac");
+    expect(automationActionId("evt:a", "b", "c")).not.toBe(automationActionId("evt", "a:b", "c"));
   });
 
-  it("does not match disabled rules, unchanged fields, deleted snapshots, unsupported events, or false conditions", () => {
+  it("distinguishes touched fields from semantic changes", () => {
     const doctype = defineDocType({
       name: "Source",
-      fields: [
-        { name: "title", type: "text" },
-        { name: "status", type: "select", options: ["Open", "Done"] }
-      ],
+      fields: sourceFields(),
       automationRules: [
-        {
-          name: "Disabled",
-          enabled: false,
-          events: ["DocumentUpdated"],
-          actions: [updateSelfAction()]
-        },
-        {
-          name: "Changed Field",
-          events: ["DocumentUpdated"],
-          changedFields: ["status"],
-          actions: [updateSelfAction()]
-        },
-        {
-          name: "Condition",
-          events: ["DocumentUpdated"],
-          condition: { field: "status", value: "Done" },
-          actions: [updateSelfAction()]
-        }
+        ruleDefinition("touched", { events: ["DocumentUpdated"], touchedFields: ["status"] }),
+        ruleDefinition("changed", { events: ["DocumentUpdated"], changes: [{ field: "status" }] })
       ]
     });
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Open", target: "Target One" }, 2);
+    const actions = automationActionsFromDomainEvent({
+      event: updatedEvent({ status: "Open" }),
+      change: documentChangeContext(before, after, ["status"]),
+      input: { status: "Open" },
+      actor: owner,
+      rules: doctype.automationRules ?? []
+    });
 
-    expect(automationActionsFromDomainEvent({
-      event: updatedEvent({ title: "Only title" }),
-      snapshot: sourceSnapshot({ status: "Open" }),
-      rules: doctype.automationRules ?? []
-    })).toEqual([]);
-    expect(automationActionsFromDomainEvent({
-      event: {
-        ...updatedEvent({ status: "Done" }),
-        payload: { kind: "DocumentCommentAdded", text: "No automation" }
-      } as DomainEvent,
-      snapshot: sourceSnapshot({ status: "Done" }),
-      rules: doctype.automationRules ?? []
-    })).toEqual([]);
-    expect(automationActionsFromDomainEvent({
-      event: updatedEvent({ status: "Done" }),
-      snapshot: { ...sourceSnapshot({ status: "Done" }), docstatus: "deleted" },
-      rules: doctype.automationRules ?? []
-    })).toEqual([]);
+    expect(actions.map((action) => action.ruleId)).toEqual(["touched"]);
   });
 
-  it("derives changed fields for create, update, workflow, and domain-command events", () => {
-    expect(automationChangedFields({
-      ...updatedEvent({ title: "Created", status: "Open" }),
-      payload: { kind: "DocumentCreated", data: { title: "Created", status: "Open" }, docstatus: "draft" }
-    })).toEqual(["title", "status"]);
-    expect(automationChangedFields({
-      ...updatedEvent({ status: "Done" }, ["obsolete"]),
-      payload: { kind: "WorkflowTransitioned", action: "close", from: "Open", to: "Done", patch: { status: "Done" } }
-    })).toEqual(["status"]);
-    expect(automationChangedFields({
-      ...updatedEvent({ status: "Done" }),
-      payload: { kind: "DomainCommandApplied", command: "close", input: {}, patch: { status: "Done" } }
-    })).toEqual(["status"]);
-    expect(automationChangedFields(updatedEvent({ status: "Done" }, ["obsolete"]))).toEqual(["obsolete", "status"]);
+  it("matches workflow and domain-command identities without treating them as predicates", () => {
+    const workflowRule = defineDocType({
+      name: "Source",
+      fields: sourceFields(),
+      automationRules: [{
+        ...ruleDefinition("review-approved", {
+          events: ["WorkflowTransitioned"],
+          workflow: "review",
+          workflowAction: "approve"
+        })
+      }]
+    }).automationRules?.[0];
+    const commandRule = defineDocType({
+      name: "Source",
+      fields: sourceFields(),
+      automationRules: [{
+        ...ruleDefinition("close-command", {
+          events: ["DomainCommandApplied"],
+          domainCommand: "close"
+        })
+      }]
+    }).automationRules?.[0];
+    const compositeWorkflowRule = defineDocType({
+      name: "Source",
+      fields: sourceFields(),
+      automationRules: [{
+        ...ruleDefinition("review-approved-by-command", {
+          events: ["DomainCommandApplied"],
+          workflow: "review",
+          workflowAction: "approve"
+        })
+      }]
+    }).automationRules?.[0];
+    const before = sourceSnapshot({ status: "Open", target: "Target One" }, 1);
+    const after = sourceSnapshot({ status: "Done", target: "Target One" }, 2);
+    const change = documentChangeContext(before, after, ["status"]);
+
+    expect(workflowRule === undefined ? false : automationRuleMatches(workflowRule, {
+      event: workflowEvent("review", "approve"),
+      change,
+      input: { action: "approve" },
+      actor: owner
+    })).toBe(true);
+    expect(workflowRule === undefined ? true : automationRuleMatches(workflowRule, {
+      event: workflowEvent("lifecycle", "approve"),
+      change,
+      input: { action: "approve" },
+      actor: owner
+    })).toBe(false);
+    expect(commandRule === undefined ? false : automationRuleMatches(commandRule, {
+      event: domainCommandEvent("close"),
+      change,
+      input: {},
+      actor: owner
+    })).toBe(true);
+    expect(compositeWorkflowRule === undefined ? false : automationRuleMatches(compositeWorkflowRule, {
+      event: domainCommandEvent("ship", [
+        { workflow: "lifecycle", stateField: "lifecycle_state", action: "finish", from: "Open", to: "Done" },
+        { workflow: "review", stateField: "review_state", action: "approve", from: "Pending", to: "Approved" }
+      ]),
+      change,
+      input: {},
+      actor: owner
+    })).toBe(true);
+    expect(compositeWorkflowRule === undefined ? true : automationRuleMatches(compositeWorkflowRule, {
+      event: domainCommandEvent("ship", [
+        { workflow: "review", stateField: "review_state", action: "reject", from: "Pending", to: "Rejected" }
+      ]),
+      change,
+      input: {},
+      actor: owner
+    })).toBe(false);
+  });
+
+  it("does not match disabled rules, unsupported events, false predicates, or deleted snapshots", () => {
+    const falsePredicate: PredicateExpression = afterField("status", "Done");
+    const rules = defineDocType({
+      name: "Source",
+      fields: sourceFields(),
+      automationRules: [
+        { ...ruleDefinition("disabled", { events: ["DocumentUpdated"] }), enabled: false },
+        { ...ruleDefinition("condition", { events: ["DocumentUpdated"] }), runWhen: falsePredicate }
+      ]
+    }).automationRules ?? [];
+    const before = sourceSnapshot({ status: "Open" }, 1);
+    const after = sourceSnapshot({ status: "Open" }, 2);
+    const context = {
+      change: documentChangeContext(before, after, ["title"]),
+      input: { title: "Changed" },
+      actor: owner,
+      rules
+    };
+
+    expect(automationActionsFromDomainEvent({ ...context, event: updatedEvent({ title: "Changed" }) })).toEqual([]);
+    expect(automationActionsFromDomainEvent({
+      ...context,
+      event: { ...updatedEvent({}), payload: { kind: "DocumentCommentAdded", text: "No automation" } } as DomainEvent
+    })).toEqual([]);
+    expect(automationActionsFromDomainEvent({
+      ...context,
+      event: updatedEvent({ title: "Changed" }),
+      change: documentChangeContext(before, { ...after, docstatus: "deleted" }, ["title"])
+    })).toEqual([]);
   });
 
   it("skips actions when target names or patches resolve empty", () => {
     const doctype = defineDocType({
       name: "Source",
-      fields: [
-        { name: "title", type: "text" },
-        { name: "target", type: "text" },
-        { name: "missing", type: "text" }
-      ],
+      fields: sourceFields(),
       automationRules: [
         {
-          name: "Missing Target",
-          events: ["DocumentUpdated"],
+          ...ruleDefinition("missing-target", { events: ["DocumentUpdated"] }),
           actions: [{
+            id: "update",
             kind: "updateDocument",
             target: { doctype: "Target", name: { kind: "field", field: "missing" } },
             patch: { title: { kind: "literal", value: "Ignored" } }
           }]
         },
         {
-          name: "Empty Patch",
-          events: ["DocumentUpdated"],
+          ...ruleDefinition("empty-patch", { events: ["DocumentUpdated"] }),
           actions: [{
+            id: "update",
             kind: "updateDocument",
             target: { doctype: "Target", name: { kind: "field", field: "target" } },
             patch: { title: { kind: "field", field: "missing" } }
@@ -161,153 +251,172 @@ describe("automation rules", () => {
         }
       ]
     });
+    const before = sourceSnapshot({ target: "Target One" }, 1);
+    const after = sourceSnapshot({ target: "Target One" }, 2);
 
     expect(automationActionsFromDomainEvent({
       event: updatedEvent({ title: "Changed" }),
-      snapshot: sourceSnapshot({ target: "Target One" }),
+      change: documentChangeContext(before, after, ["title"]),
+      input: { title: "Changed" },
+      actor: owner,
       rules: doctype.automationRules ?? []
     })).toEqual([]);
   });
 
-  it("rejects invalid automation rule definitions", () => {
+  it("rejects removed contracts and invalid stable ids, triggers, selectors, and actions", () => {
     expect(() => defineDocType({
       name: "Bad",
       fields: [{ name: "title", type: "text" }],
       automationRules: "bad"
     } as never)).toThrow("must be an array");
+    expect(() => badDocType([
+      ruleDefinition("dup", { events: ["DocumentUpdated"] }),
+      ruleDefinition("dup", { events: ["DocumentUpdated"] })
+    ])).toThrow("id 'dup' is duplicated");
+    expect(() => badDocType([
+      { ...ruleDefinition("first", { events: ["DocumentUpdated"] }), name: "Same name" },
+      { ...ruleDefinition("second", { events: ["DocumentUpdated"] }), name: "Same name" }
+    ])).toThrow("name 'Same name' is duplicated");
+    expect(() => badDocType([null] as never)).toThrow("must be an object");
+    expect(() => badDocType([{
+      ...ruleDefinition("bad id", { events: ["DocumentUpdated"] })
+    }])).toThrow("stable identifier");
+    expect(() => badDocType([{
+      ...ruleDefinition("enabled", { events: ["DocumentUpdated"] }),
+      enabled: "yes"
+    } as never])).toThrow("must be a boolean");
+    expect(() => badDocType([{
+      ...ruleDefinition("empty-events", { events: ["DocumentUpdated"] }),
+      trigger: { events: [] }
+    }])).toThrow("at least one event kind");
+    expect(() => badDocType([{
+      ...ruleDefinition("bad-event", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["UnknownEvent"] }
+    } as never])).toThrow("is not supported");
+    expect(() => badDocType([{
+      ...ruleDefinition("event", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated", "DocumentUpdated"] }
+    }])).toThrow("duplicate");
+    expect(() => badDocType([{
+      ...ruleDefinition("workflow-action", { events: ["DomainCommandApplied"] }),
+      trigger: { events: ["DomainCommandApplied"], workflowAction: "approve" }
+    }])).toThrow("requires workflow");
+    expect(() => badDocType([{
+      ...ruleDefinition("empty-touched", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated"], touchedFields: [] }
+    }])).toThrow("touchedFields must contain at least one field");
+    expect(() => badDocType([{
+      ...ruleDefinition("field", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated"], touchedFields: ["missing"] }
+    }])).toThrow("not defined on Bad");
+    expect(() => badDocType([{
+      ...ruleDefinition("bad-change", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated"], changes: [null] }
+    } as never])).toThrow("must be an object");
+    expect(() => badDocType([{
+      ...ruleDefinition("workflow", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated"], workflow: "review" }
+    }])).toThrow("require WorkflowTransitioned");
+    expect(() => badDocType([{
+      ...ruleDefinition("command", { events: ["DocumentUpdated"] }),
+      trigger: { events: ["DocumentUpdated"], domainCommand: "close" }
+    }])).toThrow("requires DomainCommandApplied");
+    expect(() => badDocType([{
+      ...ruleDefinition("actions", { events: ["DocumentUpdated"] }),
+      actions: [updateSelfAction("same"), updateSelfAction("same")]
+    }])).toThrow("action id 'same' is duplicated");
+    expect(() => badDocType([{
+      ...ruleDefinition("empty-actions", { events: ["DocumentUpdated"] }),
+      actions: []
+    }])).toThrow("at least one action");
+    expect(() => badDocType([{
+      ...ruleDefinition("bad-action", { events: ["DocumentUpdated"] }),
+      actions: [{ id: "send", kind: "sendEmail" }]
+    } as never])).toThrow("is not supported");
+    expect(() => badDocType([{
+      ...ruleDefinition("empty-patch", { events: ["DocumentUpdated"] }),
+      actions: [{
+        id: "update",
+        kind: "updateDocument",
+        target: { doctype: "Bad", name: { kind: "documentName" } },
+        patch: {}
+      }]
+    }])).toThrow("patch must contain at least one field");
+    expect(() => badDocType([{
+      ...ruleDefinition("old", { events: ["DocumentUpdated"] }),
+      trigger: undefined,
+      events: ["DocumentUpdated"],
+      changedFields: ["title"],
+      condition: afterField("title", "x")
+    } as never])).toThrow("trigger must be an object");
+  });
+
+  it("enforces configurable Automation rule and action bounds", () => {
     expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
+      name: "Bounded Rules",
+      fields: sourceFields(),
       automationRules: [
-        { name: "Dup", events: ["DocumentUpdated"], actions: [updateSelfAction()] },
-        { name: "Dup", events: ["DocumentUpdated"], actions: [updateSelfAction()] }
+        ruleDefinition("first", { events: ["DocumentUpdated"] }),
+        ruleDefinition("second", { events: ["DocumentUpdated"] })
       ]
-    })).toThrow("duplicated");
+    }, { automationLimits: { maxRules: 1 } })).toThrow("cannot define more than 1 Automation rules");
+
     expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
+      name: "Bounded Actions",
+      fields: sourceFields(),
       automationRules: [{
-        name: "Dup",
-        events: ["DocumentUpdated", "DocumentUpdated"],
-        actions: [updateSelfAction()]
+        ...ruleDefinition("bounded", { events: ["DocumentUpdated"] }),
+        actions: [updateSelfAction("first"), updateSelfAction("second")]
       }]
-    })).toThrow("duplicate");
+    }, { automationLimits: { maxActionsPerRule: 1 } })).toThrow("cannot define more than 1 actions");
+
     expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Dup",
-        events: ["DocumentUpdated"],
-        changedFields: ["title", "title"],
-        actions: [updateSelfAction()]
-      }]
-    })).toThrow("duplicate");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Empty",
-        events: [],
-        actions: [updateSelfAction()]
-      }]
-    })).toThrow("at least one");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "No Actions",
-        events: ["DocumentUpdated"],
-        actions: []
-      }]
-    })).toThrow("at least one");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Bad Event",
-        events: ["Unsupported"],
-        actions: [updateSelfAction()]
-      }]
-    } as never)).toThrow("not supported");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Bad Enabled",
-        enabled: "yes",
-        events: ["DocumentUpdated"],
-        actions: [updateSelfAction()]
-      }]
-    } as never)).toThrow("must be a boolean");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Bad Action",
-        events: ["DocumentUpdated"],
-        actions: [{ kind: "webhook" }]
-      }]
-    } as never)).toThrow("not supported");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Bad Patch",
-        events: ["DocumentUpdated"],
-        actions: [{
-          kind: "updateDocument",
-          target: { doctype: "Target", name: { kind: "documentName" } },
-          patch: []
-        }]
-      }]
-    } as never)).toThrow("must be an object");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Empty Patch",
-        events: ["DocumentUpdated"],
-        actions: [{
-          kind: "updateDocument",
-          target: { doctype: "Target", name: { kind: "documentName" } },
-          patch: {}
-        }]
-      }]
-    })).toThrow("at least one field");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: "Bad Expression",
-        events: ["DocumentUpdated"],
-        actions: [{
-          kind: "updateDocument",
-          target: { doctype: "Target", name: { kind: "documentName" } },
-          patch: { title: { kind: "unknown" } }
-        }]
-      }]
-    } as never)).toThrow("expression is invalid");
-    expect(() => defineDocType({
-      name: "Bad",
-      fields: [{ name: "title", type: "text" }],
-      automationRules: [{
-        name: " ",
-        events: ["DocumentUpdated"],
-        actions: [updateSelfAction()]
-      }]
-    })).toThrow("required");
+      name: "Invalid Bounds",
+      fields: sourceFields(),
+      automationRules: [ruleDefinition("only", { events: ["DocumentUpdated"] })]
+    }, { automationLimits: { maxRules: 0 } })).toThrow("must be a positive integer");
   });
 });
 
-function updateSelfAction() {
+function sourceFields() {
+  return [
+    { name: "title", type: "text" as const },
+    { name: "target", type: "text" as const },
+    { name: "status", type: "select" as const, options: ["Open", "Done"] },
+    { name: "missing", type: "text" as const }
+  ];
+}
+
+function ruleDefinition(
+  id: string,
+  trigger: AutomationRuleDefinition["trigger"]
+): AutomationRuleDefinition {
   return {
+    id,
+    name: id,
+    trigger,
+    actions: [updateSelfAction("update")]
+  };
+}
+
+function updateSelfAction(id: string) {
+  return {
+    id,
     kind: "updateDocument" as const,
     target: { doctype: "Source", name: { kind: "documentName" as const } },
     patch: { title: { kind: "literal" as const, value: "Changed" } }
   };
 }
 
-function updatedEvent(patch: Record<string, unknown>, unset: readonly string[] = []): DomainEvent {
+function badDocType(automationRules: readonly AutomationRuleDefinition[]) {
+  return defineDocType({
+    name: "Bad",
+    fields: [{ name: "title", type: "text" }],
+    automationRules
+  });
+}
+
+function updatedEvent(patch: DocumentData): DomainEvent {
   return {
     id: "evt_source",
     tenantId: "acme",
@@ -316,25 +425,52 @@ function updatedEvent(patch: Record<string, unknown>, unset: readonly string[] =
     type: "SourceUpdated",
     doctype: "Source",
     documentName: "Source One",
-    actorId: "owner@example.com",
+    actorId: owner.id,
     occurredAt,
-    payload: {
-      kind: "DocumentUpdated",
-      patch: patch as DomainEvent["payload"] extends { readonly patch: infer TPatch } ? TPatch : never,
-      ...(unset.length === 0 ? {} : { unset })
-    },
+    payload: { kind: "DocumentUpdated", patch },
     metadata: {}
   } as DomainEvent;
 }
 
-function sourceSnapshot(data: Record<string, unknown>): DocumentSnapshot {
+function workflowEvent(workflow: string, action: string): DomainEvent {
+  return {
+    ...updatedEvent({ status: "Done" }),
+    payload: {
+      kind: "WorkflowTransitioned",
+      workflow,
+      stateField: "status",
+      action,
+      from: "Open",
+      to: "Done",
+      patch: { status: "Done" }
+    }
+  } as unknown as DomainEvent;
+}
+
+function domainCommandEvent(
+  command: string,
+  transitions: readonly {
+    readonly workflow: string;
+    readonly stateField: string;
+    readonly action: string;
+    readonly from: string;
+    readonly to: string;
+  }[] = []
+): DomainEvent {
+  return {
+    ...updatedEvent({ status: "Done" }),
+    payload: { kind: "DomainCommandApplied", command, input: {}, patch: { status: "Done" }, transitions }
+  } as DomainEvent;
+}
+
+function sourceSnapshot(data: DocumentData, version: number): DocumentSnapshot {
   return {
     tenantId: "acme",
     doctype: "Source",
     name: "Source One",
-    version: 2,
+    version,
     docstatus: "draft",
-    data: data as DocumentSnapshot["data"],
+    data,
     createdAt: occurredAt,
     updatedAt: occurredAt
   };

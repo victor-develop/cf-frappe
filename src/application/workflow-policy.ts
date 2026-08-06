@@ -1,11 +1,11 @@
-import { conflict, notFound, permissionDenied } from "../core/errors.js";
+import { conflict, FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
-  type TenantId,
-  type WorkflowDefinition
+  type NamedWorkflowDefinition,
+  type TenantId
 } from "../core/types.js";
-import type { WorkflowDefinitionState } from "../core/workflow.js";
+import type { NamedWorkflowDefinitionState } from "../core/workflow.js";
 
 export function ensureWorkflowServiceAvailable<T>(workflows: T | undefined): asserts workflows is T {
   if (workflows === undefined) {
@@ -37,17 +37,20 @@ export function authorizeWorkflowAdministration(command: {
 }
 
 export function ensureWorkflowExpectedVersion(
-  state: WorkflowDefinitionState,
+  state: NamedWorkflowDefinitionState,
   expectedVersion: number | undefined
 ): void {
   if (expectedVersion !== undefined && state.version !== expectedVersion) {
-    throw conflict(`Expected workflow definitions at version ${expectedVersion}, found ${state.version}`);
+    throw conflict(
+      `Expected workflow '${state.doctypeName}.${state.workflowName}' at version ${String(expectedVersion)}, ` +
+      `found ${String(state.version)}`
+    );
   }
 }
 
 export function workflowDefinitionsEqual(
-  left: WorkflowDefinition | undefined,
-  right: WorkflowDefinition
+  left: NamedWorkflowDefinition | undefined,
+  right: NamedWorkflowDefinition
 ): boolean {
   return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
@@ -57,14 +60,31 @@ export type WorkflowDefinitionChangeDecision =
   | { readonly status: "noop" };
 
 export function planWorkflowDefinitionSave(
-  existing: WorkflowDefinition | undefined,
-  workflow: WorkflowDefinition
+  existing: NamedWorkflowDefinition | undefined,
+  workflow: NamedWorkflowDefinition
 ): WorkflowDefinitionChangeDecision {
   return workflowDefinitionsEqual(existing, workflow) ? { status: "noop" } : { status: "append" };
 }
 
 export function planWorkflowDefinitionClear(
-  existing: WorkflowDefinition | undefined
+  state: NamedWorkflowDefinitionState
 ): WorkflowDefinitionChangeDecision {
-  return existing === undefined ? { status: "noop" } : { status: "append" };
+  return state.cleared ? { status: "noop" } : { status: "append" };
+}
+
+export function ensureWorkflowRolesKnown(
+  workflow: NamedWorkflowDefinition,
+  roles: ReadonlyMap<string, "enabled" | "disabled">
+): void {
+  for (const role of new Set(workflow.transitions.flatMap((transition) => transition.roles ?? []))) {
+    const status = roles.get(role);
+    if (status === "enabled") {
+      continue;
+    }
+    throw new FrameworkError(
+      "WORKFLOW_INVALID",
+      status === "disabled" ? `Workflow role '${role}' is disabled` : `Workflow role '${role}' is not defined`,
+      { status: 400 }
+    );
+  }
 }

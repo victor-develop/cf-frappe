@@ -157,6 +157,54 @@ describe("document history policy", () => {
       ]);
   });
 
+  it("does not expose pre-cutover workflow events in document history", () => {
+    const events = [
+      event(1, "evt-created", {
+        kind: "DocumentCreated",
+        docstatus: "draft",
+        data: { title: "Timeline", workflow_state: "Open" }
+      }),
+      event(2, "evt-legacy", {
+        kind: "WorkflowTransitioned",
+        action: "legacy-close",
+        from: "Open",
+        to: "Legacy Closed",
+        patch: { workflow_state: "Legacy Closed", legacy: true }
+      } as unknown as DocumentEventPayload),
+      event(3, "evt-current", {
+        kind: "WorkflowTransitioned",
+        workflow: "lifecycle",
+        stateField: "workflow_state",
+        action: "close",
+        from: "Open",
+        to: "Closed",
+        patch: { workflow_state: "Closed" }
+      })
+    ];
+
+    const page = selectDocumentTimelinePage({ events, beforeSequence: 3, limit: 10 });
+    expect(page.visibleEvents.map((item) => item.id)).toEqual(["evt-created", "evt-current"]);
+    expect(documentHistoryEventsAtVersion(events, 3).map((item) => item.id))
+      .toEqual(["evt-created", "evt-current"]);
+    expect(documentTimelineEntries(events, null).map(({ eventId, summary, changes }) => ({ eventId, summary, changes })))
+      .toEqual([
+        {
+          eventId: "evt-created",
+          summary: "Created document",
+          changes: [
+            { field: "docstatus", newValue: "draft" },
+            { field: "title", newValue: "Timeline" },
+            { field: "workflow_state", newValue: "Open" }
+          ]
+        },
+        {
+          eventId: "evt-current",
+          summary: "Closed lifecycle.workflow_state from Open to Closed",
+          changes: [{ field: "workflow_state", oldValue: "Open", newValue: "Closed" }]
+        }
+      ]);
+  });
+
   it("diffs workflow, domain-command, and docstatus payloads", () => {
     const before = snapshot({ workflow_state: "Open", body: "Before" }, "draft", 1);
     const afterWorkflow = snapshot({ workflow_state: "Closed", body: "Before" }, "draft", 2);
@@ -165,6 +213,8 @@ describe("document history policy", () => {
 
     expect(documentTimelineEventChanges(event(2, "evt-workflow", {
       kind: "WorkflowTransitioned",
+      workflow: "lifecycle",
+      stateField: "workflow_state",
       action: "close",
       from: "Open",
       to: "Closed",
@@ -176,7 +226,8 @@ describe("document history policy", () => {
       kind: "DomainCommandApplied",
       command: "rewriteBody",
       input: { body: "After" },
-      patch: { body: "After" }
+      patch: { body: "After" },
+      transitions: []
     }), before, afterCommand)).toEqual([
       { field: "body", oldValue: "Before", newValue: "After" }
     ]);
@@ -191,11 +242,13 @@ describe("document history policy", () => {
       .toBe("Email: Follow up");
     expect(documentTimelineSummary({
       kind: "WorkflowTransitioned",
+      workflow: "lifecycle",
+      stateField: "workflow_state",
       action: "close",
       from: "Open",
       to: "Closed",
       patch: { workflow_state: "Closed" }
-    })).toBe("Closed workflow_state from Open to Closed");
+    })).toBe("Closed lifecycle.workflow_state from Open to Closed");
     expect(documentTimelineSummary({ kind: "DocumentCommentAdded", text: "x".repeat(90) }))
       .toBe(`Commented: ${"x".repeat(77)}...`);
   });

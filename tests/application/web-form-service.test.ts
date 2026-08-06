@@ -21,6 +21,7 @@ const leadDocType = defineDocType({
     { name: "email", type: "text", placeholder: "jane@example.com" },
     { name: "priority", type: "select", options: ["Low", "High"] },
     { name: "accepted", type: "boolean" },
+    { name: "source", type: "text" },
     { name: "created_by", type: "text", readOnly: true, defaultValue: ({ actor }) => actor.id }
   ],
   permissions: [
@@ -81,8 +82,7 @@ describe("WebFormService", () => {
         title: "Jane Buyer",
         email: "jane@example.com",
         priority: "High",
-        accepted: true,
-        created_by: "attacker@example.com"
+        accepted: true
       },
       metadata: { source: "web-form" }
     });
@@ -98,6 +98,9 @@ describe("WebFormService", () => {
         created_by: "guest"
       }
     });
+    await expect(webForms.submitWebForm(guest, "Lead Intake", {
+      data: { title: "Injected Lead", created_by: "attacker@example.com" }
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(store.readStream(documentStream(result.document.tenantId, "Lead", "Jane Buyer"))).resolves.toMatchObject([
       { payload: { kind: "DocumentCreated" }, metadata: { source: "web-form" } }
     ]);
@@ -223,6 +226,55 @@ describe("WebFormService", () => {
         message: "Web form field 'email' is required"
       });
     await expect(store.get("default", "Lead", "Missing Email")).resolves.toBeNull();
+  });
+
+  it("separates caller fields from trusted server-supplied fields", async () => {
+    const registry = createRegistry({
+      doctypes: [leadDocType],
+      webForms: [
+        defineWebForm({
+          name: "Server Lead Intake",
+          doctype: "Lead",
+          fields: [
+            { field: "title", required: true },
+            { field: "source", required: true, serverSupplied: true }
+          ]
+        })
+      ]
+    });
+    const store = new InMemoryDocumentStore();
+    const documents = new DocumentService({ registry, store, clock: fixedClock(now) });
+    const queries = new QueryService({ registry, projections: store });
+    const webForms = new WebFormService({ registry, documents, queries });
+
+    await expect(webForms.submitWebForm(guest, "Server Lead Intake", {
+      data: { title: "Injected Lead", source: "client" }
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Web form field 'source' is server-supplied"
+    });
+    await expect(webForms.submitWebForm(guest, "Server Lead Intake", {
+      data: { title: "Missing Server Data" }
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Web form field 'source' is required"
+    });
+    await expect(webForms.submitWebFormWithServerData(guest, "Server Lead Intake", {
+      data: { title: "Wrong Server Field" }
+    }, {
+      email: "server@example.test"
+    })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Web form field 'email' is not server-supplied"
+    });
+
+    await expect(webForms.submitWebFormWithServerData(guest, "Server Lead Intake", {
+      data: { title: "Trusted Lead" }
+    }, {
+      source: "verified-boundary"
+    })).resolves.toMatchObject({
+      document: { name: "Trusted Lead", data: { source: "verified-boundary" } }
+    });
   });
 
   it("hides forms when form roles or DocType create permissions fail", async () => {

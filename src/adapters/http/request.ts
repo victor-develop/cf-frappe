@@ -1,5 +1,10 @@
 import { badRequest } from "../../core/errors.js";
 import {
+  MAX_PREDICATE_DEPTH,
+  MAX_PREDICATE_NODES,
+  PREDICATE_OPERATORS
+} from "../../core/predicates.js";
+import {
   LIST_FILTER_OPERATORS,
   MAX_LIST_FILTER_EXPRESSION_DEPTH,
   MAX_LIST_FILTER_EXPRESSION_NODES,
@@ -13,12 +18,17 @@ import {
 import type {
   DocumentData,
   JsonPrimitive,
+  JsonValue,
   ListFilterExpression,
   ListFilterValue,
   ListDocumentsFilter,
   ListDocumentsQuery,
   ListFilterOperator,
-  MutableDocumentData
+  MutableDocumentData,
+  PredicateExpression,
+  PredicateOperand,
+  PredicateOperator,
+  PredicateScope
 } from "../../core/types.js";
 
 const SENSITIVE_QUERY_KEYS = new Set(["token", "password", "secret", "api_key", "apikey", "key"]);
@@ -102,6 +112,94 @@ export function listFilterExpressionFromValue(
   label = "Filter expression"
 ): ListFilterExpression {
   return listFilterExpressionNodeFromValue(value, label, 1, { remaining: MAX_LIST_FILTER_EXPRESSION_NODES });
+}
+
+export function predicateExpressionFromValue(
+  value: unknown,
+  label = "Predicate expression"
+): PredicateExpression {
+  return predicateNodeFromValue(value, label, 1, { remaining: MAX_PREDICATE_NODES });
+}
+
+function predicateNodeFromValue(
+  value: unknown,
+  label: string,
+  depth: number,
+  budget: { remaining: number }
+): PredicateExpression {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) {
+    throw badRequest(`Predicate expression cannot exceed ${MAX_PREDICATE_DEPTH} levels or ${MAX_PREDICATE_NODES} nodes`);
+  }
+  if (!isRecord(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  if (depth > MAX_PREDICATE_DEPTH) {
+    throw badRequest(`Predicate expression cannot exceed ${MAX_PREDICATE_DEPTH} levels`);
+  }
+  if (value.kind === "group") {
+    if (value.match !== "all" && value.match !== "any") {
+      throw badRequest(`${label} group match must be all or any`);
+    }
+    if (!Array.isArray(value.predicates) || value.predicates.length === 0) {
+      throw badRequest(`${label} group must include at least one predicate`);
+    }
+    return {
+      kind: "group",
+      match: value.match,
+      predicates: value.predicates.map((predicate, index) =>
+        predicateNodeFromValue(predicate, `${label}.predicates[${String(index)}]`, depth + 1, budget))
+    };
+  }
+  if (value.kind === "not") {
+    return {
+      kind: "not",
+      predicate: predicateNodeFromValue(value.predicate, `${label}.predicate`, depth + 1, budget)
+    };
+  }
+  if (value.kind !== "compare") {
+    throw badRequest(`${label}.kind must be compare, group, or not`);
+  }
+  if (typeof value.operator !== "string" ||
+    !(PREDICATE_OPERATORS as readonly string[]).includes(value.operator)) {
+    throw badRequest(`${label}.operator is invalid`);
+  }
+  return {
+    kind: "compare",
+    left: predicateOperandFromValue(value.left, `${label}.left`),
+    operator: value.operator as PredicateOperator,
+    right: predicateOperandFromValue(value.right, `${label}.right`)
+  };
+}
+
+function predicateOperandFromValue(value: unknown, label: string): PredicateOperand {
+  if (!isRecord(value)) {
+    throw badRequest(`${label} must be an object`);
+  }
+  if (value.kind === "literal") {
+    if (!("value" in value) || !isJsonValue(value.value)) {
+      throw badRequest(`${label}.value must be JSON`);
+    }
+    return { kind: "literal", value: value.value };
+  }
+  if (value.kind === "field") {
+    if ((value.scope !== "before" && value.scope !== "after") || typeof value.field !== "string") {
+      throw badRequest(`${label} field operand is invalid`);
+    }
+    return { kind: "field", scope: value.scope, field: value.field };
+  }
+  if (value.kind === "path") {
+    if (!isPredicatePathScope(value.scope) ||
+      !Array.isArray(value.path) || value.path.some((segment) => typeof segment !== "string")) {
+      throw badRequest(`${label} path operand is invalid`);
+    }
+    return { kind: "path", scope: value.scope, path: value.path };
+  }
+  throw badRequest(`${label}.kind must be literal, field, or path`);
+}
+
+function isPredicatePathScope(value: unknown): value is Extract<PredicateScope, "input" | "event" | "actor"> {
+  return value === "input" || value === "event" || value === "actor";
 }
 
 function listFilterExpressionNodeFromValue(
@@ -325,6 +423,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isJsonPrimitive(value: unknown): value is JsonPrimitive {
   return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (isJsonPrimitive(value)) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
 function parseListOrder(value: string): NonNullable<ListDocumentsQuery["order"]> {

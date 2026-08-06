@@ -1,12 +1,12 @@
 import type {
   JsonPrimitive,
-  ListDocumentsFilter,
+  JsonValue,
   ListDocumentsQuery,
-  ListFilterExpression,
-  ListFilterValue,
-  ListOrderDirection
+  ListOrderDirection,
+  PredicateExpression,
+  PredicateOperand,
+  PredicateOperator
 } from "../../core/types.js";
-import { andListFilterExpressions, isListFilterGroup, listFilterExpressionFromFilters } from "../../core/list-view.js";
 
 export interface D1ProjectionListQuery {
   readonly limit: number;
@@ -14,120 +14,172 @@ export interface D1ProjectionListQuery {
   readonly where: string;
   readonly params: readonly JsonPrimitive[];
   readonly orderBy: string;
+  readonly postFilter?: PredicateExpression;
 }
 
 export function d1ProjectionListQuery(query: ListDocumentsQuery): D1ProjectionListQuery {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
-  const filtered = listFilterWhere(
-    andListFilterExpressions([
-      listFilterExpressionFromFilters(query.filters ?? []),
-      query.filterExpression
-    ])
-  );
+  const filtered = predicateWhere(query.predicate);
   return {
     limit,
     offset,
     where: ["tenant_id = ?", "doctype = ?", ...filtered.conditions].join(" AND "),
     params: [query.tenantId, query.doctype, ...filtered.params],
-    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc")
+    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc"),
+    ...(!filtered.exact && query.predicate !== undefined ? { postFilter: query.predicate } : {})
   };
 }
 
-interface ListFilterWhere {
+interface PredicateWhere {
   readonly conditions: readonly string[];
   readonly params: readonly JsonPrimitive[];
+  readonly exact: boolean;
 }
 
-function listFilterWhere(expression: ListFilterExpression | undefined): ListFilterWhere {
-  return expression === undefined ? { conditions: [], params: [] } : listFilterExpressionWhere(expression);
+function predicateWhere(expression: PredicateExpression | undefined): PredicateWhere {
+  return expression === undefined
+    ? { conditions: [], params: [], exact: true }
+    : predicateExpressionWhere(expression);
 }
 
-function listFilterExpressionWhere(expression: ListFilterExpression): ListFilterWhere {
-  if (isListFilterGroup(expression)) {
-    const children = expression.filters.map(listFilterExpressionWhere).filter((child) => child.conditions.length > 0);
-    if (children.length === 0) {
-      return { conditions: [], params: [] };
-    }
-    const joiner = expression.match === "all" ? " AND " : " OR ";
-    return {
-      conditions: [`(${children.map((child) => child.conditions.join(" AND ")).join(joiner)})`],
-      params: children.flatMap((child) => child.params)
-    };
+function predicateExpressionWhere(expression: PredicateExpression): PredicateWhere {
+  if (expression.kind === "group") {
+    return predicateGroupWhere(expression);
   }
-  return listFilterPredicateWhere(expression);
+  if (expression.kind === "not") {
+    return { conditions: [], params: [], exact: false };
+  }
+  return predicateComparisonWhere(expression);
 }
 
-function listFilterPredicateWhere(filter: ListDocumentsFilter): ListFilterWhere {
-  const expression = listFilterExpression(filter.field);
-  const operator = filter.operator ?? "eq";
+function predicateGroupWhere(expression: Extract<PredicateExpression, { readonly kind: "group" }>): PredicateWhere {
+  const children = expression.predicates.map(predicateExpressionWhere);
+  if (expression.match === "any" && children.some((child) => !child.exact)) {
+    return { conditions: [], params: [], exact: false };
+  }
+  const pushedDown = children.filter((child) => child.conditions.length > 0);
+  const exact = children.every((child) => child.exact);
+  if (pushedDown.length === 0) {
+    return { conditions: [], params: [], exact };
+  }
+  const joiner = expression.match === "all" ? " AND " : " OR ";
+  return {
+    conditions: [`(${pushedDown.map((child) => child.conditions.join(" AND ")).join(joiner)})`],
+    params: pushedDown.flatMap((child) => child.params),
+    exact
+  };
+}
+
+function predicateComparisonWhere(
+  predicate: Extract<PredicateExpression, { readonly kind: "compare" }>
+): PredicateWhere {
+  const field = predicateField(predicate.left);
+  const expression = listFilterExpression(field);
+  const value = predicateLiteral(predicate.right);
+  const operator = predicate.operator;
   switch (operator) {
-    case "eq":
-      return { conditions: [`${expression} = ?`], params: [sqliteJsonValue(scalarFilterValue(filter))] };
-    case "ne":
+    case "eq": {
+      const scalar = scalarPredicateValue(value, operator);
+      return scalar === null
+        ? { conditions: [nullEqualityExpression(field, expression)], params: [], exact: true }
+        : { conditions: [`${expression} = ?`], params: [sqliteJsonValue(scalar)], exact: true };
+    }
+    case "ne": {
+      const scalar = scalarPredicateValue(value, operator);
       return {
-        conditions: [`${expression} IS NOT NULL AND ${expression} != ?`],
-        params: [sqliteJsonValue(scalarFilterValue(filter))]
+        conditions: [scalar === null
+          ? `${expression} IS NOT NULL`
+          : `${expression} IS NOT NULL AND ${expression} != ?`],
+        params: scalar === null ? [] : [sqliteJsonValue(scalar)],
+        exact: true
       };
+    }
     case "in": {
-      const values = membershipFilterValues(filter);
+      const values = nonNullMembershipPredicateValues(value, operator);
       return {
-        conditions: [`${expression} IN (${values.map(() => "?").join(", ")})`],
-        params: values.map(sqliteJsonValue)
+        conditions: [values.length === 0 ? "0 = 1" : `${expression} IN (${values.map(() => "?").join(", ")})`],
+        params: values.map(sqliteJsonValue),
+        exact: true
       };
     }
     case "not_in": {
-      const values = membershipFilterValues(filter);
+      const values = nonNullMembershipPredicateValues(value, operator);
       return {
-        conditions: [`${expression} IS NOT NULL AND ${expression} NOT IN (${values.map(() => "?").join(", ")})`],
-        params: values.map(sqliteJsonValue)
+        conditions: [values.length === 0
+          ? `${expression} IS NOT NULL`
+          : `${expression} IS NOT NULL AND ${expression} NOT IN (${values.map(() => "?").join(", ")})`],
+        params: values.map(sqliteJsonValue),
+        exact: true
       };
     }
     case "is":
       return {
-        conditions: [`${expression} ${presenceFilterValue(filter) === "set" ? "IS NOT NULL" : "IS NULL"}`],
-        params: []
+        conditions: [`${expression} ${presencePredicateValue(value, operator) === "set" ? "IS NOT NULL" : "IS NULL"}`],
+        params: [],
+        exact: true
       };
     case "contains":
-      return {
-        conditions: [`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`],
-        params: [`%${escapeLike(String(scalarFilterValue(filter)).toLowerCase())}%`]
-      };
     case "like":
-      return {
-        conditions: [`LOWER(CAST(${expression} AS TEXT)) LIKE ? ESCAPE '\\'`],
-        params: [patternFilterValue(filter)]
-      };
     case "not_like":
-      return {
-        conditions: [`${expression} IS NOT NULL AND LOWER(CAST(${expression} AS TEXT)) NOT LIKE ? ESCAPE '\\'`],
-        params: [patternFilterValue(filter)]
-      };
+      return { conditions: [], params: [], exact: false };
     case "gt":
-      return { conditions: [`${expression} > ?`], params: [sqliteJsonValue(scalarFilterValue(filter))] };
+      return {
+        conditions: [`${expression} > ?`],
+        params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
+        exact: true
+      };
     case "gte":
-      return { conditions: [`${expression} >= ?`], params: [sqliteJsonValue(scalarFilterValue(filter))] };
+      return {
+        conditions: [`${expression} >= ?`],
+        params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
+        exact: true
+      };
     case "lt":
-      return { conditions: [`${expression} < ?`], params: [sqliteJsonValue(scalarFilterValue(filter))] };
+      return {
+        conditions: [`${expression} < ?`],
+        params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
+        exact: true
+      };
     case "lte":
-      return { conditions: [`${expression} <= ?`], params: [sqliteJsonValue(scalarFilterValue(filter))] };
+      return {
+        conditions: [`${expression} <= ?`],
+        params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
+        exact: true
+      };
     case "between": {
-      const [minimum, maximum] = rangeFilterValues(filter);
+      const [minimum, maximum] = rangePredicateValues(value, operator);
       return {
         conditions: [`(${expression} >= ? AND ${expression} <= ?)`],
-        params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)]
+        params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)],
+        exact: true
       };
     }
     case "not_between": {
-      const [minimum, maximum] = rangeFilterValues(filter);
+      const [minimum, maximum] = rangePredicateValues(value, operator);
       return {
         conditions: [`${expression} IS NOT NULL AND (${expression} < ? OR ${expression} > ?)`],
-        params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)]
+        params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)],
+        exact: true
       };
     }
     default:
-      throw new Error(`Unsupported list filter operator '${String(operator)}'`);
+      throw new Error(`Unsupported predicate operator '${String(operator)}'`);
   }
+}
+
+function predicateField(operand: PredicateOperand): string {
+  if (operand.kind !== "field" || operand.scope !== "after") {
+    throw new Error("D1 projection predicates require an after-field left operand");
+  }
+  return operand.field;
+}
+
+function predicateLiteral(operand: PredicateOperand): JsonValue {
+  if (operand.kind !== "literal") {
+    throw new Error("D1 projection predicates require a literal right operand");
+  }
+  return operand.value;
 }
 
 function listFilterExpression(field: string): string {
@@ -136,6 +188,12 @@ function listFilterExpression(field: string): string {
     return systemExpression;
   }
   return `json_extract(data_json, '${escapeSqlString(jsonPath(field))}')`;
+}
+
+function nullEqualityExpression(field: string, expression: string): string {
+  return systemFilterExpression(field) === undefined
+    ? `json_type(data_json, '${escapeSqlString(jsonPath(field))}') = 'null'`
+    : `${expression} IS NULL`;
 }
 
 function systemFilterExpression(field: string): string | undefined {
@@ -155,49 +213,50 @@ function systemFilterExpression(field: string): string | undefined {
   }
 }
 
-function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
-  if (isFilterValueArray(filter.value)) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
+function scalarPredicateValue(value: JsonValue, operator: PredicateOperator): JsonPrimitive {
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    throw new Error(`Predicate operator '${operator}' requires a scalar value`);
   }
-  return filter.value;
+  return value;
 }
 
-function membershipFilterValues(filter: ListDocumentsFilter): readonly JsonPrimitive[] {
-  if (!isFilterValueArray(filter.value) || filter.value.length === 0) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires one or more values`);
+function membershipPredicateValues(value: JsonValue, operator: PredicateOperator): readonly JsonPrimitive[] {
+  if (!isPrimitiveArray(value) || value.length === 0) {
+    throw new Error(`Predicate operator '${operator}' requires one or more values`);
   }
-  return filter.value;
+  return value;
 }
 
-function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
-  if (filter.value === "set" || filter.value === "not set") {
-    return filter.value;
-  }
-  throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
+function nonNullMembershipPredicateValues(
+  value: JsonValue,
+  operator: PredicateOperator
+): readonly Exclude<JsonPrimitive, null>[] {
+  return membershipPredicateValues(value, operator).filter(
+    (item): item is Exclude<JsonPrimitive, null> => item !== null
+  );
 }
 
-function patternFilterValue(filter: ListDocumentsFilter): string {
-  const value = scalarFilterValue(filter);
-  if (value === null) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a non-null pattern value`);
+function presencePredicateValue(value: JsonValue, operator: PredicateOperator): "set" | "not set" {
+  if (value === "set" || value === "not set") {
+    return value;
   }
-  return String(value).toLowerCase();
+  throw new Error(`Predicate operator '${operator}' requires set or not set`);
 }
 
-function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {
-  if (!isFilterValueArray(filter.value) || filter.value.length !== 2) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires exactly two values`);
+function rangePredicateValues(value: JsonValue, operator: PredicateOperator): readonly [JsonPrimitive, JsonPrimitive] {
+  if (!isPrimitiveArray(value) || value.length !== 2) {
+    throw new Error(`Predicate operator '${operator}' requires exactly two values`);
   }
-  const minimum = filter.value[0];
-  const maximum = filter.value[1];
+  const minimum = value[0];
+  const maximum = value[1];
   if (minimum === undefined || minimum === null || maximum === undefined || maximum === null) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires non-null range values`);
+    throw new Error(`Predicate operator '${operator}' requires non-null range values`);
   }
   return [minimum, maximum];
 }
 
-function isFilterValueArray(value: ListFilterValue): value is readonly JsonPrimitive[] {
-  return Array.isArray(value);
+function isPrimitiveArray(value: JsonValue): value is readonly JsonPrimitive[] {
+  return Array.isArray(value) && value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
 }
 
 function sqliteJsonValue(value: JsonPrimitive): JsonPrimitive {
@@ -245,8 +304,4 @@ function jsonPath(field: string): string {
 
 function escapeSqlString(value: string): string {
   return value.replaceAll("'", "''");
-}
-
-function escapeLike(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }

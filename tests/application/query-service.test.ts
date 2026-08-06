@@ -1,6 +1,7 @@
 import { createLinkedServices, createServices, data, guest, owner } from "../helpers";
 import { applyCustomFieldsToDocType, createRegistry, defineDocType, InMemoryDocumentStore, QueryService } from "../../src";
 import type { ProjectionStore } from "../../src";
+import { beforeField } from "../predicate-fixtures";
 
 describe("QueryService", () => {
   it("lists readable doctypes", () => {
@@ -16,6 +17,61 @@ describe("QueryService", () => {
     await expect(queries.getDocument(owner, "Note", "My Note")).resolves.toMatchObject({
       name: "My Note"
     });
+  });
+
+  it("evaluates available workflow actions against the authoritative unredacted projection", async () => {
+    const GuardedTask = defineDocType({
+      name: "Guarded Task",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "workflow_state", type: "select", options: ["Open", "Closed"] },
+        {
+          name: "internal_gate",
+          type: "text",
+          permissions: [{ roles: ["System Manager"], actions: ["read"] }]
+        }
+      ],
+      workflows: [{
+        name: "lifecycle",
+        stateField: "workflow_state",
+        initialState: "Open",
+        states: ["Open", "Closed"],
+        transitions: [{
+          action: "close",
+          from: "Open",
+          to: "Closed",
+          roles: ["User"],
+          allowWhen: beforeField("internal_gate", "ready")
+        }]
+      }],
+      permissions: [{ roles: ["User"], actions: ["read", "transition"] }]
+    });
+    const projections = new InMemoryDocumentStore();
+    const queries = new QueryService({
+      registry: createRegistry({ doctypes: [GuardedTask] }),
+      projections
+    });
+    await projections.save({
+      tenantId: "acme",
+      doctype: "Guarded Task",
+      name: "TASK-1",
+      version: 1,
+      docstatus: "draft",
+      data: { title: "Task", workflow_state: "Open", internal_gate: "ready" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    await expect(queries.getDocument(owner, "Guarded Task", "TASK-1")).resolves.not.toHaveProperty(
+      "data.internal_gate"
+    );
+    await expect(queries.listAvailableWorkflowActions(owner, "Guarded Task", "TASK-1")).resolves.toEqual([{
+      workflow: "lifecycle",
+      workflowLabel: "lifecycle",
+      action: "close",
+      label: "close",
+      to: "Closed"
+    }]);
   });
 
   it("resolves metadata-driven form views through the query boundary", () => {
@@ -47,11 +103,52 @@ describe("QueryService", () => {
   });
 
   it("hides deleted documents from list results", async () => {
-    const { documents, queries } = createServices(["e1", "e2"]);
-    await documents.create({ actor: owner, doctype: "Note", data: data() });
-    await documents.delete({ actor: { ...owner, roles: ["Task Manager"] }, doctype: "Note", name: "My Note" });
+    const { documents, queries } = createServices(["e1", "e2", "e3"]);
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "A Deleted" }) });
+    await documents.delete({ actor: { ...owner, roles: ["Task Manager"] }, doctype: "Note", name: "A Deleted" });
+    await documents.create({ actor: owner, doctype: "Note", data: data({ title: "B Visible" }) });
 
-    await expect(queries.listDocuments(guest, "Note")).resolves.toMatchObject({ data: [], total: 1 });
+    await expect(queries.listDocuments(guest, "Note", {
+      orderBy: "name",
+      order: "asc",
+      limit: 1
+    })).resolves.toMatchObject({
+      data: [{ name: "B Visible" }],
+      limit: 1,
+      offset: 0,
+      total: 1
+    });
+  });
+
+  it("applies record permissions before list pagination and totals", async () => {
+    const { documents, queries } = createLinkedServices(["p1", "p2", "p3", "p4"]);
+    const other = { ...owner, id: "other@example.com" };
+    await documents.create({ actor: other, doctype: "Project", data: { title: "A Hidden" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "B Visible" } });
+    await documents.create({ actor: other, doctype: "Project", data: { title: "C Hidden" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "D Visible" } });
+
+    await expect(queries.listDocuments(owner, "Project", {
+      orderBy: "name",
+      order: "asc",
+      limit: 1
+    })).resolves.toMatchObject({
+      data: [{ name: "B Visible" }],
+      limit: 1,
+      offset: 0,
+      total: 2
+    });
+    await expect(queries.listDocuments(owner, "Project", {
+      orderBy: "name",
+      order: "asc",
+      limit: 1,
+      offset: 1
+    })).resolves.toMatchObject({
+      data: [{ name: "D Visible" }],
+      limit: 1,
+      offset: 1,
+      total: 2
+    });
   });
 
   it("filters list results through metadata-validated scalar fields", async () => {
@@ -134,7 +231,7 @@ describe("QueryService", () => {
       doctype: "Note",
       data: data({ title: "Count Closed", priority: "Low", count: 3 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Count Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Count Closed", workflow: "lifecycle", action: "close" });
     await documents.create({
       actor: owner,
       doctype: "Note",
@@ -492,7 +589,7 @@ describe("QueryService", () => {
       doctype: "Note",
       data: data({ title: "CSV Closed", priority: "High", body: "Hidden", count: 2 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "CSV Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "CSV Closed", workflow: "lifecycle", action: "close" });
 
     const csv = await queries.exportDocumentsCsv(owner, "Note", {
       filters: [{ field: "priority", value: "High" }],
@@ -593,14 +690,38 @@ describe("QueryService", () => {
     await expect(queries.getDocument(owner, "Project", "Zeus")).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
     await expect(queries.listDocuments(owner, "Project")).resolves.toMatchObject({
       data: [{ name: "Apollo" }],
-      total: 2
+      total: 1
     });
     await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
       data: [{ name: "Apollo Task" }],
-      total: 2
+      total: 1
     });
     await expect(queries.listLinkOptions(owner, "Task", "project")).resolves.toMatchObject({
       options: [{ value: "Apollo", label: "Apollo" }]
+    });
+  });
+
+  it("applies user permissions before list pagination and totals", async () => {
+    const { documents, queries, userPermissions } = createLinkedServices(["p1", "p2"]);
+    const admin = { id: "admin@example.com", roles: ["System Manager"], tenantId: "acme" };
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Apollo" } });
+    await documents.create({ actor: owner, doctype: "Project", data: { title: "Zeus" } });
+    await userPermissions.allow({
+      actor: admin,
+      userId: owner.id,
+      targetDoctype: "Project",
+      targetName: "Zeus"
+    });
+
+    await expect(queries.listDocuments(owner, "Project", {
+      orderBy: "name",
+      order: "asc",
+      limit: 1
+    })).resolves.toMatchObject({
+      data: [{ name: "Zeus" }],
+      limit: 1,
+      offset: 0,
+      total: 1
     });
   });
 
@@ -629,7 +750,7 @@ describe("QueryService", () => {
 
     await expect(queries.listDocuments(owner, "Project")).resolves.toMatchObject({
       data: [{ name: "Apollo" }],
-      total: 2
+      total: 1
     });
     await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
       data: [{ name: "Apollo Task" }, { name: "Zeus Task" }],
@@ -672,7 +793,7 @@ describe("QueryService", () => {
     });
     await expect(queries.listDocuments(owner, "Task")).resolves.toMatchObject({
       data: [{ name: "Apollo Task" }],
-      total: 2
+      total: 1
     });
     await expect(queries.listLinkOptions(owner, "Task", "project")).resolves.toMatchObject({
       options: [{ value: "Apollo", label: "Apollo" }]
@@ -858,7 +979,7 @@ describe("QueryService", () => {
       doctype: "Note",
       data: data({ title: "Closed Note" })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Closed Note", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Closed Note", workflow: "lifecycle", action: "close" });
 
     const raw = await queries.listDocuments(owner, "Note");
     expect(raw.total).toBe(2);

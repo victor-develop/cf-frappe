@@ -57,7 +57,7 @@ describe("KanbanService", () => {
       doctype: "Note",
       data: data({ title: "Visible Closed", priority: "High", count: 3 })
     });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Visible Closed", workflow: "lifecycle", action: "close" });
     await documents.create({
       actor: owner,
       doctype: "Note",

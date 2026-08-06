@@ -1,12 +1,11 @@
 import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { andListFilterExpressions, mergeListFilters } from "../core/list-view.js";
+import { andPredicateExpressions } from "../core/predicates.js";
 import type {
   DocTypeDefinition,
   DomainEvent,
-  ListDocumentsFilter,
-  ListFilterExpression,
   NewDomainEvent,
+  PredicateExpression,
   TenantId
 } from "../core/types.js";
 
@@ -18,8 +17,7 @@ export type SavedListFilterEventPayload =
       readonly filterId: string;
       readonly label: string;
       readonly ownerId: string;
-      readonly filters: readonly ListDocumentsFilter[];
-      readonly filterExpression?: ListFilterExpression;
+      readonly predicate?: PredicateExpression;
     }
   | {
       readonly kind: "SavedListFilterDeleted";
@@ -42,8 +40,7 @@ export interface SavedListFilter {
   readonly id: string;
   readonly label: string;
   readonly ownerId: string;
-  readonly filters: readonly ListDocumentsFilter[];
-  readonly filterExpression?: ListFilterExpression;
+  readonly predicate?: PredicateExpression;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -56,8 +53,7 @@ export interface SavedListFilterState {
 }
 
 export interface SavedListFilterInputMerge {
-  readonly filters: readonly ListDocumentsFilter[];
-  readonly filterExpression?: ListFilterExpression;
+  readonly predicate?: PredicateExpression;
 }
 
 export function foldSavedListFilters(
@@ -81,8 +77,7 @@ export function foldSavedListFilters(
           id: event.payload.filterId,
           label: event.payload.label,
           ownerId: event.payload.ownerId,
-          filters: event.payload.filters,
-          ...(event.payload.filterExpression === undefined ? {} : { filterExpression: event.payload.filterExpression }),
+          ...(event.payload.predicate === undefined ? {} : { predicate: event.payload.predicate }),
           createdAt: existing?.createdAt ?? event.occurredAt,
           updatedAt: event.occurredAt
         });
@@ -112,26 +107,16 @@ export function sortedSavedListFilters(filters: readonly SavedListFilter[]): rea
   return [...filters].sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
 }
 
-export function mergeSavedListFilter(
-  savedFilter: SavedListFilter | undefined,
-  explicitFilters: readonly ListDocumentsFilter[]
-): readonly ListDocumentsFilter[] {
-  return savedFilter ? mergeListFilters(savedFilter.filters, explicitFilters) : explicitFilters;
-}
-
 export function mergeSavedListFilterInputs(options: {
   readonly savedFilter?: SavedListFilter | undefined;
-  readonly explicitFilters: readonly ListDocumentsFilter[];
-  readonly explicitFilterExpression?: ListFilterExpression | undefined;
+  readonly explicitPredicate?: PredicateExpression | undefined;
 }): SavedListFilterInputMerge {
-  const filters = mergeSavedListFilter(options.savedFilter, options.explicitFilters);
-  const filterExpression = andListFilterExpressions([
-    options.savedFilter?.filterExpression,
-    options.explicitFilterExpression
+  const predicate = andPredicateExpressions([
+    options.savedFilter?.predicate,
+    options.explicitPredicate
   ]);
   return {
-    filters,
-    ...(filterExpression === undefined ? {} : { filterExpression })
+    ...(predicate === undefined ? {} : { predicate })
   };
 }
 

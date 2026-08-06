@@ -10,6 +10,7 @@ import {
   type DocumentShareProvider
 } from "../core/document-shares.js";
 import { applyDefaults, compactData, validateDocumentData } from "../core/schema.js";
+import { documentChangeContext } from "../core/document-change.js";
 import {
   planDocumentFieldMerge,
   type DocumentFieldMergePlan
@@ -78,10 +79,11 @@ import {
   type DocumentStatusChangePolicyPlan,
   planDocumentUpdatePolicy,
   planDomainCommandPolicy,
+  planDomainCommandTransitions,
   planWorkflowTransitionPolicy,
   requireDomainCommandDefinition,
   requireMergeBaseSnapshot,
-  requireWorkflowDefinition,
+  requireNamedWorkflowDefinition,
   workflowTransitionEventCommand
 } from "./document-command-policy.js";
 import { documentShareStateFromEvents } from "./document-share-events.js";
@@ -106,12 +108,18 @@ import {
 } from "./document-unique-values.js";
 import {
   ensureCreateNameAllowed,
-  namingSeriesCurrentValue,
+  generatedNamingFieldMutationIssues,
   namingSeriesEventCommand,
   planNamingSeriesEvent,
-  renderNamingSeries,
   resolveDocumentName
 } from "./document-naming.js";
+import {
+  DEFAULT_NAMING_MAX_ATTEMPTS,
+  namingSeriesCurrentValue,
+  namingTargetData,
+  scanNamingCandidates,
+  resolveNamingSeriesIdentity
+} from "../core/naming.js";
 import {
   applyFetchedFields,
   validateDocumentLinks,
@@ -165,6 +173,7 @@ import {
   type DomainEvent,
   type FieldDefinition,
   type MutableDocumentData,
+  type NamingSeriesStrategy,
   type NewDomainEvent,
   type PermissionAction,
   type ValidationIssue
@@ -210,7 +219,11 @@ interface DocumentServiceDocTypeContext {
 
 interface DocumentNameResolution {
   readonly name: string;
-  readonly namingSeriesWrite?: AtomicNamingSeriesWrite;
+  readonly data: DocumentData;
+  readonly namingSeriesWrite?: AtomicNamingSeriesWrite & {
+    readonly name: string;
+    readonly candidateAttempts: number;
+  };
 }
 
 export interface CreateDocumentCommand {
@@ -360,6 +373,7 @@ export interface BulkSubmitDocumentsCommand extends BulkDocumentsCommand {}
 export interface BulkCancelDocumentsCommand extends BulkDocumentsCommand {}
 
 export interface BulkTransitionDocumentsCommand extends BulkDocumentsCommand {
+  readonly workflow: string;
   readonly action: string;
 }
 
@@ -385,6 +399,7 @@ export interface TransitionDocumentCommand {
   readonly actor: Actor;
   readonly doctype: string;
   readonly name: string;
+  readonly workflow: string;
   readonly action: string;
   readonly tenantId?: string;
   readonly expectedVersion?: number;
@@ -534,8 +549,6 @@ export interface DocumentCommandExecutor {
   revokeShare(command: RevokeDocumentShareCommand): Promise<DocumentSnapshot>;
 }
 
-const NAMING_SERIES_MAX_ATTEMPTS = 10;
-
 export class DocumentService implements DocumentCommandExecutor {
   private readonly registry: ModelRegistry;
   private readonly store: DocumentStore;
@@ -566,6 +579,7 @@ export class DocumentService implements DocumentCommandExecutor {
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
     this.ensureDocTypeActionAccess(command.actor, doctype, "create");
     ensureCreateNameAllowed(doctype, command.name);
+    ensureGeneratedNamingFieldNotSupplied(doctype, command.data);
 
     const now = this.clock.now();
     const withDefaults = applyDefaults(doctype, command.data, { actor: command.actor, now });
@@ -577,7 +591,7 @@ export class DocumentService implements DocumentCommandExecutor {
       withValidatedHooks,
       relatedDocType
     );
-    const data = stripInternalTableFields(
+    const preparedData = stripInternalTableFields(
       doctype,
       withFetchedFields,
       relatedDocType
@@ -587,43 +601,66 @@ export class DocumentService implements DocumentCommandExecutor {
       compactData(command.data),
       relatedDocType
     );
-    const draft = draftDocumentSnapshot({
-      tenantId,
-      doctype,
-      name: command.name ?? "",
-      version: 0,
-      data,
-      now
-    });
-    const issues = documentCreateValidationIssues({
-      workflowStateIssues: workflowStateCreateIssues(doctype, data),
-      fieldPermissionIssues: fieldPermissionIssues({
-        actor: command.actor,
-        action: "create",
-        doctype,
-        data: userSuppliedData,
-        relatedDocType,
-        document: draft
-      }),
-      validationIssues: await this.validate(doctype, data, relatedDocType),
-      linkIssues: await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType)
-    });
-    if (issues.length > 0) {
-      throw validationFailed(issues);
-    }
-
-    for (let attempt = 0; attempt < NAMING_SERIES_MAX_ATTEMPTS; attempt += 1) {
+    let occupiedNamingCurrent: number | undefined;
+    let remainingNamingAttempts = doctype.naming?.kind === "series"
+      ? doctype.naming.maxAttempts ?? DEFAULT_NAMING_MAX_ATTEMPTS
+      : 1;
+    while (remainingNamingAttempts > 0) {
       const nameResolution = command.name === undefined
-        ? await this.resolveName(doctype, data, {
+        ? await this.resolveName(doctype, preparedData, {
             actor: command.actor,
             tenantId,
-            now
+            now,
+            maxCandidateAttempts: remainingNamingAttempts,
+            ...(occupiedNamingCurrent === undefined ? {} : { occupiedNamingCurrent })
           })
-        : { name: command.name };
+        : { name: command.name, data: preparedData };
+      if (nameResolution.namingSeriesWrite !== undefined) {
+        remainingNamingAttempts -= nameResolution.namingSeriesWrite.candidateAttempts;
+      } else {
+        remainingNamingAttempts = 0;
+      }
       const name = nameResolution.name;
+      const data = nameResolution.data;
+      const draft = draftDocumentSnapshot({
+        tenantId,
+        doctype,
+        name,
+        version: 0,
+        data,
+        now
+      });
+      const issues = documentCreateValidationIssues({
+        workflowStateIssues: workflowStateCreateIssues(doctype, data),
+        fieldPermissionIssues: fieldPermissionIssues({
+          actor: command.actor,
+          action: "create",
+          doctype,
+          data: userSuppliedData,
+          relatedDocType,
+          document: draft
+        }),
+        validationIssues: await this.validate(doctype, data, relatedDocType),
+        linkIssues: await this.validateLinks(command.actor, tenantId, doctype, data, relatedDocType)
+      });
+      if (issues.length > 0) {
+        throw validationFailed(issues);
+      }
       const stream = documentStream(tenantId, doctype.name, name);
       const existing = foldDocument(await this.store.readStream(stream));
-      ensureDocumentCreateAvailable({ doctypeName: doctype.name, documentName: name, existing });
+      try {
+        ensureDocumentCreateAvailable({ doctypeName: doctype.name, documentName: name, existing });
+      } catch (error) {
+        if (
+          nameResolution.namingSeriesWrite !== undefined &&
+          isDocumentConflictError(error) &&
+          remainingNamingAttempts > 0
+        ) {
+          occupiedNamingCurrent = nameResolution.namingSeriesWrite.next;
+          continue;
+        }
+        throw error;
+      }
       const uniqueReservations = uniqueValueReservations(tenantId, doctype, data, name);
       const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
         command.actor,
@@ -645,7 +682,7 @@ export class DocumentService implements DocumentCommandExecutor {
         plan,
         metadata: command.metadata ?? {}
       }));
-      const automationPlan = this.planAutomationRuns(doctype, event, {
+      const after = {
         tenantId,
         doctype: doctype.name,
         name,
@@ -654,6 +691,15 @@ export class DocumentService implements DocumentCommandExecutor {
         data,
         createdAt: now,
         updatedAt: now
+      } satisfies DocumentSnapshot;
+      const automationPlan = this.planAutomationRuns({
+        doctype,
+        event,
+        before: null,
+        after,
+        touchedFields: Object.keys(data),
+        input: userSuppliedData,
+        actor: command.actor
       });
       try {
         const commit = await this.store.commitBatch(
@@ -686,11 +732,17 @@ export class DocumentService implements DocumentCommandExecutor {
         );
         return this.finishAfterCommit(command.actor, doctype, commit, requireSavedEvent(commit.events, event.id), relatedDocType);
       } catch (error) {
-        if (
-          nameResolution.namingSeriesWrite !== undefined &&
-          isDocumentConflictError(error) &&
-          attempt + 1 < NAMING_SERIES_MAX_ATTEMPTS
-        ) {
+        const namingConflict = await this.namingConflictDisposition({
+          error,
+          doctype,
+          tenantId,
+          documentName: name,
+          nameResolution
+        });
+        if (namingConflict !== null && remainingNamingAttempts > 0) {
+          if (namingConflict === "document") {
+            occupiedNamingCurrent = nameResolution.namingSeriesWrite!.next;
+          }
           continue;
         }
         throw error;
@@ -894,6 +946,10 @@ export class DocumentService implements DocumentCommandExecutor {
       unsetIssues,
       originIssues,
       workflowStateIssues: workflowStateMutationIssues(options.doctype, fetchedPatchWithoutInternalFields, unset),
+      generatedNamingIssues: generatedNamingFieldMutationIssues(
+        options.doctype,
+        [...Object.keys(normalizedPatch), ...unset]
+      ),
       readOnlyIssues,
       fieldPermissionIssues: fieldAccessIssues,
       validationIssues,
@@ -943,11 +999,20 @@ export class DocumentService implements DocumentCommandExecutor {
       plan,
       metadata: options.command.metadata ?? {}
     }));
-    const automationPlan = this.planAutomationRuns(options.doctype, event, {
+    const after = {
       ...options.existing,
       version: options.existing.version + 1,
       data,
       updatedAt: now
+    } satisfies DocumentSnapshot;
+    const automationPlan = this.planAutomationRuns({
+      doctype: options.doctype,
+      event,
+      before: options.existing,
+      after,
+      touchedFields: [...Object.keys(options.command.patch), ...unset],
+      input: patchWithoutInternalFields,
+      actor: options.command.actor
     });
     const commit = await this.store.commitBatch(
       [
@@ -997,7 +1062,7 @@ export class DocumentService implements DocumentCommandExecutor {
     return this.create({
       actor: command.actor,
       doctype: doctype.name,
-      data: plan.data,
+      data: withoutGeneratedNamingField(doctype, plan.data),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.newName === undefined ? {} : { name: command.newName }),
       ...(command.eventType === undefined ? {} : { eventType: command.eventType }),
@@ -1026,7 +1091,7 @@ export class DocumentService implements DocumentCommandExecutor {
     return this.create({
       actor: command.actor,
       doctype: doctype.name,
-      data: plan.data,
+      data: withoutGeneratedNamingField(doctype, plan.data),
       ...(command.tenantId === undefined ? {} : { tenantId: command.tenantId }),
       ...(command.newName === undefined ? {} : { name: command.newName }),
       ...(command.eventType === undefined ? {} : { eventType: command.eventType }),
@@ -1037,7 +1102,7 @@ export class DocumentService implements DocumentCommandExecutor {
   async transition(command: TransitionDocumentCommand): Promise<DocumentSnapshot> {
     const tenantId = resolveTenant(command.actor, command.tenantId);
     const { doctype, relatedDocType } = await this.doctypeContext(command.actor, command.doctype, tenantId);
-    const workflow = requireWorkflowDefinition(doctype);
+    const workflow = requireNamedWorkflowDefinition(doctype, command.workflow);
     const stream = documentStream(tenantId, doctype.name, command.name);
     const existing = await this.requireExistingFromEvents(stream, doctype, command.name);
     this.ensureDocumentActionAccess(command.actor, doctype, "transition", existing);
@@ -1050,9 +1115,76 @@ export class DocumentService implements DocumentCommandExecutor {
       action: command.action,
       doctypeName: doctype.name,
       document: existing,
-      workflow
+      workflow,
+      input: { workflow: command.workflow, action: command.action }
     });
+    const hookPatch = await this.runBeforeValidate(doctype, plan.patch, existing);
+    const authorizedPatch = { ...hookPatch, [plan.stateField]: plan.to };
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, authorizedPatch, relatedDocType);
+    const patchWithFetchedFields = await this.applyFetchedFields(
+      command.actor,
+      tenantId,
+      doctype,
+      authorizedPatch,
+      relatedDocType,
+      { existing }
+    );
+    const fetchedPatchWithoutInternalFields = stripInternalTableFields(doctype, patchWithFetchedFields, relatedDocType);
+    const exactPatch = { ...patchWithFetchedFields, [plan.stateField]: plan.to };
+    const originIssues = childTableOriginIssues(doctype, exactPatch, existing.data, relatedDocType);
+    const normalizedPatch = preserveReadOnlyTableValues(doctype, exactPatch, existing, relatedDocType);
+    const data = applyDocumentDataChange(existing.data, normalizedPatch, []);
+    const draft = {
+      ...existing,
+      data,
+      version: existing.version + 1
+    };
+    const actorControlledPatch = Object.fromEntries(
+      Object.entries(patchWithoutInternalFields).filter(([field]) => field !== plan.stateField)
+    ) as DocumentData;
+    const readOnlyIssues = readonlyIssues(doctype, actorControlledPatch, relatedDocType, data);
+    const fieldAccessIssues = fieldPermissionIssues({
+      actor: command.actor,
+      action: "update",
+      doctype,
+      data: actorControlledPatch,
+      relatedDocType,
+      document: draft
+    });
+    const validationIssues = await this.validate(doctype, normalizedPatch, relatedDocType, existing, data);
+    const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, normalizedPatch, relatedDocType);
+    const issues = documentDomainCommandValidationIssues({
+      originIssues,
+      workflowStateIssues: workflowStateMutationIssues(
+        doctype,
+        fetchedPatchWithoutInternalFields,
+        [],
+        { [plan.stateField]: plan.to }
+      ),
+      generatedNamingIssues: generatedNamingFieldMutationIssues(doctype, Object.keys(normalizedPatch)),
+      readOnlyIssues,
+      fieldPermissionIssues: fieldAccessIssues,
+      validationIssues,
+      linkIssues
+    });
+    if (issues.length > 0) {
+      throw validationFailed(issues);
+    }
+
     const now = this.clock.now();
+    const nextReservations = uniqueValueReservations(tenantId, doctype, data, existing.name);
+    const existingReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
+    const releasedReservations = releasedUniqueValueReservations(existingReservations, nextReservations);
+    const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
+      command.actor,
+      nextReservations,
+      now
+    );
+    const uniqueReleaseWrites = await this.planUniqueValueReleaseWrites(
+      command.actor,
+      releasedReservations,
+      now
+    );
     const event = this.newEvent(workflowTransitionEventCommand({
       tenantId,
       stream,
@@ -1061,30 +1193,49 @@ export class DocumentService implements DocumentCommandExecutor {
       actorId: command.actor.id,
       occurredAt: now,
       action: command.action,
-      plan,
+      plan: { ...plan, patch: normalizedPatch },
       metadata: command.metadata ?? {}
     }));
-    const data = { ...existing.data, ...plan.patch };
-    const automationPlan = this.planAutomationRuns(doctype, event, {
+    const after = {
       ...existing,
       version: existing.version + 1,
       data,
       updatedAt: now
+    } satisfies DocumentSnapshot;
+    const automationPlan = this.planAutomationRuns({
+      doctype,
+      event,
+      before: existing,
+      after,
+      touchedFields: Object.keys(normalizedPatch),
+      input: { workflow: command.workflow, action: command.action },
+      actor: command.actor
     });
     const commit = await this.store.commitBatch(
       [
-        { stream, expectedVersion: existing.version, events: [event] },
+        ...documentAtomicCommitEntries({
+          uniqueReservationWrites,
+          uniqueReleaseWrites,
+          document: { stream, expectedVersion: existing.version, event }
+        }),
         ...automationPlan.entries
       ],
       (savedEvents) => {
-        const saved = requireFirstSavedEvent(savedEvents);
+        const saved = requireSavedEvent(savedEvents, event.id);
         return {
           snapshot: snapshotFromCommittedDocumentEvent(existing, saved, { data }),
-          auxiliarySnapshots: automationPlan.auxiliarySnapshots(savedEvents)
+          auxiliarySnapshots: [
+            ...documentAtomicAuxiliarySnapshots({
+              savedEvents,
+              uniqueReservationWrites,
+              uniqueReleaseWrites
+            }),
+            ...automationPlan.auxiliarySnapshots(savedEvents)
+          ]
         };
       }
     );
-    return this.finishAfterCommit(command.actor, doctype, commit, requireFirstSavedEvent(commit.events), relatedDocType);
+    return this.finishAfterCommit(command.actor, doctype, commit, requireSavedEvent(commit.events, event.id), relatedDocType);
   }
 
   async execute(command: ExecuteDomainCommand): Promise<DocumentSnapshot> {
@@ -1115,12 +1266,20 @@ export class DocumentService implements DocumentCommandExecutor {
 
     const sanitizedInput = stripInternalTableFields(doctype, commandPlan.input, relatedDocType);
     const normalizedPatch = await this.runBeforeValidate(doctype, commandPlan.patch, existing);
-    const patchWithoutInternalFields = stripInternalTableFields(doctype, normalizedPatch, relatedDocType);
+    const transitionPlan = planDomainCommandTransitions({
+      actor: command.actor,
+      doctype,
+      document: existing,
+      patch: normalizedPatch,
+      transitions: commandPlan.transitions,
+      commandInput: sanitizedInput
+    });
+    const patchWithoutInternalFields = stripInternalTableFields(doctype, transitionPlan.patch, relatedDocType);
     const patchWithFetchedFields = await this.applyFetchedFields(
       command.actor,
       tenantId,
       doctype,
-      normalizedPatch,
+      transitionPlan.patch,
       relatedDocType,
       { existing }
     );
@@ -1155,7 +1314,13 @@ export class DocumentService implements DocumentCommandExecutor {
     const linkIssues = await this.validateLinks(command.actor, tenantId, doctype, patchWithReadOnlyValues, relatedDocType);
     const issues = documentDomainCommandValidationIssues({
       originIssues,
-      workflowStateIssues: workflowStateMutationIssues(doctype, fetchedPatchWithoutInternalFields),
+      workflowStateIssues: workflowStateMutationIssues(
+        doctype,
+        fetchedPatchWithoutInternalFields,
+        [],
+        Object.fromEntries(transitionPlan.transitions.map((transition) => [transition.stateField, transition.to]))
+      ),
+      generatedNamingIssues: generatedNamingFieldMutationIssues(doctype, Object.keys(patchWithReadOnlyValues)),
       readOnlyIssues,
       fieldPermissionIssues: fieldAccessIssues,
       validationIssues,
@@ -1165,6 +1330,19 @@ export class DocumentService implements DocumentCommandExecutor {
       throw validationFailed(issues);
     }
 
+    const nextReservations = uniqueValueReservations(tenantId, doctype, data, existing.name);
+    const existingReservations = uniqueValueReservations(tenantId, doctype, existing.data, existing.name);
+    const releasedReservations = releasedUniqueValueReservations(existingReservations, nextReservations);
+    const uniqueReservationWrites = await this.planUniqueValueReservationWrites(
+      command.actor,
+      nextReservations,
+      now
+    );
+    const uniqueReleaseWrites = await this.planUniqueValueReleaseWrites(
+      command.actor,
+      releasedReservations,
+      now
+    );
     const event = this.newEvent(domainCommandEventCommand({
       tenantId,
       stream,
@@ -1176,28 +1354,55 @@ export class DocumentService implements DocumentCommandExecutor {
       commandName: command.command,
       commandInput: sanitizedInput,
       patch: patchWithReadOnlyValues,
+      transitions: transitionPlan.transitions,
       metadata: command.metadata ?? {}
     }));
-    const automationPlan = this.planAutomationRuns(doctype, event, {
+    const after = {
       ...existing,
       version: existing.version + 1,
       data,
       updatedAt: now
+    } satisfies DocumentSnapshot;
+    const automationPlan = this.planAutomationRuns({
+      doctype,
+      event,
+      before: existing,
+      after,
+      touchedFields: Object.keys(patchWithReadOnlyValues),
+      input: sanitizedInput,
+      actor: command.actor
     });
     const commit = await this.store.commitBatch(
       [
-        { stream, expectedVersion: existing.version, events: [event] },
+        ...documentAtomicCommitEntries({
+          uniqueReservationWrites,
+          uniqueReleaseWrites,
+          document: { stream, expectedVersion: existing.version, event }
+        }),
         ...automationPlan.entries
       ],
       (savedEvents) => {
-        const saved = requireFirstSavedEvent(savedEvents);
+        const saved = requireSavedEvent(savedEvents, event.id);
         return {
           snapshot: snapshotFromCommittedDocumentEvent(existing, saved, { data }),
-          auxiliarySnapshots: automationPlan.auxiliarySnapshots(savedEvents)
+          auxiliarySnapshots: [
+            ...documentAtomicAuxiliarySnapshots({
+              savedEvents,
+              uniqueReservationWrites,
+              uniqueReleaseWrites
+            }),
+            ...automationPlan.auxiliarySnapshots(savedEvents)
+          ]
         };
       }
     );
-    return this.finishAfterCommit(command.actor, doctype, commit, requireFirstSavedEvent(commit.events), relatedDocType);
+    return this.finishAfterCommit(
+      command.actor,
+      doctype,
+      commit,
+      requireSavedEvent(commit.events, event.id),
+      relatedDocType
+    );
   }
 
   async comment(command: AddDocumentCommentCommand): Promise<DocumentSnapshot> {
@@ -1426,6 +1631,7 @@ export class DocumentService implements DocumentCommandExecutor {
     return this.runBulkDocumentCommand(command, (selection) =>
       this.transition({
         ...bulkNamedCommand(command, selection),
+        workflow: command.workflow,
         action: command.action
       })
     );
@@ -1619,7 +1825,7 @@ export class DocumentService implements DocumentCommandExecutor {
     existing: DocumentSnapshot,
     stream: string,
     event: NewDomainEvent,
-    relatedDocType?: RelatedDocTypeResolver
+    relatedDocType: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
     const commit = await this.store.commit(stream, existing.version, [event], (savedEvents) => {
       const saved = requireFirstSavedEvent(savedEvents);
@@ -1648,11 +1854,20 @@ export class DocumentService implements DocumentCommandExecutor {
       plan: options.plan,
       metadata: options.command.metadata ?? {}
     }));
-    const automationPlan = this.planAutomationRuns(options.doctype, event, {
+    const after = {
       ...options.existing,
       version: options.existing.version + 1,
       docstatus: options.plan.nextStatus,
       updatedAt: now
+    } satisfies DocumentSnapshot;
+    const automationPlan = this.planAutomationRuns({
+      doctype: options.doctype,
+      event,
+      before: options.existing,
+      after,
+      touchedFields: [],
+      input: {},
+      actor: options.command.actor
     });
     const commit = await this.store.commitBatch(
       [
@@ -1681,7 +1896,7 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     commit: DocumentCommit,
     saved: DomainEvent,
-    relatedDocType?: RelatedDocTypeResolver
+    relatedDocType: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
     const snapshot = await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     return this.redactDocumentForActor(actor, doctype, snapshot, relatedDocType);
@@ -1691,28 +1906,31 @@ export class DocumentService implements DocumentCommandExecutor {
     actor: Actor,
     doctype: DocTypeDefinition,
     document: DocumentSnapshot,
-    relatedDocType?: RelatedDocTypeResolver
+    relatedDocType: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
-    const resolver = relatedDocType ?? (await resolveTenantDocTypeContext(doctype, (name) =>
-      this.doctypeFor(actor, name, document.tenantId)
-    )).relatedDocType;
     return redactDocumentSnapshot({
       actor,
       doctype,
       document,
-      relatedDocType: resolver
+      relatedDocType
     });
   }
 
-  private planAutomationRuns(
-    doctype: DocTypeDefinition,
-    event: NewDomainEvent,
-    snapshot: DocumentSnapshot
-  ): AutomationRunCommitPlan {
+  private planAutomationRuns(options: {
+    readonly doctype: DocTypeDefinition;
+    readonly event: NewDomainEvent;
+    readonly before: DocumentSnapshot | null;
+    readonly after: DocumentSnapshot | null;
+    readonly touchedFields: readonly string[];
+    readonly input: DocumentData;
+    readonly actor: Actor;
+  }): AutomationRunCommitPlan {
     return this.automationRuns.planEnqueueFromDomainEvent({
-      event,
-      snapshot,
-      rules: doctype.automationRules
+      event: options.event,
+      change: documentChangeContext(options.before, options.after, options.touchedFields),
+      input: options.input,
+      actor: options.actor,
+      rules: options.doctype.automationRules
     });
   }
 
@@ -2040,38 +2258,70 @@ export class DocumentService implements DocumentCommandExecutor {
   private async resolveName(
     doctype: DocTypeDefinition,
     data: DocumentData,
-    context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
+    context: {
+      readonly actor: Actor;
+      readonly tenantId: string;
+      readonly now: string;
+      readonly occupiedNamingCurrent?: number;
+      readonly maxCandidateAttempts: number;
+    }
   ): Promise<DocumentNameResolution> {
     const naming = doctype.naming ?? { kind: "uuid" };
     if (naming.kind !== "series") {
-      return { name: resolveDocumentName(doctype, data, this.ids) };
+      return { name: resolveDocumentName(doctype, data, this.ids), data };
     }
-    const write = await this.planNamingSeriesWrite(doctype, naming.pattern, context);
+    const write = await this.planNamingSeriesWrite(doctype, naming, data, context);
     return {
-      name: renderNamingSeries(naming.pattern, write.next),
+      name: write.name,
+      data: namingTargetData(naming, data, write.name),
       namingSeriesWrite: write
     };
   }
 
   private async planNamingSeriesWrite(
     doctype: DocTypeDefinition,
-    pattern: string,
-    context: { readonly actor: Actor; readonly tenantId: string; readonly now: string }
-  ): Promise<AtomicNamingSeriesWrite> {
-    const stream = namingSeriesStream(context.tenantId, doctype.name, pattern);
+    strategy: NamingSeriesStrategy,
+    data: DocumentData,
+    context: {
+      readonly actor: Actor;
+      readonly tenantId: string;
+      readonly now: string;
+      readonly occupiedNamingCurrent?: number;
+      readonly maxCandidateAttempts: number;
+    }
+  ): Promise<AtomicNamingSeriesWrite & { readonly name: string; readonly candidateAttempts: number }> {
+    const identity = resolveNamingSeriesIdentity(doctype, strategy, data, context);
+    const stream = namingSeriesStream(context.tenantId, doctype.name, identity.counter, identity.scope);
     const existing = foldDocument(await this.store.readStream(stream));
-    const current = namingSeriesCurrentValue(existing?.data.current) ?? 0;
-    const next = current + 1;
+    const storedCurrent = namingSeriesCurrentValue(existing?.data.current);
+    const current = storedCurrent === undefined
+      ? context.occupiedNamingCurrent
+      : context.occupiedNamingCurrent === undefined
+        ? storedCurrent
+        : Math.max(storedCurrent, context.occupiedNamingCurrent);
+    const scan = scanNamingCandidates({
+      doctype,
+      strategy,
+      data,
+      context,
+      ...(current === undefined ? {} : { current }),
+      attemptLimit: context.maxCandidateAttempts
+    });
+    const candidate = scan.candidates[0]!;
     const eventPlan = planNamingSeriesEvent({
       doctypeName: doctype.name,
-      pattern,
-      next,
+      pattern: strategy.pattern,
+      counter: identity.counter,
+      scope: identity.scope,
+      next: candidate.value,
       existing
     });
     return {
       stream,
       existing,
-      next,
+      next: candidate.value,
+      name: candidate.name,
+      candidateAttempts: scan.attempts,
       event: this.newEvent(namingSeriesEventCommand({
         tenantId: context.tenantId,
         stream,
@@ -2081,6 +2331,59 @@ export class DocumentService implements DocumentCommandExecutor {
       }))
     };
   }
+
+  private async namingConflictDisposition(input: {
+    readonly error: unknown;
+    readonly doctype: DocTypeDefinition;
+    readonly tenantId: string;
+    readonly documentName: string;
+    readonly nameResolution: DocumentNameResolution;
+  }): Promise<"counter" | "document" | null> {
+    const write = input.nameResolution.namingSeriesWrite;
+    if (write === undefined || !isDocumentConflictError(input.error)) {
+      return null;
+    }
+    const counterEvents = await this.store.readStream(write.stream);
+    const expectedCounterVersion = write.existing?.version ?? 0;
+    if ((counterEvents.at(-1)?.sequence ?? 0) !== expectedCounterVersion) {
+      return "counter";
+    }
+    const document = foldDocument(await this.store.readStream(
+      documentStream(input.tenantId, input.doctype.name, input.documentName)
+    ));
+    return document !== null && document.docstatus !== "deleted" ? "document" : null;
+  }
+}
+
+function ensureGeneratedNamingFieldNotSupplied(
+  doctype: DocTypeDefinition,
+  data: MutableDocumentData
+): void {
+  const naming = doctype.naming;
+  if (
+    naming?.kind !== "series" ||
+    naming.targetField === undefined ||
+    !Object.prototype.hasOwnProperty.call(data, naming.targetField)
+  ) {
+    return;
+  }
+  throw validationFailed([{
+    field: naming.targetField,
+    code: "generated_name",
+    message: `Field '${naming.targetField}' is generated by the naming series for ${doctype.name}`
+  }]);
+}
+
+function withoutGeneratedNamingField(
+  doctype: DocTypeDefinition,
+  data: MutableDocumentData
+): MutableDocumentData {
+  const naming = doctype.naming;
+  if (naming?.kind !== "series" || naming.targetField === undefined) {
+    return data;
+  }
+  const { [naming.targetField]: _generated, ...remaining } = data;
+  return remaining;
 }
 
 function draftDocumentSnapshot(input: {

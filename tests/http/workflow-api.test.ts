@@ -20,21 +20,41 @@ const adminHeaders = {
 };
 
 describe("workflow api", () => {
+  it("does not adapt removed DocType-only workflow mutation routes", async () => {
+    const { app } = makeWorkflowApp();
+    const response = await app.request("/api/workflows/Note", {
+      method: "PUT",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        workflow: {
+          stateField: "workflow_state",
+          initialState: "Open",
+          states: ["Open", "Closed"],
+          transitions: [{ action: "close", from: "Open", to: "Closed" }]
+        }
+      })
+    });
+
+    expect(response.status).toBe(404);
+  });
+
   it("manages tenant workflow definitions through generated JSON routes", async () => {
     const { app } = makeWorkflowApp();
 
     const empty = await app.request("/api/workflows/Note", { headers: adminHeaders });
     expect(empty.status).toBe(200);
     await expect(empty.json()).resolves.toMatchObject({
-      data: { tenantId: "acme", doctypeName: "Note", version: 0 }
+      data: [{ tenantId: "acme", doctypeName: "Note", workflowName: "lifecycle", version: 0 }]
     });
 
-    const saved = await app.request("/api/workflows/Note", {
+    const saved = await app.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: adminHeaders,
       body: JSON.stringify({
         expectedVersion: 0,
         workflow: {
+          name: "lifecycle",
+          stateField: "workflow_state",
           initialState: "Open",
           states: ["Open", "Closed"],
           transitions: [
@@ -54,10 +74,10 @@ describe("workflow api", () => {
     const meta = await app.request("/api/meta/doctypes/Note", { headers: adminHeaders });
     expect(meta.status).toBe(200);
     await expect(meta.json()).resolves.toMatchObject({
-      data: { workflow: { transitions: [{ action: "approve" }] } }
+      data: { workflows: [{ name: "lifecycle", transitions: [{ action: "approve" }] }] }
     });
 
-    const cleared = await app.request("/api/workflows/Note", {
+    const cleared = await app.request("/api/workflows/Note/lifecycle", {
       method: "DELETE",
       headers: adminHeaders,
       body: JSON.stringify({ expectedVersion: 1 })
@@ -77,7 +97,7 @@ describe("workflow api", () => {
     expect(denied.status).toBe(403);
     await expect(denied.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
 
-    const missingWorkflow = await app.request("/api/workflows/Note", {
+    const missingWorkflow = await app.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: adminHeaders,
       body: JSON.stringify({ expectedVersion: 0 })
@@ -87,11 +107,12 @@ describe("workflow api", () => {
       error: { code: "BAD_REQUEST", message: "workflow must be an object" }
     });
 
-    const invalidWorkflow = await app.request("/api/workflows/Note", {
+    const invalidWorkflow = await app.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: adminHeaders,
       body: JSON.stringify({
         workflow: {
+          name: "lifecycle",
           stateField: "missing_state",
           initialState: "Open",
           states: ["Open", "Closed"],
@@ -104,12 +125,14 @@ describe("workflow api", () => {
       error: { code: "WORKFLOW_INVALID" }
     });
 
-    const created = await app.request("/api/workflows/Note", {
+    const created = await app.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: adminHeaders,
       body: JSON.stringify({
         expectedVersion: 0,
         workflow: {
+          name: "lifecycle",
+          stateField: "workflow_state",
           initialState: "Open",
           states: ["Open", "Closed"],
           transitions: [{ action: "approve", from: "Open", to: "Closed" }]
@@ -118,12 +141,14 @@ describe("workflow api", () => {
     });
     expect(created.status).toBe(200);
 
-    const stale = await app.request("/api/workflows/Note", {
+    const stale = await app.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: adminHeaders,
       body: JSON.stringify({
         expectedVersion: 0,
         workflow: {
+          name: "lifecycle",
+          stateField: "workflow_state",
           initialState: "Open",
           states: ["Open", "Closed"],
           transitions: [{ action: "review", from: "Open", to: "Closed" }]
@@ -134,7 +159,7 @@ describe("workflow api", () => {
     await expect(stale.json()).resolves.toMatchObject({ error: { code: "DOCUMENT_CONFLICT" } });
 
     const { app: oversizedApp } = makeWorkflowApp(80);
-    const oversized = await oversizedApp.request("/api/workflows/Note", {
+    const oversized = await oversizedApp.request("/api/workflows/Note/lifecycle", {
       method: "PUT",
       headers: { ...adminHeaders, "content-length": "99" },
       body: "{}"

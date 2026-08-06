@@ -1,6 +1,6 @@
 import { FrameworkError } from "./errors.js";
-import { domainEventPayloadKind } from "./domain-events.js";
-import { matchesListFilterExpression, normalizeListFilterExpression } from "./list-view.js";
+import { domainEventPayloadKind, domainEventWorkflowIdentity, type DomainEventWorkflowIdentity } from "./domain-events.js";
+import { evaluatePredicateExpression, normalizePredicateExpression } from "./predicates.js";
 import type {
   AssignmentRuleAssigneeDefinition,
   AssignmentRuleDefinition,
@@ -67,7 +67,7 @@ export interface AssignmentRuleState {
   readonly rules: readonly AssignmentRuleEntry[];
 }
 
-export interface AssignmentRuleDocumentAssignment {
+export interface AssignmentRuleDocumentAssignment extends DomainEventWorkflowIdentity {
   readonly assigneeId: string;
   readonly ruleName: string;
 }
@@ -157,7 +157,10 @@ export function normalizeAssignmentRule(
   const assignees = normalizeAssignees(doctype, rule.assignees);
   const condition = rule.condition === undefined
     ? undefined
-    : normalizeListFilterExpression(doctype, rule.condition, { errorCode: "ASSIGNMENT_RULE_INVALID" });
+    : normalizePredicateExpression(doctype, rule.condition, {
+        availableScopes: ["after", "event"],
+        errorCode: "ASSIGNMENT_RULE_INVALID"
+      });
   const excludeActor = optionalBoolean(rule.excludeActor, "Assignment rule excludeActor");
   return Object.freeze({
     name,
@@ -179,6 +182,7 @@ export function assignmentRuleAssignmentsFromDomainEvent(
   }
   const assignments: AssignmentRuleDocumentAssignment[] = [];
   const seen = new Set<string>();
+  const workflowIdentity = domainEventWorkflowIdentity(context.event);
   for (const rule of context.rules) {
     if (!ruleMatches(rule, context.event, snapshot)) {
       continue;
@@ -192,7 +196,7 @@ export function assignmentRuleAssignmentsFromDomainEvent(
         continue;
       }
       seen.add(key);
-      assignments.push({ assigneeId, ruleName: rule.name });
+      assignments.push({ assigneeId, ruleName: rule.name, ...workflowIdentity });
     }
   }
   return Object.freeze(assignments);
@@ -210,7 +214,12 @@ function ruleMatches(
   if (rule.condition === undefined) {
     return true;
   }
-  return matchesListFilterExpression(snapshot, rule.condition);
+  return evaluatePredicateExpression(rule.condition, {
+    before: null,
+    after: snapshot,
+    input: {},
+    event
+  });
 }
 
 function assignmentRuleAssignees(

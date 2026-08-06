@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import { badRequest } from "../../core/errors.js";
 import type { Actor, JsonValue } from "../../core/types.js";
 import type { WebFormResolvedField, WebFormService } from "../../application/web-form-service.js";
 import type { ActorResolver } from "./actor.js";
 import { readJsonObject, requestMetadata } from "./request.js";
+import { dataFromWebFormData, webFormDataFromBody } from "./web-form-input.js";
 import { escapeHtml, resolveWebsitePresentation, websitePage, type WebsitePresentation, type WebsiteSettingsReader } from "./website-rendering.js";
 
 export interface WebFormApiOptions {
@@ -11,7 +11,13 @@ export interface WebFormApiOptions {
   readonly websiteSettings?: WebsiteSettingsReader;
   readonly actor: ActorResolver;
   readonly maxJsonBytes?: number;
+  readonly serverSuppliedData?: WebFormServerSuppliedDataResolver;
 }
+
+export type WebFormServerSuppliedDataResolver = (
+  request: Request,
+  webFormName: string
+) => Readonly<Record<string, JsonValue | undefined>> | undefined | Promise<Readonly<Record<string, JsonValue | undefined>> | undefined>;
 
 const DEFAULT_MAX_JSON_BYTES = 1_000_000;
 
@@ -33,7 +39,7 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
     const actor = await options.actor(c.req.raw);
     const body = await readJsonObject(c.req.raw, { maxJsonBytes });
     const data = webFormDataFromBody(body);
-    const result = await options.webForms.submitWebForm(actor, c.req.param("webForm"), {
+    const result = await submitWebForm(options, actor, c.req.raw, c.req.param("webForm"), {
       data,
       metadata: requestMetadata(c.req.raw)
     });
@@ -74,66 +80,6 @@ export function createWebFormApi(options: WebFormApiOptions): Hono {
   });
 
   return app;
-}
-
-function webFormDataFromBody(body: Record<string, JsonValue | undefined>): Record<string, JsonValue | undefined> {
-  const data = body.data;
-  if (data === undefined) {
-    return body;
-  }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    throw badRequest("Web form data must be an object");
-  }
-  return data as Record<string, JsonValue | undefined>;
-}
-
-function dataFromFormData(
-  formData: FormData,
-  fields: readonly WebFormResolvedField[]
-): Record<string, JsonValue | undefined> {
-  const data: Record<string, JsonValue | undefined> = {};
-  for (const field of fields) {
-    const raw = formData.get(field.field);
-    data[field.field] = valueFromFormData(raw, field);
-  }
-  return data;
-}
-
-function valueFromFormData(value: FormDataEntryValue | null, field: WebFormResolvedField): JsonValue | undefined {
-  if (field.type === "boolean") {
-    return value !== null;
-  }
-  if (value === null) {
-    return undefined;
-  }
-  if (typeof value !== "string") {
-    throw badRequest(`Web form field '${field.field}' must be text`);
-  }
-  if (value === "") {
-    return undefined;
-  }
-  if (field.type === "integer") {
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed)) {
-      throw badRequest(`Web form field '${field.field}' must be an integer`);
-    }
-    return parsed;
-  }
-  if (field.type === "number") {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) {
-      throw badRequest(`Web form field '${field.field}' must be a number`);
-    }
-    return parsed;
-  }
-  if (field.type === "json") {
-    try {
-      return JSON.parse(value) as JsonValue;
-    } catch {
-      throw badRequest(`Web form field '${field.field}' must contain valid JSON`);
-    }
-  }
-  return value;
 }
 
 interface WebFormListItem {
@@ -177,8 +123,8 @@ async function submitPublicWebForm(
 ): Promise<Response> {
   const metadata = await getPublicWebForm(options.webForms, actor, identifier);
   const formData = await request.formData();
-  const result = await options.webForms.submitWebForm(actor, metadata.form.name, {
-    data: dataFromFormData(formData, metadata.fields),
+  const result = await submitWebForm(options, actor, request, metadata.form.name, {
+    data: dataFromWebFormData(formData, metadata.fields),
     metadata: requestMetadata(request)
   });
   return html(renderWebFormSuccess(
@@ -208,6 +154,7 @@ function renderWebForm(metadata: Awaited<ReturnType<WebFormService["getWebForm"]
 }
 
 function renderWebFormField(field: WebFormResolvedField): string {
+  if (field.serverSupplied) return "";
   const required = field.required ? " required" : "";
   const placeholder = webFormPlaceholder(field);
   const help = field.description === undefined ? "" : `<small>${escapeHtml(field.description)}</small>`;
@@ -226,6 +173,19 @@ function renderWebFormField(field: WebFormResolvedField): string {
     return `<label class="checkbox"><input type="checkbox" name="${name}" value="1"><span>${escapeHtml(field.label)}</span>${help}</label>`;
   }
   return `<label>${label}<input name="${name}" type="${inputType(field.type)}"${required}${placeholder}>${help}</label>`;
+}
+
+async function submitWebForm(
+  options: WebFormApiOptions,
+  actor: Actor,
+  request: Request,
+  webFormName: string,
+  input: Parameters<WebFormService["submitWebForm"]>[2]
+) {
+  const serverData = await options.serverSuppliedData?.(request, webFormName);
+  return serverData === undefined
+    ? options.webForms.submitWebForm(actor, webFormName, input)
+    : options.webForms.submitWebFormWithServerData(actor, webFormName, input, serverData);
 }
 
 function webFormPlaceholder(field: WebFormResolvedField): string {

@@ -12,8 +12,9 @@ import {
   type JsonValue,
   type LinkOption,
   type ListDocumentsFilter,
-  type ListFilterBuilderField,
   type ListFilterExpression,
+  type ListFilterBuilderField,
+  type PredicateExpression,
   type ListFilterGroup,
   type ListFilterGroupMatch,
   type ListFilterInputType,
@@ -25,11 +26,12 @@ import {
   type NotificationRuleChannel,
   type NotificationRuleEventKind,
   type NotificationRuleRecipientDefinition,
+  type NamedWorkflowDefinition,
+  type NamedWorkflowTransition,
+  type NamingSeriesStrategy,
   type ResolvedFormSection,
   type ResolvedFormView,
-  type ResolvedListView,
-  type WorkflowDefinition,
-  type WorkflowTransition
+  type ResolvedListView
 } from "../../core/types.js";
 import { isListFilterGroup } from "../../core/list-view.js";
 import {
@@ -55,7 +57,9 @@ import type {
 import type { DocumentImportMode, DocumentImportResult } from "../../application/document-import-service.js";
 import type { CustomFieldState } from "../../core/custom-fields.js";
 import type { FieldPropertyOverrideState } from "../../core/field-property-overrides.js";
-import { isWorkflowStateField, type WorkflowDefinitionState } from "../../core/workflow.js";
+import { isWorkflowStateField, type NamedWorkflowDefinitionState } from "../../core/workflow.js";
+import type { NamingConfigurationState } from "../../core/naming-configuration.js";
+import type { NamingPreview } from "../../application/naming-service.js";
 import type { DocumentSharePermission, DocumentShareState } from "../../core/document-shares.js";
 import type { FileDashboard } from "../../application/file-service.js";
 import type { KanbanCardResult, KanbanRunResult } from "../../application/kanban-service.js";
@@ -127,6 +131,8 @@ export type FormLinkOptions = Readonly<Record<string, readonly LinkOption[]>>;
 export type FormTableDefinitions = Readonly<Record<string, DocTypeDefinition>>;
 export type FormLifecycleAction = "submit" | "cancel";
 export interface FormWorkflowAction {
+  readonly workflow: string;
+  readonly workflowLabel: string;
   readonly action: string;
   readonly label: string;
   readonly to: string;
@@ -2169,35 +2175,112 @@ export function renderFieldPropertyAdmin(state: FieldPropertyAdminState): string
 export interface WorkflowAdminState {
   readonly doctypes: readonly DocTypeDefinition[];
   readonly selectedDoctype: string;
+  readonly selectedWorkflowName?: string;
   readonly doctype?: DocTypeDefinition;
   readonly roleSuggestions?: readonly string[];
-  readonly draftWorkflow?: WorkflowDefinition;
-  readonly state?: WorkflowDefinitionState;
+  readonly draftWorkflow?: NamedWorkflowDefinition;
+  readonly state?: readonly NamedWorkflowDefinitionState[];
   readonly error?: string;
 }
 
 export function renderWorkflowAdmin(state: WorkflowAdminState): string {
-  const version = state.state?.version ?? 0;
-  const workflow = state.draftWorkflow ?? state.state?.workflow;
-  const savedWorkflow = state.state?.workflow;
+  const selectedState = state.state?.find((entry) => entry.workflowName === state.selectedWorkflowName) ??
+    state.state?.find((entry) => entry.workflow !== undefined);
+  const version = selectedState?.version ?? 0;
+  const workflow = state.draftWorkflow ?? selectedState?.workflow;
+  const selectedWorkflowName = workflow?.name ?? state.selectedWorkflowName ?? "";
   const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
   const states = workflow?.states.join("\n") ?? "";
-  const transitions = workflow?.transitions.map(renderWorkflowTransitionLine).join("\n") ?? "";
   const workflowStates = workflow?.states ?? [];
   const roleSuggestions = uniqueSortedStrings([
     ...(state.roleSuggestions ?? []),
     ...(workflow?.transitions.flatMap((transition) => transition.roles ?? []) ?? [])
   ]);
-  const rows = workflow?.transitions
-    .map((transition) => `<tr>
-      ${renderTableCell("Action", escapeHtml(transition.action))}
-      ${renderTableCell("From", escapeHtml(transition.from))}
-      ${renderTableCell("To", escapeHtml(transition.to))}
-      ${renderTableCell("Roles", escapeHtml((transition.roles ?? []).join(", ")))}
-      ${renderTableCell("Event Type", escapeHtml(transition.eventType ?? ""))}
+  const rows = state.state
+    ?.map((entry) => `<tr>
+      ${renderTableCell("Name", escapeHtml(entry.workflowName))}
+      ${renderTableCell("Label", escapeHtml(entry.workflow?.label ?? ""))}
+      ${renderTableCell("State Field", escapeHtml(entry.workflow?.stateField ?? ""))}
+      ${renderTableCell("Source", entry.cleared ? "cleared" : entry.version === 0 ? "static" : "runtime")}
+      ${renderTableCell("Version", String(entry.version))}
+      ${renderTableCell("Actions", `<a class="button" href="${escapeHtml(workflowAdminHref(state.selectedDoctype, entry.workflowName))}">Edit</a>`)}
     </tr>`)
     .join("");
   return `<form class="panel form" method="get" action="/desk/admin/workflows">
+    <div class="fields cols-1">
+      ${renderDocTypeSelectControl({
+        label: "DocType",
+        name: "doctype",
+        value: state.selectedDoctype,
+        options: doctypeOptions(state.doctypes, state.selectedDoctype)
+      })}
+      <label class="field"><span>Workflow</span><input name="workflow" value="${escapeHtml(selectedWorkflowName)}" placeholder="lifecycle"></label>
+    </div>
+    <div class="actions"><button class="button primary" type="submit">Load</button></div>
+  </form>
+  ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
+  <form class="panel form" method="post" action="/desk/admin/workflows">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(version)}">
+    <div class="form-head"><h2>${workflow === undefined ? "New Workflow" : "Workflow Definition"}</h2><p>v${String(version)}</p></div>
+    <div class="fields">
+      <label class="field"><span>Name</span><input name="name" value="${escapeHtml(selectedWorkflowName)}"></label>
+      <label class="field"><span>Label</span><input name="label" value="${escapeHtml(workflow?.label ?? "")}"></label>
+      ${renderWorkflowStateFieldControl(doctype, workflow?.stateField ?? "")}
+      ${renderWorkflowInitialStateControl(workflowStates, workflow?.initialState ?? "")}
+      <label class="field"><span>States</span><textarea name="states">${escapeHtml(states)}</textarea></label>
+    </div>
+    ${renderWorkflowTransitionControls(workflow?.transitions ?? [], workflowStates, roleSuggestions)}
+    <div class="actions">
+      <button class="button primary" type="submit">Save Workflow</button>
+      ${workflow ? `<button class="button danger" type="submit" formaction="/desk/admin/workflows/${encodeURIComponent(state.selectedDoctype)}/${encodeURIComponent(workflow.name)}/clear">Clear Workflow</button>` : ""}
+    </div>
+  </form>
+  <section class="panel">
+    <div class="table-wrap">
+      <table class="responsive-table">
+        <thead><tr><th>Name</th><th>Label</th><th>State Field</th><th>Source</th><th>Version</th><th>Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No workflows configured.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+export interface NamingAdminState {
+  readonly doctypes: readonly DocTypeDefinition[];
+  readonly selectedDoctype: string;
+  readonly doctype?: DocTypeDefinition;
+  readonly state?: NamingConfigurationState;
+  readonly preview?: NamingPreview;
+  readonly draftStrategy?: NamingSeriesStrategy;
+  readonly previewData?: DocumentData;
+  readonly error?: string;
+}
+
+export function renderNamingAdmin(state: NamingAdminState): string {
+  const doctype = state.doctype ?? state.doctypes.find((item) => item.name === state.selectedDoctype);
+  const effective = state.draftStrategy ?? state.state?.runtimeStrategy ?? state.state?.effectiveStrategy;
+  const strategy: NamingSeriesStrategy = effective?.kind === "series"
+    ? effective
+    : {
+        kind: "series",
+        pattern: `${state.selectedDoctype || "DOC"}-{sequence:6}`,
+        counter: namingDefaultCounter(state.selectedDoctype)
+      };
+  const version = state.state?.version ?? 0;
+  const previewData = state.previewData ?? {};
+  const targetFields = (doctype?.fields ?? []).filter((field) =>
+    field.type === "text" && field.readOnly === true && field.noCopy === true
+  );
+  const scopeFields = (doctype?.fields ?? []).filter((field) =>
+    field.type !== "table" && field.type !== "json" && field.type !== "longText"
+  );
+  const selectedScopes = new Set(strategy.scopeFields ?? []);
+  const previewRows = state.preview?.candidates.map((candidate) => `<tr>
+    ${renderTableCell("Sequence", String(candidate.value))}
+    ${renderTableCell("Generated ID", `<code>${escapeHtml(candidate.name)}</code>`)}
+  </tr>`).join("") ?? "";
+  return `<form class="panel form" method="get" action="/desk/admin/naming">
     <div class="fields cols-1">
       ${renderDocTypeSelectControl({
         label: "DocType",
@@ -2209,29 +2292,82 @@ export function renderWorkflowAdmin(state: WorkflowAdminState): string {
     <div class="actions"><button class="button primary" type="submit">Load</button></div>
   </form>
   ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)}</p>` : ""}
-  <form class="panel form" method="post" action="/desk/admin/workflows">
+  <form class="panel form" method="post" action="/desk/admin/naming">
     <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
     <input type="hidden" name="expectedVersion" value="${String(version)}">
-    <div class="form-head"><h2>Workflow Definition</h2><p>v${String(version)}</p></div>
+    <div class="form-head"><h2>Naming Strategy</h2><p>${escapeHtml(state.state?.source ?? "default")} v${String(version)}</p></div>
     <div class="fields">
-      ${renderWorkflowStateFieldControl(doctype, workflow?.stateField ?? "workflow_state")}
-      ${renderWorkflowInitialStateControl(workflowStates, workflow?.initialState ?? "")}
-      <label class="field"><span>States</span><textarea name="states">${escapeHtml(states)}</textarea></label>
+      <label class="field wide"><span>Pattern</span><input name="pattern" value="${escapeHtml(strategy.pattern)}" placeholder="RET-{YYYY}-{sequence:6}"></label>
+      <label class="field"><span>Counter</span><input name="counter" value="${escapeHtml(strategy.counter ?? "")}" placeholder="returns"></label>
+      <label class="field"><span>Generated Field</span><select name="targetField">
+        <option value="">Document name only</option>
+        ${targetFields.map((field) => `<option value="${escapeHtml(field.name)}"${field.name === strategy.targetField ? " selected" : ""}>${escapeHtml(field.label ?? field.name)}</option>`).join("")}
+      </select></label>
+      <label class="field"><span>Default Padding</span><input name="padding" type="number" min="1" max="18" value="${escapeHtml(String(strategy.padding ?? 6))}"></label>
+      <label class="field"><span>Start</span><input name="start" type="number" min="1" value="${escapeHtml(String(strategy.start ?? 1))}"></label>
+      <label class="field"><span>Step</span><input name="step" type="number" min="1" value="${escapeHtml(String(strategy.step ?? 1))}"></label>
+      <label class="field"><span>Reset</span><select name="reset">${renderNamingResetOptions(strategy.reset ?? "never")}</select></label>
+      <label class="field"><span>Max Attempts</span><input name="maxAttempts" type="number" min="1" max="10000" value="${escapeHtml(String(strategy.maxAttempts ?? 10000))}"></label>
+      <label class="field wide"><span>Exclusions JSON</span><textarea name="exclusions" rows="6">${escapeHtml(JSON.stringify(strategy.exclusions ?? [], null, 2))}</textarea></label>
     </div>
-    ${renderWorkflowTransitionControls(workflow?.transitions ?? [], workflowStates, roleSuggestions, transitions)}
+    <fieldset class="panel-section"><legend>Counter Scope Fields</legend>
+      <div class="quick-filter-choice">
+        ${scopeFields.map((field) => `<label><input type="checkbox" name="scopeField" value="${escapeHtml(field.name)}"${selectedScopes.has(field.name) ? " checked" : ""}> <span>${escapeHtml(field.label ?? field.name)}</span></label>`).join("") || `<p class="empty">No scalar fields are available.</p>`}
+      </div>
+    </fieldset>
     <div class="actions">
-      <button class="button primary" type="submit">Save Workflow</button>
-      ${savedWorkflow ? `<button class="button danger" type="submit" formaction="/desk/admin/workflows/${encodeURIComponent(state.selectedDoctype)}/clear">Clear Override</button>` : ""}
+      <button class="button primary" type="submit">Save Strategy</button>
+      ${state.state?.runtimeStrategy === undefined ? "" : `<button class="button danger" type="submit" formaction="/desk/admin/naming/${encodeURIComponent(state.selectedDoctype)}/clear">Clear Runtime Strategy</button>`}
     </div>
   </form>
-  <section class="panel">
-    <div class="table-wrap">
-      <table class="responsive-table">
-        <thead><tr><th>Action</th><th>From</th><th>To</th><th>Roles</th><th>Event Type</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">No workflow override configured.</td></tr>`}</tbody>
-      </table>
+  <form class="panel form" method="post" action="/desk/admin/naming/preview">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <div class="form-head"><h2>Preview</h2><p>Does not consume numbers</p></div>
+    <div class="fields">
+      <label class="field wide"><span>Scope / Token Data JSON</span><textarea name="data" rows="5">${escapeHtml(JSON.stringify(previewData, null, 2))}</textarea></label>
+      <label class="field"><span>Count</span><input name="count" type="number" min="1" max="100" value="${String(state.preview?.candidates.length ?? 5)}"></label>
     </div>
-  </section>`;
+    <div class="actions"><button class="button primary" type="submit">Preview IDs</button></div>
+  </form>
+  <section class="panel">
+    <div class="form-head"><h2>Upcoming IDs</h2><p>${escapeHtml(namingCounterSummary(state.preview))}</p></div>
+    <div class="table-wrap"><table class="responsive-table">
+      <thead><tr><th>Sequence</th><th>Generated ID</th></tr></thead>
+      <tbody>${previewRows || `<tr><td colspan="2" class="empty">Provide required token or scope data to preview this strategy.</td></tr>`}</tbody>
+    </table></div>
+  </section>
+  <form class="panel form" method="post" action="/desk/admin/naming/counter">
+    <input type="hidden" name="doctype" value="${escapeHtml(state.selectedDoctype)}">
+    <input type="hidden" name="expectedVersion" value="${String(state.preview?.counterVersion ?? 0)}">
+    <div class="form-head"><h2>Advance Counter</h2><p>Forward only</p></div>
+    <div class="fields">
+      <label class="field"><span>Current Value</span><input name="current" type="number" min="0" value="${escapeHtml(String(state.preview?.current ?? 0))}"></label>
+      <label class="field wide"><span>Scope / Token Data JSON</span><textarea name="data" rows="5">${escapeHtml(JSON.stringify(previewData, null, 2))}</textarea></label>
+    </div>
+    <div class="actions"><button class="button" type="submit">Advance Counter</button></div>
+  </form>`;
+}
+
+function renderNamingResetOptions(selected: string): string {
+  return [
+    ["never", "Never"],
+    ["year", "Every year"],
+    ["month", "Every month"],
+    ["day", "Every day"]
+  ].map(([value, label]) => `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`).join("");
+}
+
+function namingDefaultCounter(doctype: string): string {
+  const normalized = doctype.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "documents";
+}
+
+function namingCounterSummary(preview: NamingPreview | undefined): string {
+  if (preview === undefined) {
+    return "Counter not loaded";
+  }
+  const scope = preview.scope ? `, scope ${preview.scope}` : "";
+  return `${preview.counter}${scope}, current ${String(preview.current ?? "not started")}, v${String(preview.counterVersion)}`;
 }
 
 export function renderNotificationRuleAdmin(state: NotificationRuleAdminState): string {
@@ -2500,6 +2636,10 @@ function assignmentRuleAdminHref(doctype: string, ruleName: string): string {
   return `/desk/admin/assignment-rules?doctype=${encodeURIComponent(doctype)}&rule=${encodeURIComponent(ruleName)}`;
 }
 
+function workflowAdminHref(doctype: string, workflowName: string): string {
+  return `/desk/admin/workflows?doctype=${encodeURIComponent(doctype)}&workflow=${encodeURIComponent(workflowName)}`;
+}
+
 function notificationRuleRecipientLabel(
   recipient: NotificationRuleState["rules"][number]["rule"]["recipients"][number]
 ): string {
@@ -2521,24 +2661,12 @@ function assignmentRuleAssigneeLabel(
   return `user:${assignee.userId}`;
 }
 
-function notificationRuleConditionValue(condition: ListFilterExpression | undefined): string {
+function notificationRuleConditionValue(condition: PredicateExpression | undefined): string {
   return condition === undefined ? "" : JSON.stringify(condition, null, 2);
 }
 
-function notificationRuleConditionLabel(condition: ListFilterExpression | undefined): string {
+function notificationRuleConditionLabel(condition: PredicateExpression | undefined): string {
   return condition === undefined ? "" : JSON.stringify(condition);
-}
-
-function renderWorkflowTransitionLine(
-  transition: NonNullable<WorkflowDefinitionState["workflow"]>["transitions"][number]
-): string {
-  return [
-    transition.action,
-    transition.from,
-    transition.to,
-    (transition.roles ?? []).join(", "),
-    transition.eventType ?? ""
-  ].join(" | ");
 }
 
 function renderWorkflowStateFieldControl(doctype: DocTypeDefinition | undefined, selected: string): string {
@@ -2562,10 +2690,9 @@ function renderWorkflowInitialStateControl(states: readonly string[], selected: 
 }
 
 function renderWorkflowTransitionControls(
-  transitions: readonly WorkflowTransition[],
+  transitions: readonly NamedWorkflowTransition[],
   states: readonly string[],
-  roleSuggestions: readonly string[],
-  legacyTransitions: string
+  roleSuggestions: readonly string[]
 ): string {
   const rows = (transitions.length === 0 ? [undefined, undefined, undefined] : [...transitions, undefined])
     .map((transition, index) => renderWorkflowTransitionControlRow(transition, index, states, roleSuggestions))
@@ -2573,15 +2700,11 @@ function renderWorkflowTransitionControls(
   return `<fieldset class="admin-row-builder workflow-transition-builder">
     <legend>Transitions</legend>
     <div class="admin-row-list">${rows}</div>
-    <details class="nested-disclosure">
-      <summary>Advanced transition lines</summary>
-      <label class="field wide"><span>Legacy Lines</span><textarea name="transitions" rows="4">${escapeHtml(legacyTransitions)}</textarea></label>
-    </details>
   </fieldset>`;
 }
 
 function renderWorkflowTransitionControlRow(
-  transition: WorkflowTransition | undefined,
+  transition: NamedWorkflowTransition | undefined,
   index: number,
   states: readonly string[],
   roleSuggestions: readonly string[]
@@ -2590,6 +2713,7 @@ function renderWorkflowTransitionControlRow(
   const from = transition?.from ?? "";
   const to = transition?.to ?? "";
   const roles = (transition?.roles ?? []).join(", ");
+  const allowWhen = transition?.allowWhen === undefined ? "" : JSON.stringify(transition.allowWhen, null, 2);
   const eventType = transition?.eventType ?? "";
   const stateOptionsFrom = states.length === 0
     ? ""
@@ -2611,6 +2735,7 @@ function renderWorkflowTransitionControlRow(
       datalistId: index === 0 ? "workflow-role-suggestions" : `workflow-role-suggestions-${String(index)}`,
       className: "field compact"
     })}
+    <label class="field compact"><span>Allow When JSON</span><textarea name="transitionAllowWhen" rows="3">${escapeHtml(allowWhen)}</textarea></label>
     <label class="field compact"><span>Event Type</span><input name="transitionEventType" value="${escapeHtml(eventType)}"></label>
   </div>`;
 }
@@ -3947,7 +4072,9 @@ export function renderFormView(
   }
 ): string {
   const updateDocument = options.mode === "update" ? options.document : undefined;
-  const protectedWorkflowStateField = workflowStateFieldName(doctype);
+  const workflowInitialStates = new Map(
+    (doctype.workflows ?? []).map((workflow) => [workflow.stateField, workflow.initialState] as const)
+  );
   const action =
     options.mode === "create"
       ? `/desk/${encodeURIComponent(doctype.name)}`
@@ -3960,11 +4087,9 @@ export function renderFormView(
       renderFormSection(
         section,
         options.document,
-        options.mode,
         options.linkOptions ?? {},
         options.tableDefinitions ?? {},
-        protectedWorkflowStateField,
-        doctype.workflow?.initialState
+        workflowInitialStates
       )
     )
     .join("");
@@ -3988,12 +4113,13 @@ export function renderFormView(
       : "";
   const workflowActions =
     updateDocument !== undefined && options.workflowActions?.length
-      ? `<section class="command-row" aria-label="Workflow actions">${options.workflowActions
-          .map(
-            (workflow) =>
-              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/transition/${encodeURIComponent(workflow.action)}">${escapeHtml(workflow.label)}</button>`
-          )
-          .join("")}</section>`
+      ? groupWorkflowActions(options.workflowActions)
+          .map(([workflowName, actions]) => `<section class="command-row" aria-label="${escapeHtml(actions[0]?.workflowLabel ?? workflowName)} workflow actions">
+            <strong>${escapeHtml(actions[0]?.workflowLabel ?? workflowName)}</strong>
+            ${actions.map((workflow) =>
+              `<button class="button" formmethod="post" formaction="/desk/${encodeURIComponent(doctype.name)}/${encodeURIComponent(updateDocument.name)}/workflows/${encodeURIComponent(workflow.workflow)}/transition/${encodeURIComponent(workflow.action)}">${escapeHtml(workflow.label)}</button>`
+            ).join("")}
+          </section>`).join("")
       : "";
   const printLinks =
     updateDocument !== undefined && options.printFormats?.length
@@ -4365,23 +4491,20 @@ export function renderErrorPanel(message: string): string {
 function renderFormSection(
   section: ResolvedFormSection,
   document: DocumentSnapshot | undefined,
-  mode: "create" | "update",
   linkOptions: FormLinkOptions,
   tableDefinitions: FormTableDefinitions,
-  protectedWorkflowStateField: string | undefined,
-  workflowInitialState: string | undefined
+  workflowInitialStates: ReadonlyMap<string, string>
 ): string {
   const fields = section.fields
     .map((field) =>
       renderField(
         field,
-        document?.data[field.name] ?? (field.name === protectedWorkflowStateField ? workflowInitialState : undefined),
-        mode,
+        document?.data[field.name] ?? workflowInitialStates.get(field.name),
         linkOptions[field.name] ?? [],
         tableDefinitions[field.name],
         linkOptions,
         tableDefinitions,
-        field.name === protectedWorkflowStateField
+        workflowInitialStates.has(field.name)
       )
     )
     .join("");
@@ -4394,7 +4517,6 @@ function renderFormSection(
 function renderField(
   field: FieldDefinition,
   value: JsonValue | undefined,
-  mode: "create" | "update",
   linkOptions: readonly LinkOption[],
   tableDefinition: DocTypeDefinition | undefined,
   allLinkOptions: FormLinkOptions,
@@ -4404,18 +4526,24 @@ function renderField(
   const id = `field-${slug(field.name)}`;
   const label = escapeHtml(field.label ?? field.name);
   const required = field.required ? " required" : "";
-  const readonly = field.readOnly || protectedWorkflowState || (mode === "update" && field.readOnly) ? " readonly" : "";
+  const nonEditable = field.readOnly === true || protectedWorkflowState;
+  const readonly = nonEditable && field.type !== "link" && field.type !== "select" && field.type !== "boolean"
+    ? " readonly"
+    : "";
+  const disabled = nonEditable && (field.type === "link" || field.type === "select" || field.type === "boolean")
+    ? " disabled"
+    : "";
   const hiddenDependsOn = field.hiddenDependsOn === undefined
     ? ""
     : ` data-cf-frappe-hidden-depends-on="${escapeHtml(JSON.stringify(field.hiddenDependsOn))}"`;
   const placeholder = renderFieldPlaceholder(field);
-  const nameAttribute = protectedWorkflowState ? "" : ` name="${escapeHtml(field.name)}"`;
+  const nameAttribute = nonEditable ? "" : ` name="${escapeHtml(field.name)}"`;
   const protectedAttribute = protectedWorkflowState ? ' data-cf-frappe-workflow-state="protected"' : "";
-  const common = `id="${id}"${nameAttribute} data-cf-frappe-field-type="${field.type}"${protectedAttribute}${hiddenDependsOn}${required}${readonly}`;
+  const common = `id="${id}"${nameAttribute} data-cf-frappe-field-type="${field.type}"${protectedAttribute}${hiddenDependsOn}${required}${readonly}${disabled}`;
   const formatted = formatFormValue(value);
   const help = renderFieldHelp(field);
   if (field.type === "table") {
-    return renderTableField(field, value, tableDefinition, allLinkOptions, tableDefinitions, field.name, field.name);
+    return renderTableField(field, value, tableDefinition, allLinkOptions, tableDefinitions, field.name, field.name, nonEditable);
   }
   if (protectedWorkflowState) {
     return `<label class="field" for="${id}"><span>${label}${field.required ? " *" : ""}</span><input type="text" ${common} value="${escapeHtml(formatted)}"${placeholder}>${help}</label>`;
@@ -4448,12 +4576,15 @@ function renderTableField(
   linkOptions: FormLinkOptions,
   tableDefinitions: FormTableDefinitions,
   definitionPath: string,
-  inputPath: string
+  inputPath: string,
+  nonEditable = false
 ): string {
   const label = escapeHtml(field.label ?? field.name);
   const help = renderFieldHelp(field);
   if (!child) {
-    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}" name="${escapeHtml(field.name)}" data-cf-frappe-field-type="${field.type}">${escapeHtml(formatFormValue(value))}</textarea>${help}</label>`;
+    const nameAttribute = nonEditable ? "" : ` name="${escapeHtml(field.name)}"`;
+    const readonly = nonEditable ? " readonly" : "";
+    return `<label class="field" for="field-${slug(field.name)}"><span>${label}${field.required ? " *" : ""}</span><textarea id="field-${slug(field.name)}"${nameAttribute} data-cf-frappe-field-type="${field.type}"${readonly}>${escapeHtml(formatFormValue(value))}</textarea>${help}</label>`;
   }
   const rows = Array.isArray(value) ? value.filter(isJsonObject) : [];
   const renderRows = rows.length > 0 ? rows : [{}];
@@ -4478,7 +4609,7 @@ function renderTableField(
   const nextRow = rows.length > 0
     ? renderBlankTableRow(definitionPath, inputPath, rows.length, childFields, linkOptions, tableDefinitions)
     : "";
-  return `<fieldset class="field table-field">
+  return `<fieldset class="field table-field"${nonEditable ? " disabled" : ""}>
     <legend>${label}${field.required ? " *" : ""}</legend>
     <div class="table-wrap">
       <table>
@@ -4497,8 +4628,16 @@ function renderFieldHelp(field: FieldDefinition): string {
   ].filter((item) => item.length > 0).map((item) => `<small>${escapeHtml(item)}</small>`).join("");
 }
 
-function workflowStateFieldName(doctype: DocTypeDefinition): string | undefined {
-  return doctype.workflow === undefined ? undefined : doctype.workflow.stateField ?? "workflow_state";
+function groupWorkflowActions(
+  actions: readonly FormWorkflowAction[]
+): readonly (readonly [string, readonly FormWorkflowAction[]])[] {
+  const grouped = new Map<string, FormWorkflowAction[]>();
+  for (const action of actions) {
+    const group = grouped.get(action.workflow) ?? [];
+    group.push(action);
+    grouped.set(action.workflow, group);
+  }
+  return [...grouped.entries()];
 }
 
 function renderTableRow(options: {

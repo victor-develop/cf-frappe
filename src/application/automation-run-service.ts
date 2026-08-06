@@ -1,13 +1,17 @@
-import { automationActionsFromDomainEvent } from "../core/automation-rules.js";
-import { domainEventPayloadKind } from "../core/domain-events.js";
+import { automationActionIdentity, automationActionsFromDomainEvent } from "../core/automation-rules.js";
+import { domainEventPayloadKind, domainEventWorkflowIdentity } from "../core/domain-events.js";
+import type { DomainEventWorkflowIdentity } from "../core/domain-events.js";
 import { notFound } from "../core/errors.js";
 import { automationRunStream } from "../core/streams.js";
 import type {
   AutomationRuleDefinition,
+  Actor,
+  DocumentChangeContext,
   DocumentData,
   DocumentSnapshot,
   DomainEvent,
-  ListFilterExpression,
+  JsonValue,
+  PredicateExpression,
   NewDomainEvent,
   TenantId
 } from "../core/types.js";
@@ -53,6 +57,8 @@ export type {
 
 const MAX_AUTOMATION_RUN_APPEND_ATTEMPTS = 5;
 const AUTOMATION_RUN_LIST_PAGE_SIZE = 100;
+export const DEFAULT_AUTOMATION_MAX_DEPTH = 8;
+export const DEFAULT_AUTOMATION_MAX_PATH_REPEATS = 1;
 
 export interface AutomationRunCommitPlan {
   readonly entries: readonly DocumentCommitBatchEntry[];
@@ -63,11 +69,15 @@ export interface AutomationRunCommitPlan {
 export interface AutomationRunPlannerOptions {
   readonly ids?: IdGenerator;
   readonly retry?: Partial<AutomationRunRetryPolicy>;
+  readonly maxDepth?: number;
+  readonly maxPathRepeats?: number;
 }
 
 export interface PlanAutomationRunsFromDomainEventCommand {
   readonly event: NewDomainEvent | DomainEvent;
-  readonly snapshot: DocumentSnapshot | null;
+  readonly change: DocumentChangeContext;
+  readonly input: DocumentData;
+  readonly actor: Actor;
   readonly rules: readonly AutomationRuleDefinition[] | undefined;
   readonly metadata?: DocumentData;
 }
@@ -102,10 +112,18 @@ export interface FailAutomationRunCommand extends CompleteAutomationRunCommand {
 export class AutomationRunPlanner {
   protected readonly ids: IdGenerator;
   protected readonly retry: AutomationRunRetryPolicy;
+  protected readonly maxDepth: number;
+  protected readonly maxPathRepeats: number;
 
   constructor(options: AutomationRunPlannerOptions = {}) {
     this.ids = options.ids ?? cryptoIdGenerator;
     this.retry = normalizeAutomationRunRetryPolicy(options.retry);
+    this.maxDepth = positiveInteger(options.maxDepth, DEFAULT_AUTOMATION_MAX_DEPTH, "Automation max depth");
+    this.maxPathRepeats = positiveInteger(
+      options.maxPathRepeats,
+      DEFAULT_AUTOMATION_MAX_PATH_REPEATS,
+      "Automation max path repeats"
+    );
   }
 
   planEnqueueFromDomainEvent(command: PlanAutomationRunsFromDomainEventCommand): AutomationRunCommitPlan {
@@ -116,53 +134,108 @@ export class AutomationRunPlanner {
     const sourceEvent = committedLikeEvent(command.event);
     const actions = automationActionsFromDomainEvent({
       event: sourceEvent,
-      snapshot: command.snapshot,
+      change: command.change,
+      input: command.input,
+      actor: command.actor,
       rules
     });
     if (actions.length === 0) {
       return emptyAutomationRunCommitPlan;
     }
     const sourcePayloadKind = domainEventPayloadKind(sourceEvent);
-    const runEvents = actions.map((action): NewDomainEvent<AutomationRunEventPayload> => {
+    const workflowIdentity = domainEventWorkflowIdentity(sourceEvent);
+    const workflowMetadata = workflowIdentityMetadata(workflowIdentity);
+    const runGroups = actions.map((action) => {
+      const automationPathKey = automationActionIdentity(action.ruleId, action.actionId);
+      const automationDepth = sourceAutomationDepth(sourceEvent) + 1;
+      const sourcePath = sourceAutomationPath(sourceEvent);
+      const automationPath = Object.freeze([...sourcePath, automationPathKey]);
+      const correlationId = sourceCorrelationId(sourceEvent);
       const payload: AutomationRunEventPayload = {
         kind: "AutomationRunEnqueued",
-        runId: action.actionId,
+        runId: action.runId,
         sourceEventId: sourceEvent.id,
         sourceEventType: sourceEvent.type,
         sourcePayloadKind,
         sourceDoctype: sourceEvent.doctype,
         sourceDocumentName: sourceEvent.documentName,
         sourceActorId: sourceEvent.actorId,
+        ...workflowIdentity,
+        ruleId: action.ruleId,
         ruleName: action.ruleName,
-        actionIndex: action.actionIndex,
+        actionId: action.actionId,
         action: action.action,
-        retry: this.retry
+        retry: this.retry,
+        causationId: sourceEvent.id,
+        correlationId,
+        automationDepth,
+        automationPath
       };
-      return automationRunEvent({
+      const enqueued = automationRunEvent({
         id: this.ids.next("evt_"),
         tenantId: sourceEvent.tenantId,
-        stream: automationRunStream(sourceEvent.tenantId, action.actionId),
+        stream: automationRunStream(sourceEvent.tenantId, action.runId),
         actorId: sourceEvent.actorId,
         occurredAt: sourceEvent.occurredAt,
         payload,
         metadata: {
           sourceEventId: sourceEvent.id,
+          causationId: sourceEvent.id,
+          correlationId,
+          automationDepth,
+          automationPath,
+          automationRuleId: action.ruleId,
           automationRuleName: action.ruleName,
+          automationActionDefinitionId: action.actionId,
+          ...workflowMetadata,
           ...(command.metadata ?? {})
         }
       });
+      const suppressionError = automationLoopSuppressionError({
+        automationDepth,
+        automationPathKey,
+        maxDepth: this.maxDepth,
+        maxPathRepeats: this.maxPathRepeats,
+        sourcePath
+      });
+      const events: NewDomainEvent<AutomationRunEventPayload>[] = [enqueued];
+      if (suppressionError !== undefined) {
+        events.push(automationRunEvent({
+          id: this.ids.next("evt_"),
+          tenantId: sourceEvent.tenantId,
+          stream: enqueued.stream,
+          actorId: "system",
+          occurredAt: sourceEvent.occurredAt,
+          payload: {
+            kind: "AutomationRunSuppressed",
+            runId: action.runId,
+            error: suppressionError
+          },
+          metadata: {
+            sourceEventId: sourceEvent.id,
+            causationId: sourceEvent.id,
+            correlationId,
+            automationDepth,
+            automationPath,
+            automationRuleId: action.ruleId,
+            automationActionDefinitionId: action.actionId,
+            ...workflowMetadata
+          }
+        }));
+      }
+      return Object.freeze({ runId: action.runId, events: Object.freeze(events) });
     });
     return {
-      entries: runEvents.map((event) => ({
-        stream: event.stream,
+      entries: runGroups.map((group) => ({
+        stream: group.events[0]!.stream,
         expectedVersion: 0,
-        events: [event]
+        events: group.events
       })),
-      runIds: runEvents.map((event) => event.documentName),
+      runIds: runGroups.map((group) => group.runId),
       auxiliarySnapshots(savedEvents) {
-        return runEvents.map((event) => {
-          const saved = requireSavedEvent(savedEvents, event.id);
-          const record = foldAutomationRun(saved.tenantId, [saved]);
+        return runGroups.map((group) => {
+          const saved = group.events.map((event) => requireSavedEvent(savedEvents, event.id));
+          const record = foldAutomationRun(saved[0]!.tenantId, saved);
           if (record === null) {
             throw new Error("Automation run enqueue event did not fold into a run record");
           }
@@ -171,6 +244,16 @@ export class AutomationRunPlanner {
       }
     };
   }
+}
+
+function workflowIdentityMetadata(identity: DomainEventWorkflowIdentity): DocumentData {
+  return {
+    ...(identity.workflowName === undefined ? {} : { workflowName: identity.workflowName }),
+    ...(identity.workflowAction === undefined ? {} : { workflowAction: identity.workflowAction }),
+    ...(identity.workflowTransitions === undefined
+      ? {}
+      : { workflowTransitions: identity.workflowTransitions as unknown as JsonValue })
+  };
 }
 
 export class AutomationRunService extends AutomationRunPlanner {
@@ -313,20 +396,20 @@ export class AutomationRunService extends AutomationRunPlanner {
     }
     const records: AutomationRunRecord[] = [];
     let offset = 0;
-    const filterExpression: ListFilterExpression = {
+    const predicate: PredicateExpression = {
       kind: "group",
       match: "any",
-      filters: [
-        { field: "status", value: "pending" },
-        { field: "status", value: "failed" },
-        { field: "status", value: "claimed" }
+      predicates: [
+        statusPredicate("pending"),
+        statusPredicate("failed"),
+        statusPredicate("claimed")
       ]
     };
     for (;;) {
       const page = await this.projections.list({
         tenantId,
         doctype: "__AutomationRuns",
-        filterExpression,
+        predicate,
         orderBy: "enqueuedAt",
         order: "asc",
         limit: AUTOMATION_RUN_LIST_PAGE_SIZE,
@@ -448,6 +531,55 @@ const emptyAutomationRunCommitPlan: AutomationRunCommitPlan = Object.freeze({
 
 function committedLikeEvent(event: NewDomainEvent | DomainEvent): DomainEvent {
   return "sequence" in event ? event : { ...event, sequence: 0 } as DomainEvent;
+}
+
+function sourceAutomationDepth(event: DomainEvent): number {
+  const value = event.metadata.automationDepth;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function sourceAutomationPath(event: DomainEvent): readonly string[] {
+  const value = event.metadata.automationPath;
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
+}
+
+function sourceCorrelationId(event: DomainEvent): string {
+  const value = event.metadata.correlationId;
+  return typeof value === "string" && value.length > 0 ? value : event.id;
+}
+
+function automationLoopSuppressionError(options: {
+  readonly automationDepth: number;
+  readonly automationPathKey: string;
+  readonly maxDepth: number;
+  readonly maxPathRepeats: number;
+  readonly sourcePath: readonly string[];
+}): string | undefined {
+  if (options.automationDepth > options.maxDepth) {
+    return `Automation depth ${String(options.automationDepth)} exceeds limit ${String(options.maxDepth)}`;
+  }
+  const priorOccurrences = options.sourcePath.filter((item) => item === options.automationPathKey).length;
+  if (priorOccurrences >= options.maxPathRepeats) {
+    return `Automation path '${options.automationPathKey}' exceeds repeat limit ${String(options.maxPathRepeats)}`;
+  }
+  return undefined;
+}
+
+function statusPredicate(status: string): PredicateExpression {
+  return Object.freeze({
+    kind: "compare",
+    left: Object.freeze({ kind: "field", scope: "after", field: "status" }),
+    operator: "eq",
+    right: Object.freeze({ kind: "literal", value: status })
+  });
+}
+
+function positiveInteger(value: number | undefined, fallback: number, label: string): number {
+  const normalized = value ?? fallback;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throw new RangeError(`${label} must be a positive integer`);
+  }
+  return normalized;
 }
 
 function requireAutomationRunRecord(record: AutomationRunRecord | null | undefined, runId: string): AutomationRunRecord {

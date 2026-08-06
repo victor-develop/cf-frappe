@@ -1,7 +1,7 @@
 import { permissionDenied } from "../core/errors.js";
 import { assertWebFormMatchesDocType, type WebFormDefinition } from "../core/web-form.js";
 import type { ModelRegistry } from "../core/registry.js";
-import type { Actor, DocTypeDefinition } from "../core/types.js";
+import type { Actor, DocTypeDefinition, JsonValue } from "../core/types.js";
 import type { DocumentService } from "./document-service.js";
 import type { QueryService } from "./query-service.js";
 import { isPermissionDeniedError } from "./access-policy.js";
@@ -9,6 +9,7 @@ import {
   isPublishedWebFormForActor,
   planWebFormAccess,
   resolveWebFormMetadata,
+  webFormServerSubmissionData,
   webFormSubmissionData,
   webFormSubmitResult,
   type WebFormAccessDecision,
@@ -72,6 +73,23 @@ export class WebFormService {
   ): Promise<WebFormSubmitResult> {
     const metadata = await this.getWebForm(actor, webFormName);
     const data = webFormSubmissionData(metadata, input);
+    const document = await this.documents.create({
+      actor,
+      doctype: metadata.doctype,
+      data,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata })
+    });
+    return webFormSubmitResult(metadata, document);
+  }
+
+  async submitWebFormWithServerData(
+    actor: Actor,
+    webFormName: string,
+    input: WebFormSubmitInput,
+    serverData: Readonly<Record<string, JsonValue | undefined>>
+  ): Promise<WebFormSubmitResult> {
+    const metadata = await this.getWebForm(actor, webFormName);
+    const data = webFormServerSubmissionData(metadata, input, serverData);
     const document = await this.documents.create({
       actor,
       doctype: metadata.doctype,

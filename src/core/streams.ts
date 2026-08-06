@@ -4,8 +4,21 @@ export function documentStream(tenantId: TenantId, doctype: DocTypeName, name: D
   return `${escapePart(tenantId)}:${escapePart(doctype)}:${escapePart(name)}`;
 }
 
-export function namingSeriesStream(tenantId: TenantId, doctype: DocTypeName, pattern: string): StreamName {
-  return documentStream(tenantId, "__NamingSeries", `${doctype}:${pattern}`);
+export function namingSeriesStream(
+  tenantId: TenantId,
+  doctype: DocTypeName,
+  counter: string,
+  scope = ""
+): StreamName {
+  return documentStream(tenantId, "__NamingSeries", `${doctype}:${counter}${scope ? `:${scope}` : ""}`);
+}
+
+export function namingConfigurationStream(tenantId: TenantId, doctype: DocTypeName): StreamName {
+  return documentStream(tenantId, "__NamingConfiguration", doctype);
+}
+
+export function metadataRevisionStream(tenantId: TenantId, doctype: DocTypeName): StreamName {
+  return documentStream(tenantId, "__MetadataRevision", doctype);
 }
 
 export function uniqueValueStream(
@@ -33,8 +46,20 @@ export function customFieldsStream(tenantId: TenantId, doctype: DocTypeName): St
   return documentStream(tenantId, "__CustomFields", doctype);
 }
 
-export function workflowDefinitionsStream(tenantId: TenantId): StreamName {
-  return documentStream(tenantId, "__Workflows", "definitions");
+export function namedWorkflowStream(
+  tenantId: TenantId,
+  doctype: DocTypeName,
+  workflowName: string
+): StreamName {
+  return documentStream(tenantId, "__NamedWorkflows", `${doctype}:${workflowName}`);
+}
+
+export function namedWorkflowStateFieldStream(
+  tenantId: TenantId,
+  doctype: DocTypeName,
+  stateField: string
+): StreamName {
+  return documentStream(tenantId, "__NamedWorkflowFields", `${doctype}:${stateField}`);
 }
 
 export function fieldPropertyOverridesStream(tenantId: TenantId): StreamName {

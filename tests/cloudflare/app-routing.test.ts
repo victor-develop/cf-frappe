@@ -311,6 +311,68 @@ describe("CloudFrappe Worker routing", () => {
     ]);
   });
 
+  it("passes request-scoped server-supplied Web Form data through Worker routing", async () => {
+    const Lead = defineDocType({
+      name: "Server Lead",
+      naming: { kind: "field", field: "title" },
+      fields: [
+        { name: "title", type: "text", required: true },
+        { name: "source", type: "text", required: true }
+      ],
+      permissions: [{ roles: ["Guest"], actions: ["create"] }]
+    });
+    const registry = createRegistry({
+      doctypes: [Lead],
+      webForms: [
+        defineWebForm({
+          name: "Server Lead Intake",
+          route: "server/lead-intake",
+          doctype: "Server Lead",
+          fields: [
+            { field: "title", required: true },
+            { field: "source", required: true, serverSupplied: true }
+          ]
+        })
+      ]
+    });
+    const trustedRequests = new WeakMap<Request, Readonly<Record<string, string>>>();
+    const worker = createCloudFrappeWorker({
+      registry,
+      actor: () => ({ id: "guest", roles: ["Guest"], tenantId: "acme" }),
+      webFormServerSuppliedData: (request, webFormName) =>
+        webFormName === "Server Lead Intake" ? trustedRequests.get(request) : undefined
+    });
+    const commands: AggregateCoordinatorCommand[] = [];
+    const env = {
+      DB: fakeD1(),
+      AGGREGATES: fakeTransactingNamespace(commands)
+    };
+
+    const trustedRequest = cfRequest("http://localhost/api/web-form/Server%20Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Trusted Worker Lead" } })
+    });
+    trustedRequests.set(trustedRequest, { source: "verified-worker-boundary" });
+    const trusted = await worker.fetch!(trustedRequest, env, fakeExecutionContext());
+    expect(trusted.status).toBe(201);
+    expect(commands).toEqual([
+      expect.objectContaining({
+        kind: "create",
+        doctype: "Server Lead",
+        data: { title: "Trusted Worker Lead", source: "verified-worker-boundary" }
+      })
+    ]);
+
+    const injected = await worker.fetch!(cfRequest("http://localhost/api/web-form/Server%20Lead%20Intake/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: { title: "Injected Worker Lead", source: "client" } })
+    }), env, fakeExecutionContext());
+    expect(injected.status).toBe(400);
+    expect(commands).toHaveLength(1);
+  });
+
   it("mounts metadata Web View API and public routes through Worker routing", async () => {
     const Article = defineDocType({
       name: "Article",
@@ -489,12 +551,14 @@ describe("CloudFrappe Worker routing", () => {
     };
 
     const saved = await worker.fetch!(
-      cfRequest("http://localhost/api/workflows/Note", {
+      cfRequest("http://localhost/api/workflows/Note/lifecycle", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           expectedVersion: 0,
           workflow: {
+            name: "lifecycle",
+            stateField: "workflow_state",
             initialState: "Open",
             states: ["Open", "Closed"],
             transitions: [{ action: "approve", from: "Open", to: "Closed", roles: ["User"] }]
@@ -510,7 +574,7 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(meta.status).toBe(200);
     await expect(meta.json()).resolves.toMatchObject({
-      data: { workflow: { transitions: [{ action: "approve" }] } }
+      data: { workflows: [{ name: "lifecycle", transitions: [{ action: "approve" }] }] }
     });
   });
 
@@ -2928,6 +2992,16 @@ function fakeEventD1(): D1Database {
         async all() {
           if (!sql.includes("FROM cf_frappe_events")) {
             return { results: [] };
+          }
+          if (sql.includes("SELECT DISTINCT stream")) {
+            const tenantId = String(this.params[0] ?? "");
+            const doctype = String(this.params[1] ?? "");
+            const streams = [...new Set(events
+              .filter((event) => event.tenant_id === tenantId && event.doctype === doctype)
+              .map((event) => event.stream))]
+              .sort()
+              .map((stream) => ({ stream }));
+            return { results: streams };
           }
           const stream = String(this.params[0] ?? "");
           const maxSequence = sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;

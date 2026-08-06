@@ -2,7 +2,6 @@ import {
   foldSavedListFilters,
   isSavedListFilterEvent,
   isSavedListFilterPayloadKind,
-  mergeSavedListFilter,
   mergeSavedListFilterInputs,
   normalizeSavedListFilterLabel,
   SAVED_LIST_FILTER_PAYLOAD_KINDS,
@@ -11,7 +10,7 @@ import {
   savedListFiltersForOwner,
   sortedSavedListFilters
 } from "../../src";
-import type { DomainEvent, SavedListFilterEventPayload } from "../../src";
+import type { DomainEvent, SavedListFilter, SavedListFilterEventPayload } from "../../src";
 import { manager, noteDocType, owner } from "../helpers";
 
 describe("saved list filter events", () => {
@@ -21,20 +20,20 @@ describe("saved list filter events", () => {
         filterId: "filter-a",
         label: "Alpha updated",
         ownerId: owner.id,
-        filters: [{ field: "workflow_state", value: "Closed" }]
+        predicate: comparison("workflow_state", "Closed")
       }, "2026-01-01T00:03:00.000Z"),
       deletedEvent(4, "filter-b", manager.id),
       savedEvent(1, {
         filterId: "filter-a",
         label: "Alpha",
         ownerId: owner.id,
-        filters: [{ field: "priority", value: "High" }]
+        predicate: comparison("priority", "High")
       }, "2026-01-01T00:01:00.000Z"),
       savedEvent(2, {
         filterId: "filter-b",
         label: "Beta",
         ownerId: manager.id,
-        filters: [{ field: "priority", value: "Low" }]
+        predicate: comparison("priority", "Low")
       }, "2026-01-01T00:02:00.000Z")
     ]);
 
@@ -43,7 +42,7 @@ describe("saved list filter events", () => {
       id: "filter-a",
       label: "Alpha updated",
       ownerId: owner.id,
-      filters: [{ field: "workflow_state", value: "Closed" }],
+      predicate: comparison("workflow_state", "Closed"),
       createdAt: "2026-01-01T00:01:00.000Z",
       updatedAt: "2026-01-01T00:03:00.000Z"
     });
@@ -56,25 +55,25 @@ describe("saved list filter events", () => {
         filterId: "filter-z",
         label: "Zeta",
         ownerId: owner.id,
-        filters: [{ field: "priority", value: "High" }]
+        predicate: comparison("priority", "High")
       }),
       savedEvent(2, {
         filterId: "filter-b",
         label: "Alpha",
         ownerId: owner.id,
-        filters: [{ field: "priority", value: "Medium" }]
+        predicate: comparison("priority", "Medium")
       }),
       savedEvent(3, {
         filterId: "filter-a",
         label: "Alpha",
         ownerId: owner.id,
-        filters: [{ field: "priority", value: "Low" }]
+        predicate: comparison("priority", "Low")
       }),
       savedEvent(4, {
         filterId: "manager-only",
         label: "Manager",
         ownerId: manager.id,
-        filters: [{ field: "priority", value: "Low" }]
+        predicate: comparison("priority", "Low")
       })
     ]);
 
@@ -92,34 +91,21 @@ describe("saved list filter events", () => {
       id: "filter-a",
       label: "Important",
       ownerId: owner.id,
-      filters: [{ field: "priority", value: "High" }],
-      filterExpression: { field: "workflow_state", value: "Open" },
+      predicate: comparison("priority", "High"),
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
-    };
+    } satisfies SavedListFilter;
 
-    expect(mergeSavedListFilter(savedFilter, [{ field: "owner", value: owner.id }])).toEqual([
-      { field: "priority", value: "High" },
-      { field: "owner", value: owner.id }
-    ]);
-    expect(mergeSavedListFilter(undefined, [{ field: "owner", value: owner.id }])).toEqual([
-      { field: "owner", value: owner.id }
-    ]);
     expect(mergeSavedListFilterInputs({
       savedFilter,
-      explicitFilters: [{ field: "owner", value: owner.id }],
-      explicitFilterExpression: { field: "status", value: "Active" }
+      explicitPredicate: comparison("status", "Active")
     })).toEqual({
-      filters: [
-        { field: "priority", value: "High" },
-        { field: "owner", value: owner.id }
-      ],
-      filterExpression: {
+      predicate: {
         kind: "group",
         match: "all",
-        filters: [
-          { field: "workflow_state", value: "Open" },
-          { field: "status", value: "Active" }
+        predicates: [
+          comparison("priority", "High"),
+          comparison("status", "Active")
         ]
       }
     });
@@ -139,8 +125,7 @@ describe("saved list filter events", () => {
       savedEvent(3, {
         filterId: "filter-a",
         label: "Alpha",
-        ownerId: owner.id,
-        filters: []
+        ownerId: owner.id
       })
     ])).toBe(3);
     expect(savedListFilterEvent({
@@ -166,7 +151,7 @@ describe("saved list filter events", () => {
       filterId: "filter-a",
       label: "Alpha",
       ownerId: owner.id,
-      filters: [{ field: "priority", value: "High" }]
+      predicate: comparison("priority", "High")
     });
     const imported = { ...saved, type: "NoteListViewPresetImported" };
 
@@ -183,7 +168,7 @@ describe("saved list filter events", () => {
         filterId: "filter-a",
         label: "Alpha",
         ownerId: owner.id,
-        filters: [{ field: "priority", value: "High" }]
+        predicate: comparison("workflow_state", "Open")
       }),
       type: "NoteListViewPresetImported"
     };
@@ -195,7 +180,8 @@ describe("saved list filter events", () => {
     expect(state.filters.get("filter-a")).toMatchObject({
       id: "filter-a",
       label: "Alpha",
-      ownerId: owner.id
+      ownerId: owner.id,
+      predicate: comparison("workflow_state", "Open")
     });
   });
 });
@@ -213,6 +199,15 @@ function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind
     occurredAt: "2026-01-01T00:00:00.000Z",
     payload,
     metadata: {}
+  };
+}
+
+function comparison(field: string, value: string) {
+  return {
+    kind: "compare" as const,
+    left: { kind: "field" as const, scope: "after" as const, field },
+    operator: "eq" as const,
+    right: { kind: "literal" as const, value }
   };
 }
 

@@ -6,6 +6,7 @@ import {
   unsafeHeaderActorResolver
 } from "../../src";
 import { createServices, now } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 import { fixedClock } from "../../src";
 
 const adminHeaders = {
@@ -37,7 +38,7 @@ describe("notification rule api", () => {
             { kind: "user", userId: "manager@example.com" }
           ],
           channels: ["email", "inbox"],
-          condition: { field: "priority", value: "High" },
+          condition: afterField("priority", "High"),
           subject: "Note changed"
         }
       })
@@ -51,7 +52,7 @@ describe("notification rule api", () => {
             rule: {
               name: "Managers on updates",
               channels: ["email", "inbox"],
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               subject: "Note changed"
             },
             enabled: true
@@ -78,7 +79,7 @@ describe("notification rule api", () => {
                 { kind: "user", userId: "manager@example.com" }
               ],
               channels: ["email", "inbox"],
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               subject: "Note changed"
             }
           }
@@ -161,7 +162,7 @@ describe("notification rule api", () => {
         rule: {
           events: ["DocumentUpdated"],
           recipients: [{ kind: "user", userId: "manager@example.com" }],
-          condition: { field: "metadata", value: "x" }
+          condition: afterField("metadata", "x")
         }
       })
     });

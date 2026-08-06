@@ -7,7 +7,7 @@ describe("DocumentHistoryService", () => {
     const history = new DocumentHistoryService({ events, queries });
     await documents.create({ actor: owner, doctype: "Note", data: data({ title: "Timeline Note" }) });
     await documents.update({ actor: owner, doctype: "Note", name: "Timeline Note", patch: { body: "Updated" } });
-    await documents.transition({ actor: owner, doctype: "Note", name: "Timeline Note", action: "close" });
+    await documents.transition({ actor: owner, doctype: "Note", name: "Timeline Note", workflow: "lifecycle", action: "close" });
     await documents.execute({
       actor: owner,
       doctype: "Note",
@@ -65,8 +65,8 @@ describe("DocumentHistoryService", () => {
       {
         sequence: 3,
         kind: "WorkflowTransitioned",
-        type: "NoteClose",
-        summary: "Closed workflow_state from Open to Closed"
+        type: "NoteLifecycleClose",
+        summary: "Closed lifecycle.workflow_state from Open to Closed"
       },
       {
         sequence: 4,

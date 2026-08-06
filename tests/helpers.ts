@@ -66,11 +66,13 @@ export const noteDocType = defineDocType({
     filters: [{ field: "workflow_state", value: "Open" }],
     pageSize: 25
   },
-  workflow: {
+  workflows: [{
+    name: "lifecycle",
+    stateField: "workflow_state",
     initialState: "Open",
     states: ["Open", "Closed"],
     transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
-  },
+  }],
   permissions: [
     { roles: ["Guest"], actions: ["read"] },
     {

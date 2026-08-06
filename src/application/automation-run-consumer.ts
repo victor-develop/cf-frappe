@@ -150,7 +150,13 @@ export class AutomationRunConsumer {
         claimId,
         metadata: {
           sourceEventId: record.sourceEventId,
+          causationId: record.id,
+          correlationId: record.correlationId,
+          automationDepth: record.automationDepth,
+          automationPath: record.automationPath,
+          automationRuleId: record.ruleId,
           automationRuleName: record.ruleName,
+          automationActionDefinitionId: record.actionId,
           automationActionId: record.id
         }
       });
@@ -191,7 +197,13 @@ export class AutomationRunConsumer {
         metadata: {
           automationActionId: record.id,
           automationRunId: record.id,
+          causationId: record.id,
+          correlationId: record.correlationId,
+          automationDepth: record.automationDepth,
+          automationPath: record.automationPath,
+          automationRuleId: record.ruleId,
           automationRuleName: record.ruleName,
+          automationActionDefinitionId: record.actionId,
           sourceEventId: record.sourceEventId,
           sourceDoctype: record.sourceDoctype,
           sourceDocumentName: record.sourceDocumentName
@@ -228,7 +240,13 @@ export class AutomationRunConsumer {
         error,
         metadata: {
           sourceEventId: record.sourceEventId,
+          causationId: record.id,
+          correlationId: record.correlationId,
+          automationDepth: record.automationDepth,
+          automationPath: record.automationPath,
+          automationRuleId: record.ruleId,
           automationRuleName: record.ruleName,
+          automationActionDefinitionId: record.actionId,
           automationActionId: record.id
         }
       });
@@ -253,7 +271,13 @@ export class AutomationRunConsumer {
       retryAt,
       metadata: {
         sourceEventId: record.sourceEventId,
+        causationId: record.id,
+        correlationId: record.correlationId,
+        automationDepth: record.automationDepth,
+        automationPath: record.automationPath,
+        automationRuleId: record.ruleId,
         automationRuleName: record.ruleName,
+        automationActionDefinitionId: record.actionId,
         automationActionId: record.id
       }
     });

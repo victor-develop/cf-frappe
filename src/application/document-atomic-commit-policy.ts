@@ -106,7 +106,8 @@ function projectNamingSeriesWrite(
   if (!write.existing) {
     return snapshotFromDocumentCreatedEvent(saved);
   }
+  const patch = saved.payload.kind === "DocumentUpdated" ? saved.payload.patch : {};
   return snapshotFromCommittedDocumentEvent(write.existing, saved, {
-    data: { ...write.existing.data, current: write.next }
+    data: { ...write.existing.data, ...patch, current: write.next }
   });
 }

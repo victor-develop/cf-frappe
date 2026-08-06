@@ -103,14 +103,23 @@ describe("saved list filter policy", () => {
       id: "filter-1",
       label: "Updated",
       ownerId: owner.id,
-      filters: [{ field: "workflow_state", value: "Closed" }],
-      filterExpression: { field: "priority", value: "High" },
+      predicate: {
+        kind: "compare",
+        left: { kind: "field", scope: "after", field: "priority" },
+        operator: "eq",
+        right: { kind: "literal", value: "High" }
+      },
       existing,
       now
     })).toMatchObject({
       id: "filter-1",
       label: "Updated",
-      filterExpression: { field: "priority", value: "High" },
+      predicate: {
+        kind: "compare",
+        left: { kind: "field", scope: "after", field: "priority" },
+        operator: "eq",
+        right: { kind: "literal", value: "High" }
+      },
       createdAt: existing.createdAt,
       updatedAt: now
     });
@@ -121,7 +130,6 @@ describe("saved list filter policy", () => {
       id: "filter-2",
       label: "Fresh",
       ownerId: owner.id,
-      filters: [{ field: "priority", value: "Low" }],
       now
     })).toEqual({
       tenantId: "acme",
@@ -129,7 +137,6 @@ describe("saved list filter policy", () => {
       id: "filter-2",
       label: "Fresh",
       ownerId: owner.id,
-      filters: [{ field: "priority", value: "Low" }],
       createdAt: now,
       updatedAt: now
     });
@@ -143,7 +150,12 @@ function filter(id: string): SavedListFilter {
     id,
     label: "Open notes",
     ownerId: owner.id,
-    filters: [{ field: "workflow_state", value: "Open" }],
+    predicate: {
+      kind: "compare",
+      left: { kind: "field", scope: "after", field: "workflow_state" },
+      operator: "eq",
+      right: { kind: "literal", value: "Open" }
+    },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"
   };

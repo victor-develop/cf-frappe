@@ -31,14 +31,20 @@ describe("Desk form rendering", () => {
       mode: "update",
       document,
       lifecycleActions: ["submit"],
-      workflowActions: [{ action: "Approve & Close", label: "Approve", to: "Closed" }],
+      workflowActions: [{
+        workflow: "review",
+        workflowLabel: "Review",
+        action: "Approve & Close",
+        label: "Approve",
+        to: "Closed"
+      }],
       printFormats: [{ name: "Task Print", label: "Task Print", doctype: "Task" }],
       printPdfEnabled: true,
       canDuplicate: true
     });
 
     expect(html).toContain('formaction="/desk/Task/TASK%2F1/submit"');
-    expect(html).toContain('formaction="/desk/Task/TASK%2F1/transition/Approve%20%26%20Close"');
+    expect(html).toContain('formaction="/desk/Task/TASK%2F1/workflows/review/transition/Approve%20%26%20Close"');
     expect(html).toContain('href="/desk/print/Task%20Print/TASK%2F1"');
     expect(html).toContain('href="/desk/print/Task%20Print/TASK%2F1/pdf"');
     expect(html).toContain('formaction="/desk/Task/TASK%2F1/duplicate"');
@@ -51,11 +57,13 @@ describe("Desk form rendering", () => {
         { name: "title", type: "text" },
         { name: "workflow_state", label: "Workflow State", type: "select", options: ["Open", "Done"] }
       ],
-      workflow: {
+      workflows: [{
+        name: "lifecycle",
+        stateField: "workflow_state",
         initialState: "Open",
         states: ["Open", "Done"],
         transitions: [{ action: "finish", from: "Open", to: "Done" }]
-      }
+      }]
     });
 
     const createHtml = renderFormView(Task, resolveFormView(Task), { mode: "create" });
@@ -72,6 +80,34 @@ describe("Desk form rendering", () => {
     });
     expect(updateHtml).toContain('value="Done"');
     expect(updateHtml).not.toContain('name="workflow_state"');
+  });
+
+  it("omits names and disables non-text controls for read-only fields", () => {
+    const Review = defineDocType({
+      name: "Review",
+      fields: [
+        { name: "title", type: "text", readOnly: true },
+        { name: "status", type: "select", options: ["Pending", "Approved"], readOnly: true },
+        { name: "customer", type: "link", linkTo: "Customer", readOnly: true },
+        { name: "confirmed", type: "boolean", readOnly: true }
+      ]
+    });
+    const html = renderFormView(Review, resolveFormView(Review), {
+      mode: "update",
+      document: {
+        ...taskSnapshot("REV-1"),
+        doctype: "Review",
+        data: { title: "Refund", status: "Pending", customer: "CUST-1", confirmed: true }
+      },
+      linkOptions: { customer: [{ value: "CUST-1", label: "CUST-1" }] },
+      canUpdate: true
+    });
+
+    expect(html).toMatch(/id="field-title"[^>]* readonly/);
+    expect(html).toMatch(/id="field-status"[^>]* disabled/);
+    expect(html).toMatch(/id="field-customer"[^>]* disabled/);
+    expect(html).toMatch(/id="field-confirmed"[^>]* disabled/);
+    expect(html).not.toMatch(/id="field-(?:title|status|customer|confirmed)"[^>]* name=/);
   });
 });
 

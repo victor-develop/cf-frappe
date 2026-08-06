@@ -1,7 +1,50 @@
-import { D1ProjectionStore } from "../../src";
-import type { DocumentData, DocumentSnapshot } from "../../src";
+import {
+  D1_PROJECTION_MAX_POST_FILTER_ROWS,
+  D1ProjectionStore,
+  InMemoryProjectionStore,
+  predicateExpressionFromListFilterExpression
+} from "../../src";
+import { d1ProjectionListQuery } from "../../src/adapters/d1/projection-query.js";
+import type {
+  DocumentData,
+  DocumentSnapshot,
+  ListDocumentsFilter,
+  ListFilterExpression,
+  PredicateExpression
+} from "../../src";
 
 describe("D1ProjectionStore", () => {
+  it("preserves Predicate null semantics without binding SQL NULL comparisons", () => {
+    const compare = (operator: "eq" | "ne" | "in" | "not_in", value: null | readonly (string | null)[]) =>
+      d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: {
+          kind: "compare",
+          left: { kind: "field", scope: "after", field: "priority" },
+          operator,
+          right: { kind: "literal", value }
+        }
+      });
+
+    expect(compare("eq", null)).toMatchObject({
+      where: "tenant_id = ? AND doctype = ? AND json_type(data_json, '$.priority') = 'null'",
+      params: ["acme", "Note"]
+    });
+    expect(compare("ne", null)).toMatchObject({
+      where: "tenant_id = ? AND doctype = ? AND json_extract(data_json, '$.priority') IS NOT NULL",
+      params: ["acme", "Note"]
+    });
+    expect(compare("not_in", ["Low", null])).toMatchObject({
+      where: "tenant_id = ? AND doctype = ? AND json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') NOT IN (?)",
+      params: ["acme", "Note", "Low"]
+    });
+    expect(compare("in", [null])).toMatchObject({
+      where: "tenant_id = ? AND doctype = ? AND 0 = 1",
+      params: ["acme", "Note"]
+    });
+  });
+
   it("lists projections with bound filter parameters for rows and counts", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } }),
@@ -12,7 +55,7 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "priority", value: "High" }]
+      predicate: filterPredicate([{ field: "priority", value: "High" }])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 High" }], total: 1 });
@@ -103,24 +146,24 @@ describe("D1ProjectionStore", () => {
     });
   });
 
-  it("escapes contains filter values before binding LIKE parameters", async () => {
+  it("post-filters contains without sending text matcher values to SQLite", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })
     ]);
     const store = new D1ProjectionStore(db as unknown as D1Database);
 
-    await store.list({
+    const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "title", operator: "contains", value: "50%_Off" }]
+      predicate: filterPredicate([{ field: "title", operator: "contains", value: "50%_Off" }])
     });
 
-    const [rows, count] = db.statements;
-    expect(rows?.sql).toContain("LIKE ? ESCAPE '\\'");
+    expect(result).toMatchObject({ data: [{ name: "D1 Sale" }], total: 1 });
+    const [rows] = db.statements;
+    expect(rows?.sql).not.toContain("LOWER(");
+    expect(rows?.sql).not.toContain("LIKE");
     expect(rows?.sql).not.toContain("50%_Off");
-    expect(rows?.params).toEqual(["acme", "Note", "%50\\%\\_off%", 50, 0]);
-    expect(count?.sql).toContain("LIKE ? ESCAPE '\\'");
-    expect(count?.params).toEqual(["acme", "Note", "%50\\%\\_off%"]);
+    expect(rows?.params).toEqual(["acme", "Note", D1_PROJECTION_MAX_POST_FILTER_ROWS + 1]);
   });
 
   it("renders advanced scalar operators with bound filter parameters", async () => {
@@ -132,11 +175,11 @@ describe("D1ProjectionStore", () => {
     await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [
+      predicate: filterPredicate([
         { field: "priority", operator: "ne", value: "Low" },
         { field: "count", operator: "gt", value: 2 },
         { field: "count", operator: "lt", value: 9 }
-      ]
+      ])
     });
 
     const [rows, count] = db.statements;
@@ -158,7 +201,7 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "priority", operator: "in", value: ["High", "Medium"] }]
+      predicate: filterPredicate([{ field: "priority", operator: "in", value: ["High", "Medium"] }])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Medium" }], total: 2 });
@@ -174,7 +217,7 @@ describe("D1ProjectionStore", () => {
     const notInResult = await notInStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "priority", operator: "not_in", value: ["Low", "Medium"] }]
+      predicate: filterPredicate([{ field: "priority", operator: "not_in", value: ["Low", "Medium"] }])
     });
 
     expect(notInResult).toMatchObject({ data: [{ name: "D1 High" }], total: 1 });
@@ -195,7 +238,7 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filterExpression: {
+      predicate: filterPredicate({
         kind: "group",
         match: "any",
         filters: [
@@ -209,7 +252,7 @@ describe("D1ProjectionStore", () => {
             ]
           }
         ]
-      }
+      })
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Count" }], total: 2 });
@@ -243,11 +286,11 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [
+      predicate: filterPredicate([
         { field: "system.docstatus", value: "submitted" },
         { field: "system.updatedAt", operator: "gte", value: "2026-01-04T00:00:00.000Z" },
         { field: "system.version", operator: "gt", value: 1 }
-      ]
+      ])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 Submitted" }], total: 1 });
@@ -282,7 +325,7 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "count", operator: "between", value: [2, 8] }]
+      predicate: filterPredicate([{ field: "count", operator: "between", value: [2, 8] }])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 Mid" }], total: 1 });
@@ -298,7 +341,7 @@ describe("D1ProjectionStore", () => {
     const notBetween = await notBetweenStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "count", operator: "not_between", value: [2, 8] }]
+      predicate: filterPredicate([{ field: "count", operator: "not_between", value: [2, 8] }])
     });
 
     expect(notBetween.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High"]);
@@ -323,7 +366,7 @@ describe("D1ProjectionStore", () => {
     const missing = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "body", operator: "is", value: "not set" }]
+      predicate: filterPredicate([{ field: "body", operator: "is", value: "not set" }])
     });
 
     expect(missing.data.map((document) => document.name)).toEqual(["D1 Null Body", "D1 Missing Body"]);
@@ -339,7 +382,7 @@ describe("D1ProjectionStore", () => {
     const set = await setStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "body", operator: "is", value: "set" }]
+      predicate: filterPredicate([{ field: "body", operator: "is", value: "set" }])
     });
 
     expect(set.data.map((document) => document.name)).toEqual(["D1 Body", "D1 Empty Body"]);
@@ -349,7 +392,7 @@ describe("D1ProjectionStore", () => {
     expect(setDb.statements[0]?.params).toEqual(["acme", "Note", 50, 0]);
   });
 
-  it("renders pattern operators with bound LIKE parameters", async () => {
+  it("post-filters pattern operators through the shared Predicate evaluator", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } }),
       documentRow({ name: "D1 Launchpad", data: { title: "Launchpad" } }),
@@ -360,54 +403,129 @@ describe("D1ProjectionStore", () => {
     const like = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "title", operator: "like", value: "launch%" }]
+      predicate: filterPredicate([{ field: "title", operator: "like", value: "launch%" }])
     });
 
     expect(like.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
     expect(like.total).toBe(2);
-    const [rows, count] = db.statements;
-    expect(rows?.sql).toContain("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) LIKE ? ESCAPE '\\'");
+    const [rows] = db.statements;
+    expect(rows?.sql).not.toContain("LOWER(");
+    expect(rows?.sql).not.toContain("LIKE");
     expect(rows?.sql).not.toContain("launch%");
-    expect(rows?.params).toEqual(["acme", "Note", "launch%", 50, 0]);
-    expect(count?.params).toEqual(["acme", "Note", "launch%"]);
+    expect(rows?.params).toEqual(["acme", "Note", D1_PROJECTION_MAX_POST_FILTER_ROWS + 1]);
 
     const notLikeDb = new FakeD1Database(db.rows);
     const notLikeStore = new D1ProjectionStore(notLikeDb as unknown as D1Database);
     const notLike = await notLikeStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "title", operator: "not_like", value: "%launch%" }]
+      predicate: filterPredicate([{ field: "title", operator: "not_like", value: "%launch%" }])
     });
 
     expect(notLike.data.map((document) => document.name)).toEqual(["D1 Routine"]);
     expect(notLike.total).toBe(1);
-    expect(notLikeDb.statements[0]?.sql).toContain(
-      "json_extract(data_json, '$.title') IS NOT NULL AND LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) NOT LIKE ? ESCAPE '\\'"
-    );
+    expect(notLikeDb.statements[0]?.sql).not.toContain("LOWER(");
+    expect(notLikeDb.statements[0]?.sql).not.toContain("LIKE");
     expect(notLikeDb.statements[0]?.sql).not.toContain("%launch%");
-    expect(notLikeDb.statements[0]?.params).toEqual(["acme", "Note", "%launch%", 50, 0]);
+    expect(notLikeDb.statements[0]?.params).toEqual([
+      "acme",
+      "Note",
+      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
+    ]);
 
     const escapedDb = new FakeD1Database(db.rows);
     const escapedStore = new D1ProjectionStore(escapedDb as unknown as D1Database);
     const escaped = await escapedStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "title", operator: "like", value: "\\l%" }]
+      predicate: filterPredicate([{ field: "title", operator: "like", value: "\\l%" }])
     });
 
     expect(escaped.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
-    expect(escapedDb.statements[0]?.params).toEqual(["acme", "Note", "\\l%", 50, 0]);
+    expect(escapedDb.statements[0]?.params).toEqual([
+      "acme",
+      "Note",
+      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
+    ]);
 
     const trailingEscapeDb = new FakeD1Database(db.rows);
     const trailingEscapeStore = new D1ProjectionStore(trailingEscapeDb as unknown as D1Database);
     const trailingEscape = await trailingEscapeStore.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "title", operator: "like", value: "launch plan\\" }]
+      predicate: filterPredicate([{ field: "title", operator: "like", value: "launch plan\\" }])
     });
 
     expect(trailingEscape).toMatchObject({ data: [], total: 0 });
-    expect(trailingEscapeDb.statements[0]?.params).toEqual(["acme", "Note", "launch plan\\", 50, 0]);
+    expect(trailingEscapeDb.statements[0]?.params).toEqual([
+      "acme",
+      "Note",
+      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
+    ]);
+  });
+
+  it("matches in-memory Unicode case folding, wildcards, escaping, and negation", async () => {
+    const snapshots = [
+      documentSnapshot({ name: "D1 Umlaut", data: { title: "Ärger", priority: "Low" } }),
+      documentSnapshot({ name: "D1 Literal", data: { title: "Value 100% Ready", priority: "Low" } }),
+      documentSnapshot({ name: "D1 Routine", data: { title: "Routine", priority: "High" } }),
+      documentSnapshot({ name: "D1 Null", data: { title: null, priority: "Low" } }),
+      documentSnapshot({ name: "D1 Missing", data: { priority: "Low" } })
+    ];
+    const db = new FakeD1Database(snapshots.map(rowFromSnapshot));
+    const d1 = new D1ProjectionStore(db as unknown as D1Database);
+    const memory = new InMemoryProjectionStore();
+    for (const snapshot of snapshots) {
+      await memory.save(snapshot);
+    }
+
+    const cases: ReadonlyArray<readonly [PredicateExpression, readonly string[]]> = [
+      [filterPredicate([{ field: "title", operator: "contains", value: "ä" }]), ["D1 Umlaut"]],
+      [filterPredicate([{ field: "title", operator: "like", value: "ä_ger" }]), ["D1 Umlaut"]],
+      [filterPredicate([{ field: "title", operator: "like", value: "value 100\\%%" }]), ["D1 Literal"]],
+      [filterPredicate([{ field: "title", operator: "not_like", value: "%ä%" }]), ["D1 Literal", "D1 Routine"]],
+      [{
+        kind: "not",
+        predicate: filterPredicate([{ field: "title", value: "Routine" }])
+      }, ["D1 Umlaut", "D1 Literal", "D1 Null", "D1 Missing"]],
+      [{
+        kind: "group",
+        match: "any",
+        predicates: [
+          filterPredicate([{ field: "priority", value: "High" }]),
+          filterPredicate([{ field: "title", operator: "like", value: "ä%" }])
+        ]
+      }, ["D1 Umlaut", "D1 Routine"]]
+    ];
+
+    for (const [predicate, expectedNames] of cases) {
+      const query = { tenantId: "acme", doctype: "Note", predicate } as const;
+      const [d1Result, memoryResult] = await Promise.all([d1.list(query), memory.list(query)]);
+      expect(d1Result.data.map((document) => document.name)).toEqual(expectedNames);
+      expect(d1Result).toEqual(memoryResult);
+    }
+
+    expect(db.statements.every((statement) => !statement.sql.includes("LOWER("))).toBe(true);
+    expect(db.statements.every((statement) => !statement.sql.includes("NOT ("))).toBe(true);
+  });
+
+  it("bounds shared-evaluator post-filter scans", async () => {
+    const db = new FakeD1Database(Array.from(
+      { length: D1_PROJECTION_MAX_POST_FILTER_ROWS + 1 },
+      (_, index) => documentRow({ name: `D1 ${index}`, data: { title: "Ärger" } })
+    ));
+    const store = new D1ProjectionStore(db as unknown as D1Database);
+
+    await expect(store.list({
+      tenantId: "acme",
+      doctype: "Note",
+      predicate: filterPredicate([{ field: "title", operator: "contains", value: "ä" }])
+    })).rejects.toThrow(`exceeded ${D1_PROJECTION_MAX_POST_FILTER_ROWS} candidate rows`);
+    expect(db.statements[0]?.params).toEqual([
+      "acme",
+      "Note",
+      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
+    ]);
   });
 
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
@@ -504,11 +622,11 @@ describe("D1ProjectionStore", () => {
     const result = await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [
+      predicate: filterPredicate([
         { field: "priority", operator: "ne", value: "Low" },
         { field: "count", operator: "gt", value: 2 },
         { field: "count", operator: "lt", value: 9 }
-      ]
+      ])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 Match" }], total: 1 });
@@ -523,7 +641,7 @@ describe("D1ProjectionStore", () => {
     await store.list({
       tenantId: "acme",
       doctype: "Note",
-      filters: [{ field: "priority') OR 1=1 --", value: "High" }]
+      predicate: filterPredicate([{ field: "priority') OR 1=1 --", value: "High" }])
     });
 
     const [rows, count] = db.statements;
@@ -534,6 +652,15 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "High"]);
   });
 });
+
+function filterPredicate(
+  input: ListFilterExpression | readonly ListDocumentsFilter[]
+): PredicateExpression {
+  const expression: ListFilterExpression = Array.isArray(input)
+    ? { kind: "group", match: "all", filters: input as readonly ListDocumentsFilter[] }
+    : input as ListFilterExpression;
+  return predicateExpressionFromListFilterExpression(expression);
+}
 
 interface FakeDocumentRow {
   readonly tenant_id: string;
@@ -546,6 +673,39 @@ interface FakeDocumentRow {
   readonly updated_at: string;
 }
 
+function documentSnapshot(input: {
+  readonly name: string;
+  readonly data: DocumentData;
+  readonly version?: number;
+  readonly docstatus?: "draft" | "submitted" | "cancelled" | "deleted";
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "Note",
+    name: input.name,
+    version: input.version ?? 1,
+    docstatus: input.docstatus ?? "draft",
+    data: input.data,
+    createdAt: input.createdAt ?? "2026-01-01T00:00:00.000Z",
+    updatedAt: input.updatedAt ?? "2026-01-01T00:00:00.000Z"
+  };
+}
+
+function rowFromSnapshot(snapshot: DocumentSnapshot): FakeDocumentRow {
+  return {
+    tenant_id: snapshot.tenantId,
+    doctype: snapshot.doctype,
+    name: snapshot.name,
+    version: snapshot.version,
+    docstatus: snapshot.docstatus,
+    data_json: JSON.stringify(snapshot.data),
+    created_at: snapshot.createdAt,
+    updated_at: snapshot.updatedAt
+  };
+}
+
 function documentRow(input: {
   readonly name: string;
   readonly data: DocumentData;
@@ -554,16 +714,7 @@ function documentRow(input: {
   readonly createdAt?: string;
   readonly updatedAt?: string;
 }): FakeDocumentRow {
-  return {
-    tenant_id: "acme",
-    doctype: "Note",
-    name: input.name,
-    version: input.version ?? 1,
-    docstatus: input.docstatus ?? "draft",
-    data_json: JSON.stringify(input.data),
-    created_at: input.createdAt ?? "2026-01-01T00:00:00.000Z",
-    updated_at: input.updatedAt ?? "2026-01-01T00:00:00.000Z"
-  };
+  return rowFromSnapshot(documentSnapshot(input));
 }
 
 class FakeD1Database {
@@ -707,18 +858,6 @@ class FakeD1PreparedStatement {
           return false;
         }
       }
-      if (this.sql.includes("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) LIKE ? ESCAPE")) {
-        if (!matchesSqlLikePattern(data.title, filterParams[paramIndex])) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("LOWER(CAST(json_extract(data_json, '$.title') AS TEXT)) NOT LIKE ? ESCAPE")) {
-        if (data.title === undefined || data.title === null || matchesSqlLikePattern(data.title, filterParams[paramIndex])) {
-          return false;
-        }
-        paramIndex += 1;
-      }
       const hasCountNotBetween = this.sql.includes(
         "json_extract(data_json, '$.count') IS NOT NULL AND (json_extract(data_json, '$.count') < ? OR json_extract(data_json, '$.count') > ?)"
       );
@@ -804,42 +943,4 @@ function compares(
   predicate: (actual: number, expected: number) => boolean
 ): boolean {
   return typeof actual === "number" && typeof expected === "number" && predicate(actual, expected);
-}
-
-function matchesSqlLikePattern(actual: unknown, pattern: unknown): boolean {
-  if (actual === undefined || actual === null || typeof pattern !== "string") {
-    return false;
-  }
-  return new RegExp(`^${sqlLikePatternRegex(pattern)}$`, "i").test(String(actual));
-}
-
-function sqlLikePatternRegex(pattern: string): string {
-  let regex = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    if (char === "\\") {
-      const next = pattern[index + 1];
-      if (next === undefined) {
-        regex += "(?!)";
-        continue;
-      }
-      regex += escapeRegex(next);
-      index += 1;
-      continue;
-    }
-    if (char === "%") {
-      regex += "[\\s\\S]*";
-      continue;
-    }
-    if (char === "_") {
-      regex += "[\\s\\S]";
-      continue;
-    }
-    regex += escapeRegex(char ?? "");
-  }
-  return regex;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }

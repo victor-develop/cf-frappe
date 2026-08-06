@@ -11,8 +11,22 @@ import {
 } from "../../src";
 import type { DocumentData, DocumentSnapshot, PermissionAction } from "../../src";
 import { owner } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 describe("schema", () => {
+  it("rejects removed singular Workflow metadata instead of adapting it", () => {
+    expect(() => defineDocType({
+      name: "Legacy Task",
+      fields: [{ name: "status", type: "select", options: ["Open", "Done"] }],
+      workflow: {
+        stateField: "status",
+        initialState: "Open",
+        states: ["Open", "Done"],
+        transitions: [{ action: "finish", from: "Open", to: "Done" }]
+      }
+    } as never)).toThrow("uses removed singular Workflow metadata");
+  });
+
   const doctype = defineDocType({
     name: "Invoice",
     fields: [
@@ -120,11 +134,13 @@ describe("schema", () => {
     const task = defineDocType({
       name: "Workflow Task",
       fields: [{ name: "workflow_state", type: "select", options: ["Open", "Closed"] }],
-      workflow: {
+      workflows: [{
+        name: "lifecycle",
+        stateField: "workflow_state",
         initialState: "Open",
         states,
         transitions: [{ action: "close", from: "Open", to: "Closed", roles: transitionRoles }]
-      }
+      }]
     });
 
     states[0] = "Draft";
@@ -141,26 +157,29 @@ describe("schema", () => {
       updatedAt: "2026-01-01T00:00:00.000Z"
     };
 
-    expect(task.workflow).toEqual({
+    expect(task.workflows).toEqual([{
+      name: "lifecycle",
+      stateField: "workflow_state",
       initialState: "Open",
       states: ["Open", "Closed"],
       transitions: [{ action: "close", from: "Open", to: "Closed", roles: ["User"] }]
-    });
-    expect(Object.isFrozen(task.workflow?.states)).toBe(true);
-    expect(Object.isFrozen(task.workflow?.transitions)).toBe(true);
-    expect(Object.isFrozen(task.workflow?.transitions[0]?.roles)).toBe(true);
+    }]);
+    expect(Object.isFrozen(task.workflows)).toBe(true);
+    expect(Object.isFrozen(task.workflows?.[0]?.states)).toBe(true);
+    expect(Object.isFrozen(task.workflows?.[0]?.transitions)).toBe(true);
+    expect(Object.isFrozen(task.workflows?.[0]?.transitions[0]?.roles)).toBe(true);
     expect(
       allowedWorkflowTransitions({
         actor: { id: "user@example.com", roles: ["User"], tenantId: "acme" },
         document,
-        workflow: task.workflow!
+        workflow: task.workflows![0]!
       }).map((transition) => transition.action)
     ).toEqual(["close"]);
     expect(
       allowedWorkflowTransitions({
         actor: { id: "admin@example.com", roles: ["Admin"], tenantId: "acme" },
         document,
-        workflow: task.workflow!
+        workflow: task.workflows![0]!
       })
     ).toEqual([]);
   });
@@ -399,7 +418,7 @@ describe("schema", () => {
         {
           name: "escalation_reason",
           type: "text",
-          mandatoryDependsOn: { field: "priority", value: "High" }
+          mandatoryDependsOn: afterField("priority", "High")
         }
       ]
     });
@@ -429,7 +448,7 @@ describe("schema", () => {
     expect(() =>
       defineDocType({
         name: "Bad Mandatory",
-        fields: [{ name: "reason", type: "text", mandatoryDependsOn: { field: "missing", value: true } }]
+        fields: [{ name: "reason", type: "text", mandatoryDependsOn: afterField("missing", true) }]
       })
     ).toThrow(FrameworkError);
   });
@@ -442,7 +461,7 @@ describe("schema", () => {
         {
           name: "approval_note",
           type: "text",
-          readOnlyDependsOn: { field: "status", value: "Approved" }
+          readOnlyDependsOn: afterField("status", "Approved")
         }
       ]
     });
@@ -451,7 +470,7 @@ describe("schema", () => {
     expect(() =>
       defineDocType({
         name: "Bad Read Only",
-        fields: [{ name: "approval_note", type: "text", readOnlyDependsOn: { field: "missing", value: true } }]
+        fields: [{ name: "approval_note", type: "text", readOnlyDependsOn: afterField("missing", true) }]
       })
     ).toThrow(FrameworkError);
   });
@@ -464,17 +483,17 @@ describe("schema", () => {
         {
           name: "closure_reason",
           type: "text",
-          hiddenDependsOn: { field: "status", operator: "ne", value: "Closed" }
+          hiddenDependsOn: afterField("status", "Closed", "ne")
         }
       ]
     });
 
     expect(Object.isFrozen(Task.fields[1]?.hiddenDependsOn)).toBe(true);
-    expect(Task.fields[1]?.hiddenDependsOn).toEqual({ field: "status", operator: "ne", value: "Closed" });
+    expect(Task.fields[1]?.hiddenDependsOn).toEqual(afterField("status", "Closed", "ne"));
     expect(() =>
       defineDocType({
         name: "Bad Hidden",
-        fields: [{ name: "closure_reason", type: "text", hiddenDependsOn: { field: "missing", value: true } }]
+        fields: [{ name: "closure_reason", type: "text", hiddenDependsOn: afterField("missing", true) }]
       })
     ).toThrow(FrameworkError);
   });

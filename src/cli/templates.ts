@@ -409,11 +409,11 @@ npx cf-frappe resources list --url https://your-worker.example --doctype Task --
 npx cf-frappe resources get --url https://your-worker.example --doctype Task --name "Review generated Desk workspace" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources create --url https://your-worker.example --doctype Task --data-json '{"title":"Follow up","priority":"Medium"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources update --url https://your-worker.example --doctype Task --name "Follow up" --data-json '{"priority":"High"}' --expected-version 1 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition start --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --transition finish --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --workflow lifecycle --transition start --expected-version 2 --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources transition --url https://your-worker.example --doctype Task --name "Follow up" --workflow lifecycle --transition finish --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources command --url https://your-worker.example --doctype Task --name "Follow up" --command raisePriority --data-json '{"priority":"High"}' --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources duplicate --url https://your-worker.example --doctype Task --name "Follow up" --new-name "Follow up copy" --header-env Authorization=CF_FRAPPE_AUTH
-npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --transition finish --document "Follow up" --document-version "Follow up:3" --header-env Authorization=CF_FRAPPE_AUTH
+npx cf-frappe resources bulk-transition --url https://your-worker.example --doctype Task --workflow lifecycle --transition finish --document "Follow up" --document-version "Follow up:3" --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources timeline --url https://your-worker.example --doctype Task --name "Follow up" --limit 25 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources comment --url https://your-worker.example --doctype Task --name "Follow up" --text "Needs one more look" --expected-version 3 --header-env Authorization=CF_FRAPPE_AUTH
 npx cf-frappe resources activity --url https://your-worker.example --doctype Task --name "Follow up" --subject "Follow-up sent" --activity-type email --detail "Sent to customer@example.com" --channel email --external-id msg-123 --expected-version 4 --header-env Authorization=CF_FRAPPE_AUTH
@@ -643,7 +643,9 @@ export const Task = defineDocType({
     filters: [{ field: "workflow_state", value: "Open" }],
     pageSize: 25
   },
-  workflow: {
+  workflows: [{
+    name: "lifecycle",
+    stateField: "workflow_state",
     initialState: "Open",
     states: ["Open", "Doing", "Done"],
     transitions: [
@@ -651,7 +653,7 @@ export const Task = defineDocType({
       { action: "finish", from: "Doing", to: "Done", roles: ["User", "Task Manager"] },
       { action: "reopen", from: "Done", to: "Open", roles: ["Task Manager"] }
     ]
-  },
+  }],
   permissions: [
     { roles: ["Guest"], actions: ["read"] },
     { roles: ["User"], actions: ["read", "create", "update", "transition", "comment", "assign", "tag", "follow"] },
@@ -1060,6 +1062,7 @@ async function applyStarterTaskSeedWorkflowState(
       actor: STARTER_TASK_SEED_ACTOR,
       doctype: "Task",
       name,
+      workflow: "lifecycle",
       action: "start",
       metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }
     });
@@ -1068,6 +1071,7 @@ async function applyStarterTaskSeedWorkflowState(
         actor: STARTER_TASK_SEED_ACTOR,
         doctype: "Task",
         name,
+        workflow: "lifecycle",
         action: "finish",
         expectedVersion: doing.version,
         metadata: { patchId: STARTER_TASK_SEED_PATCH_ID }

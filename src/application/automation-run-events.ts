@@ -1,4 +1,5 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
+import type { DomainEventWorkflowTransition } from "../core/domain-events.js";
 import type { ResolvedAutomationActionDefinition } from "../core/automation-rules.js";
 import type {
   DocumentData,
@@ -28,10 +29,18 @@ export type AutomationRunEventPayload =
       readonly sourceDoctype: string;
       readonly sourceDocumentName: string;
       readonly sourceActorId: string;
+      readonly workflowName?: string;
+      readonly workflowAction?: string;
+      readonly workflowTransitions?: readonly DomainEventWorkflowTransition[];
+      readonly ruleId: string;
       readonly ruleName: string;
-      readonly actionIndex: number;
+      readonly actionId: string;
       readonly action: ResolvedAutomationActionDefinition;
       readonly retry: AutomationRunRetryPolicy;
+      readonly causationId: string;
+      readonly correlationId: string;
+      readonly automationDepth: number;
+      readonly automationPath: readonly string[];
     }
   | {
       readonly kind: "AutomationRunClaimed";
@@ -56,6 +65,11 @@ export type AutomationRunEventPayload =
       readonly runId: string;
       readonly claimId: string;
       readonly error: string;
+    }
+  | {
+      readonly kind: "AutomationRunSuppressed";
+      readonly runId: string;
+      readonly error: string;
     };
 
 export type AutomationRunPayloadKind = AutomationRunEventPayload["kind"];
@@ -65,7 +79,8 @@ export const AUTOMATION_RUN_PAYLOAD_KINDS = Object.freeze([
   "AutomationRunClaimed",
   "AutomationRunDelivered",
   "AutomationRunFailed",
-  "AutomationRunDeadLettered"
+  "AutomationRunDeadLettered",
+  "AutomationRunSuppressed"
 ] as const satisfies readonly AutomationRunPayloadKind[]);
 
 const AUTOMATION_RUN_PAYLOAD_KIND_SET = new Set<string>(AUTOMATION_RUN_PAYLOAD_KINDS);
@@ -79,10 +94,18 @@ export interface AutomationRunRecord {
   readonly sourceDoctype: string;
   readonly sourceDocumentName: string;
   readonly sourceActorId: string;
+  readonly workflowName?: string;
+  readonly workflowAction?: string;
+  readonly workflowTransitions?: readonly DomainEventWorkflowTransition[];
+  readonly ruleId: string;
   readonly ruleName: string;
-  readonly actionIndex: number;
+  readonly actionId: string;
   readonly action: ResolvedAutomationActionDefinition;
   readonly retry: AutomationRunRetryPolicy;
+  readonly causationId: string;
+  readonly correlationId: string;
+  readonly automationDepth: number;
+  readonly automationPath: readonly string[];
   readonly status: AutomationRunStatus;
   readonly attempts: number;
   readonly enqueuedAt: string;
@@ -151,10 +174,20 @@ export function foldAutomationRun(
         sourceDoctype: event.payload.sourceDoctype,
         sourceDocumentName: event.payload.sourceDocumentName,
         sourceActorId: event.payload.sourceActorId,
+        ...(event.payload.workflowName === undefined ? {} : { workflowName: event.payload.workflowName }),
+        ...(event.payload.workflowAction === undefined ? {} : { workflowAction: event.payload.workflowAction }),
+        ...(event.payload.workflowTransitions === undefined
+          ? {}
+          : { workflowTransitions: event.payload.workflowTransitions }),
+        ruleId: event.payload.ruleId,
         ruleName: event.payload.ruleName,
-        actionIndex: event.payload.actionIndex,
+        actionId: event.payload.actionId,
         action: event.payload.action,
         retry: event.payload.retry,
+        causationId: event.payload.causationId,
+        correlationId: event.payload.correlationId,
+        automationDepth: event.payload.automationDepth,
+        automationPath: event.payload.automationPath,
         status: "pending",
         attempts: 0,
         enqueuedAt: event.occurredAt,
@@ -194,10 +227,18 @@ export function automationRunRecordFromSnapshot(snapshot: DocumentSnapshot): Aut
     sourceDoctype: String(data.sourceDoctype),
     sourceDocumentName: String(data.sourceDocumentName),
     sourceActorId: String(data.sourceActorId),
+    ...(typeof data.workflowName === "string" ? { workflowName: data.workflowName } : {}),
+    ...(typeof data.workflowAction === "string" ? { workflowAction: data.workflowAction } : {}),
+    ...automationRunWorkflowTransitionsFromData(data.workflowTransitions),
+    ruleId: String(data.ruleId),
     ruleName: String(data.ruleName),
-    actionIndex: Number(data.actionIndex),
+    actionId: String(data.actionId),
     action: automationRunActionFromData(data.action),
     retry: automationRunRetryFromData(data.retry),
+    causationId: String(data.causationId),
+    correlationId: String(data.correlationId),
+    automationDepth: Number(data.automationDepth),
+    automationPath: automationPathFromData(data.automationPath),
     status: automationRunStatusFromData(data.status),
     attempts: Number(data.attempts),
     enqueuedAt: String(data.enqueuedAt),
@@ -277,6 +318,16 @@ function applyAutomationRunEvent(record: AutomationRunRecord, event: DomainEvent
         version: event.sequence
       };
     }
+    case "AutomationRunSuppressed": {
+      const { retryAt: _retryAt, claimExpiresAt: _claimExpiresAt, ...dead } = record;
+      return {
+        ...dead,
+        status: "dead",
+        error: event.payload.error,
+        deadLetteredAt: event.occurredAt,
+        version: event.sequence
+      };
+    }
     case "AutomationRunEnqueued":
       return record;
   }
@@ -290,10 +341,20 @@ function automationRunData(record: AutomationRunRecord): DocumentData {
     sourceDoctype: record.sourceDoctype,
     sourceDocumentName: record.sourceDocumentName,
     sourceActorId: record.sourceActorId,
+    ...(record.workflowName === undefined ? {} : { workflowName: record.workflowName }),
+    ...(record.workflowAction === undefined ? {} : { workflowAction: record.workflowAction }),
+    ...(record.workflowTransitions === undefined
+      ? {}
+      : { workflowTransitions: record.workflowTransitions as unknown as JsonValue }),
+    ruleId: record.ruleId,
     ruleName: record.ruleName,
-    actionIndex: record.actionIndex,
+    actionId: record.actionId,
     action: record.action as unknown as JsonValue,
     retry: record.retry as unknown as JsonValue,
+    causationId: record.causationId,
+    correlationId: record.correlationId,
+    automationDepth: record.automationDepth,
+    automationPath: record.automationPath,
     status: record.status,
     attempts: record.attempts,
     enqueuedAt: record.enqueuedAt,
@@ -306,6 +367,35 @@ function automationRunData(record: AutomationRunRecord): DocumentData {
     ...(record.retryAt === undefined ? {} : { retryAt: record.retryAt }),
     ...(record.deadLetteredAt === undefined ? {} : { deadLetteredAt: record.deadLetteredAt })
   };
+}
+
+function automationRunWorkflowTransitionsFromData(
+  value: unknown
+): { readonly workflowTransitions?: readonly DomainEventWorkflowTransition[] } {
+  if (value === undefined) {
+    return {};
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Automation run snapshot contains invalid workflow transitions");
+  }
+  const transitions = value.map((item) => {
+    if (!isRecord(item) ||
+      typeof item.workflow !== "string" ||
+      typeof item.stateField !== "string" ||
+      typeof item.action !== "string" ||
+      typeof item.from !== "string" ||
+      typeof item.to !== "string") {
+      throw new Error("Automation run snapshot contains invalid workflow transitions");
+    }
+    return Object.freeze({
+      workflow: item.workflow,
+      stateField: item.stateField,
+      action: item.action,
+      from: item.from,
+      to: item.to
+    });
+  });
+  return { workflowTransitions: Object.freeze(transitions) };
 }
 
 function automationRunActionFromData(value: unknown): ResolvedAutomationActionDefinition {
@@ -349,6 +439,13 @@ function automationRunRetryFromData(value: unknown): AutomationRunRetryPolicy {
     baseDelaySeconds,
     maxDelaySeconds
   };
+}
+
+function automationPathFromData(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error("Automation run snapshot contains an invalid automation path");
+  }
+  return Object.freeze([...value]);
 }
 
 function automationRunStatusFromData(value: unknown): AutomationRunStatus {
@@ -414,6 +511,10 @@ declare module "../core/types.js" {
     readonly AutomationRunDeadLettered: Extract<
       AutomationRunEventPayload,
       { readonly kind: "AutomationRunDeadLettered" }
+    >;
+    readonly AutomationRunSuppressed: Extract<
+      AutomationRunEventPayload,
+      { readonly kind: "AutomationRunSuppressed" }
     >;
   }
 }

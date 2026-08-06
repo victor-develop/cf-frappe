@@ -10,6 +10,7 @@ import {
   sortedAutomationRunRecords
 } from "../../src";
 import type { DomainEvent } from "../../src";
+import type { AutomationRunEventPayload } from "../../src";
 
 const now = "2026-01-01T00:00:00.000Z";
 
@@ -20,13 +21,15 @@ describe("automation run events", () => {
       "AutomationRunClaimed",
       "AutomationRunDelivered",
       "AutomationRunFailed",
-      "AutomationRunDeadLettered"
+      "AutomationRunDeadLettered",
+      "AutomationRunSuppressed"
     ]);
     expect(automationRunEventType(enqueuedPayload("run-1"))).toBe("AutomationRunEnqueued");
     expect(automationRunEventType({ kind: "AutomationRunClaimed", runId: "run-1", claimId: "claim-1", claimExpiresAt: now })).toBe("AutomationRunClaimed");
     expect(automationRunEventType({ kind: "AutomationRunDelivered", runId: "run-1", claimId: "claim-1" })).toBe("AutomationRunDelivered");
     expect(automationRunEventType({ kind: "AutomationRunFailed", runId: "run-1", claimId: "claim-1", error: "nope", retryAt: now })).toBe("AutomationRunFailed");
     expect(automationRunEventType({ kind: "AutomationRunDeadLettered", runId: "run-1", claimId: "claim-1", error: "nope" })).toBe("AutomationRunDeadLettered");
+    expect(automationRunEventType({ kind: "AutomationRunSuppressed", runId: "run-1", error: "loop" })).toBe("AutomationRunSuppressed");
   });
 
   it("narrows automation run events by payload kind instead of event type", () => {
@@ -65,11 +68,32 @@ describe("automation run events", () => {
       deadEvent(3, "run-2", "claim-1", "always broken")
     ]);
     expect(dead).toMatchObject({ id: "run-2", status: "dead", error: "always broken" });
+
+    const suppressed = foldAutomationRun("acme", [
+      enqueuedEvent(1, "run-3", now),
+      suppressedEvent(2, "run-3", "loop detected")
+    ]);
+    expect(suppressed).toMatchObject({ id: "run-3", status: "dead", attempts: 0, error: "loop detected" });
   });
 
   it("projects and hydrates run snapshots", () => {
-    const record = foldAutomationRun("acme", [
-      enqueuedEvent(1, "run-1", now),
+    const enqueued = enqueuedEvent(1, "run-1", now);
+    const transition = {
+      workflow: "lifecycle",
+      stateField: "status",
+      action: "finish",
+      from: "Open",
+      to: "Done"
+    };
+    const record = foldAutomationRun("acme", [{
+      ...enqueued,
+      payload: {
+        ...enqueued.payload,
+        workflowName: "lifecycle",
+        workflowAction: "finish",
+        workflowTransitions: [transition]
+      } as AutomationRunEventPayload
+    },
       claimedEvent(2, "run-1", "claim-1", "2026-01-01T00:05:00.000Z")
     ]);
 
@@ -79,7 +103,13 @@ describe("automation run events", () => {
       doctype: "__AutomationRuns",
       name: "run-1",
       docstatus: "draft",
-      data: { status: "claimed", attempts: 1 }
+      data: {
+        status: "claimed",
+        attempts: 1,
+        workflowName: "lifecycle",
+        workflowAction: "finish",
+        workflowTransitions: [transition]
+      }
     });
     expect(automationRunRecordFromSnapshot(snapshot)).toEqual(record);
     expect(automationRunSnapshot(foldAutomationRun("acme", [
@@ -142,6 +172,10 @@ describe("automation run events", () => {
       ...snapshot,
       data: { ...snapshot.data, status: "unknown" }
     })).toThrow("invalid status");
+    expect(() => automationRunRecordFromSnapshot({
+      ...snapshot,
+      data: { ...snapshot.data, workflowTransitions: [{ workflow: "lifecycle" }] }
+    })).toThrow("invalid workflow transitions");
   });
 });
 
@@ -155,14 +189,19 @@ function enqueuedPayload(runId: string) {
     sourceDoctype: "Source",
     sourceDocumentName: "Source One",
     sourceActorId: "owner@example.com",
+    ruleId: "mirror",
     ruleName: "Mirror",
-    actionIndex: 0,
+    actionId: "update",
     action: {
       kind: "updateDocument" as const,
       target: { doctype: "Target", name: "Target One" },
       patch: { title: "Done" }
     },
-    retry: { maxAttempts: 3, baseDelaySeconds: 10, maxDelaySeconds: 60 }
+    retry: { maxAttempts: 3, baseDelaySeconds: 10, maxDelaySeconds: 60 },
+    causationId: "evt_source",
+    correlationId: "evt_source",
+    automationDepth: 1,
+    automationPath: ["mirror:update"]
   };
 }
 
@@ -202,6 +241,14 @@ function deadEvent(sequence: number, runId: string, claimId: string, error: stri
     kind: "AutomationRunDeadLettered",
     runId,
     claimId,
+    error
+  }, now);
+}
+
+function suppressedEvent(sequence: number, runId: string, error: string): DomainEvent {
+  return stateEvent(sequence, runId, {
+    kind: "AutomationRunSuppressed",
+    runId,
     error
   }, now);
 }

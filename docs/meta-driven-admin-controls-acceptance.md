@@ -65,7 +65,7 @@ The current slice does not need to complete these richer builders:
    - `State Field` uses the shared field selector, limited to workflow-compatible field types.
    - `Initial State`, transition `from`, and transition `to` are selectable from workflow states when states exist.
    - Transition roles use the shared role selector.
-   - Existing newline/pipe transition payload parsing remains compatible.
+   - Named workflow rows submit structured transition fields; the removed newline/pipe legacy payload is not accepted.
 
 2. Notification rule admin:
    - Event kinds are rendered as metadata-driven choices.
@@ -118,7 +118,7 @@ The current slice does not need to complete these richer builders:
 - HTML rendering lives in shared Desk control helpers.
 - Page render functions should compose shared helpers instead of duplicating option filtering and datalist construction inline.
 - Server-side validation remains authoritative. Selectors reduce mistakes but do not replace domain validation.
-- Existing public route paths, command payload field names, and service APIs remain backward compatible.
+- Except for the intentionally removed pre-cutover Workflow contracts, existing public route paths, command payload field names, and service APIs remain stable.
 - The implementation must not introduce a new frontend framework or client-side build step.
 
 ## Test Criteria

@@ -1,9 +1,14 @@
 import { notFound } from "../core/errors.js";
-import { customFieldsCatalogStream, customFieldsStream } from "../core/streams.js";
+import {
+  customFieldsCatalogStream,
+  customFieldsStream,
+  namingConfigurationStream
+} from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   SYSTEM_MANAGER_ROLE,
   type Actor,
+  type DocTypeDefinition,
   type DocumentData,
   type FieldDefinition,
   type NewDomainEvent,
@@ -23,6 +28,10 @@ import {
   foldCustomFields,
   type CustomFieldState
 } from "../core/custom-fields.js";
+import {
+  applyNamingConfigurationToDocType,
+  foldNamingConfiguration
+} from "../core/naming-configuration.js";
 import {
   assertCustomFieldDefaultValueValid,
   assertCustomFieldReferencesResolve,
@@ -46,13 +55,18 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
+import {
+  appendMetadataMutation,
+  metadataRevisionVersion,
+  type MetadataMutationStore
+} from "./metadata-revision.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 
 export type { CustomFieldEventPayload } from "./custom-field-events.js";
 
 export interface CustomFieldServiceOptions {
   readonly registry: ModelRegistry;
-  readonly events: EventStore;
+  readonly events: MetadataMutationStore;
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
@@ -78,7 +92,7 @@ export interface DisableCustomFieldCommand {
 
 export class CustomFieldService {
   private readonly registry: ModelRegistry;
-  private readonly events: EventStore;
+  private readonly events: MetadataMutationStore;
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
@@ -117,6 +131,7 @@ export class CustomFieldService {
     this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveCustomFieldTenant({ actor: command.actor, tenantId: command.tenantId });
+    const metadataRevision = await metadataRevisionVersion(this.events, tenantId, command.doctype);
     let field = normalizeCustomField(command.field);
     const events = await this.tenantCustomFieldEvents(tenantId);
     const states = this.statesFromEvents(tenantId, events);
@@ -137,6 +152,15 @@ export class CustomFieldService {
     if (planCustomFieldSave(findCustomFieldEntry(state, field.name), field).status === "noop") {
       return state;
     }
+    const projectedStates = projectPendingCustomFieldState(
+      tenantId,
+      states,
+      doctype.name,
+      field,
+      this.clock.now()
+    );
+    const projectedState = projectedStates.find((candidate) => candidate.doctype === doctype.name)!;
+    await this.assertNamingConfigurationRemainsValid(tenantId, doctype, projectedState);
     const stream = customFieldsCatalogStream(tenantId);
     const event = this.event({
       tenantId,
@@ -149,14 +173,22 @@ export class CustomFieldService {
         field
       })
     });
-    const saved = await this.events.append(stream, state.version, [event]);
-    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, saved));
+    const saved = await appendMetadataMutation(this.events, {
+      tenantId,
+      doctype: doctype.name,
+      sourceStream: stream,
+      sourceExpectedVersion: state.version,
+      sourceEvent: event,
+      metadataRevision
+    });
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, [saved]));
   }
 
   async disableField(command: DisableCustomFieldCommand): Promise<CustomFieldState> {
     this.authorizeAdministration(command.actor, command.tenantId);
     const doctype = this.registry.get(command.doctype);
     const tenantId = resolveCustomFieldTenant({ actor: command.actor, tenantId: command.tenantId });
+    const metadataRevision = await metadataRevisionVersion(this.events, tenantId, command.doctype);
     const fieldName = normalizeRequiredCustomFieldText(command.fieldName, "Custom field name");
     const events = await this.tenantCustomFieldEvents(tenantId);
     const state = this.stateFromEvents(tenantId, doctype.name, events);
@@ -168,6 +200,12 @@ export class CustomFieldService {
     if (decision.status === "noop") {
       return state;
     }
+    await this.assertNamingConfigurationRemainsValid(tenantId, doctype, {
+      ...state,
+      fields: state.fields.map((entry) => entry.field.name === fieldName
+        ? { ...entry, enabled: false, updatedAt: this.clock.now() }
+        : entry)
+    });
     const stream = customFieldsCatalogStream(tenantId);
     const event = this.event({
       tenantId,
@@ -180,12 +218,33 @@ export class CustomFieldService {
         fieldName
       })
     });
-    const saved = await this.events.append(stream, state.version, [event]);
-    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, saved));
+    const saved = await appendMetadataMutation(this.events, {
+      tenantId,
+      doctype: doctype.name,
+      sourceStream: stream,
+      sourceExpectedVersion: state.version,
+      sourceEvent: event,
+      metadataRevision
+    });
+    return this.stateFromEvents(tenantId, doctype.name, withSavedCustomFieldCatalogEvents(events, [saved]));
   }
 
   private async stateFor(tenantId: TenantId, doctype: string): Promise<CustomFieldState> {
     return this.stateFromEvents(tenantId, doctype, await this.tenantCustomFieldEvents(tenantId));
+  }
+
+  private async assertNamingConfigurationRemainsValid(
+    tenantId: TenantId,
+    base: DocTypeDefinition,
+    customFieldState: CustomFieldState
+  ): Promise<void> {
+    const withCustomFields = applyCustomFieldsToDocType(base, customFieldState);
+    const namingState = foldNamingConfiguration(
+      tenantId,
+      withCustomFields,
+      await this.events.readStream(namingConfigurationStream(tenantId, base.name))
+    );
+    applyNamingConfigurationToDocType(withCustomFields, namingState);
   }
 
   private async tenantCustomFieldEvents(tenantId: TenantId): Promise<CustomFieldEventSet> {

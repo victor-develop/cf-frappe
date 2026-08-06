@@ -1,22 +1,18 @@
 import type {
   DocumentSnapshot,
   JsonValue,
-  ListDocumentsFilter,
+  PredicateExpression,
   ListOrderDirection
 } from "../../core/types.js";
-import {
-  listFilterExpressionFromFilters,
-  matchesListFilterExpression as matchesCoreListFilterExpression
-} from "../../core/list-view.js";
+import { matchesPredicateExpression as matchesCorePredicateExpression } from "../../core/list-view.js";
 
-export { matchesCoreListFilterExpression as matchesListFilterExpression };
+export { matchesCorePredicateExpression as matchesPredicateExpression };
 
-export function matchesListFilters(
+export function matchesDocumentPredicate(
   document: DocumentSnapshot,
-  filters: readonly ListDocumentsFilter[] = []
+  predicate: PredicateExpression | undefined
 ): boolean {
-  const expression = listFilterExpressionFromFilters(filters);
-  return expression === undefined || matchesCoreListFilterExpression(document, expression);
+  return matchesCorePredicateExpression(document, predicate);
 }
 
 export function compareListDocuments(

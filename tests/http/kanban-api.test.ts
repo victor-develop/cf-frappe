@@ -37,7 +37,7 @@ describe("kanban api", () => {
       doctype: "Note",
       data: data({ title: "HTTP Closed", priority: "High", count: 2 })
     });
-    await services.documents.transition({ actor: owner, doctype: "Note", name: "HTTP Closed", action: "close" });
+    await services.documents.transition({ actor: owner, doctype: "Note", name: "HTTP Closed", workflow: "lifecycle", action: "close" });
     const kanbans = new KanbanService({ registry: services.registry, queries: services.queries });
     const app = createResourceApi({
       registry: services.registry,

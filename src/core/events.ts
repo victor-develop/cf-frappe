@@ -1,4 +1,5 @@
 import { FrameworkError } from "./errors.js";
+import { isCurrentWorkflowTransitionPayload } from "./domain-events.js";
 import { cloneJsonValue, isJsonValue } from "./json.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent } from "./types.js";
 
@@ -37,6 +38,19 @@ export function foldDocumentFrom(
         }
         break;
       case "WorkflowTransitioned":
+        if (!isCurrentWorkflowTransitionPayload(event.payload)) {
+          break;
+        }
+        if (snapshot) {
+          const current: DocumentSnapshot = snapshot;
+          snapshot = {
+            ...current,
+            version: event.sequence,
+            data: { ...current.data, ...cloneData(event.payload.patch) },
+            updatedAt: event.occurredAt
+          };
+        }
+        break;
       case "DomainCommandApplied":
         if (snapshot) {
           const current: DocumentSnapshot = snapshot;
@@ -137,8 +151,8 @@ export function foldDocumentFrom(
       case "CustomFieldDisabled":
       case "FieldPropertyOverrideSaved":
       case "FieldPropertyOverrideCleared":
-      case "WorkflowDefinitionSaved":
-      case "WorkflowDefinitionCleared":
+      case "NamedWorkflowSaved":
+      case "NamedWorkflowCleared":
       case "NotificationRuleSaved":
       case "NotificationRuleCleared":
       case "AssignmentRuleSaved":

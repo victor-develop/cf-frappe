@@ -1,13 +1,14 @@
 import type { DocumentFieldMergePlan, DocumentMergeSnapshot } from "../core/document-merge.js";
 import { badRequest, conflict, FrameworkError, permissionDenied } from "../core/errors.js";
 import { compactData } from "../core/schema.js";
-import { allowedWorkflowTransitions, currentWorkflowState } from "../core/workflow.js";
+import { evaluateNamedWorkflowTransition } from "../core/workflow.js";
 import { copyDocumentData } from "./document-field-policy.js";
 import {
   domainCommandAppliedPayload,
   workflowTransitionedPayload,
   workflowTransitionEventType,
-  type DocumentCommandEventPayload
+  type DocumentCommandEventPayload,
+  type DomainCommandTransitionFact
 } from "./document-command-events.js";
 import {
   documentCreatedPayload,
@@ -21,15 +22,16 @@ import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
 import type {
   Actor,
   DomainCommandDefinition,
+  DomainCommandTransitionIntent,
   DocStatus,
   DocTypeDefinition,
   DocumentData,
   DocumentSnapshot,
   MutableDocumentData,
+  NamedWorkflowDefinition,
   NewDomainEvent,
   PermissionAction,
-  ValidationIssue,
-  WorkflowDefinition
+  ValidationIssue
 } from "../core/types.js";
 
 export function ensureExpectedVersion(existing: DocumentSnapshot, expectedVersion?: number): void {
@@ -118,6 +120,7 @@ export interface DocumentUpdateValidationIssueGroups {
   readonly unsetIssues?: readonly ValidationIssue[] | undefined;
   readonly originIssues?: readonly ValidationIssue[] | undefined;
   readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
+  readonly generatedNamingIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
   readonly fieldPermissionIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
@@ -132,6 +135,7 @@ export function documentUpdateValidationIssues(
     ...(groups.unsetIssues ?? []),
     ...(groups.originIssues ?? []),
     ...(groups.workflowStateIssues ?? []),
+    ...(groups.generatedNamingIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
     ...(groups.fieldPermissionIssues ?? []),
     ...(groups.validationIssues ?? []),
@@ -160,6 +164,7 @@ export function documentCreateValidationIssues(
 export interface DocumentDomainCommandValidationIssueGroups {
   readonly originIssues?: readonly ValidationIssue[] | undefined;
   readonly workflowStateIssues?: readonly ValidationIssue[] | undefined;
+  readonly generatedNamingIssues?: readonly ValidationIssue[] | undefined;
   readonly readOnlyIssues?: readonly ValidationIssue[] | undefined;
   readonly fieldPermissionIssues?: readonly ValidationIssue[] | undefined;
   readonly validationIssues?: readonly ValidationIssue[] | undefined;
@@ -172,6 +177,7 @@ export function documentDomainCommandValidationIssues(
   return [
     ...(groups.originIssues ?? []),
     ...(groups.workflowStateIssues ?? []),
+    ...(groups.generatedNamingIssues ?? []),
     ...(groups.readOnlyIssues ?? []),
     ...(groups.fieldPermissionIssues ?? []),
     ...(groups.validationIssues ?? []),
@@ -280,6 +286,7 @@ export function documentUpdateEventCommand(input: {
 export interface DomainCommandPolicyPlan {
   readonly input: DocumentData;
   readonly patch: DocumentData;
+  readonly transitions: readonly DomainCommandTransitionIntent[];
   readonly permissionAction: PermissionAction;
   readonly allowReadOnlyFields: boolean;
   readonly bypassFieldPermissions: boolean;
@@ -315,13 +322,15 @@ export function requireDomainCommandDefinition(
   return definition;
 }
 
-export function requireWorkflowDefinition(
-  doctype: Pick<DocTypeDefinition, "name" | "workflow">
-): WorkflowDefinition {
-  if (!doctype.workflow) {
-    throw new FrameworkError("BAD_REQUEST", `${doctype.name} has no workflow`, { status: 400 });
+export function requireNamedWorkflowDefinition(
+  doctype: Pick<DocTypeDefinition, "name" | "workflows">,
+  workflowName: string
+): NamedWorkflowDefinition {
+  const workflow = doctype.workflows?.find((candidate) => candidate.name === workflowName);
+  if (!workflow) {
+    throw new FrameworkError("WORKFLOW_NOT_FOUND", `${doctype.name} has no workflow '${workflowName}'`, { status: 404 });
   }
-  return doctype.workflow;
+  return workflow;
 }
 
 export function planDomainCommandPolicy(input: {
@@ -332,21 +341,57 @@ export function planDomainCommandPolicy(input: {
   readonly now: string;
 }): DomainCommandPolicyPlan {
   const commandInput = compactData(input.input);
-  const patch = input.definition.buildPatch
-    ? input.definition.buildPatch({
-        actor: input.actor,
-        document: input.document,
-        input: commandInput,
-        now: input.now
-      })
-    : pickCommandFields(input.definition.fields, commandInput);
+  if (input.definition.buildPatch !== undefined && input.definition.buildPlan !== undefined) {
+    throw new FrameworkError("BAD_REQUEST", "Domain command cannot define both buildPatch and buildPlan", { status: 400 });
+  }
+  const context = {
+    actor: input.actor,
+    document: input.document,
+    input: commandInput,
+    now: input.now
+  };
+  const built = input.definition.buildPlan?.(context);
+  const patch = built?.patch ?? (input.definition.buildPatch
+    ? input.definition.buildPatch(context)
+    : pickCommandFields(input.definition.fields, commandInput));
   return {
     input: commandInput,
     patch: compactData(patch),
+    transitions: normalizeDomainCommandTransitionIntents(built?.transitions),
     permissionAction: input.definition.permissionAction ?? "update",
     allowReadOnlyFields: input.definition.allowReadOnlyFields ?? false,
     bypassFieldPermissions: input.definition.bypassFieldPermissions ?? false
   };
+}
+
+function normalizeDomainCommandTransitionIntents(
+  transitions: readonly DomainCommandTransitionIntent[] | undefined
+): readonly DomainCommandTransitionIntent[] {
+  if (transitions === undefined) {
+    return Object.freeze([]);
+  }
+  if (!Array.isArray(transitions)) {
+    throw new FrameworkError("BAD_REQUEST", "Domain command transitions must be an array", { status: 400 });
+  }
+  return Object.freeze(transitions.map((transition, index) => {
+    if (typeof transition !== "object" || transition === null || Array.isArray(transition)) {
+      throw new FrameworkError("BAD_REQUEST", `Domain command transition ${String(index + 1)} must be an object`, {
+        status: 400
+      });
+    }
+    const suffix = String(index + 1);
+    return Object.freeze({
+      workflow: requiredDomainCommandTransitionId(transition.workflow, `transition ${suffix} workflow`),
+      action: requiredDomainCommandTransitionId(transition.action, `transition ${suffix} action`)
+    });
+  }));
+}
+
+function requiredDomainCommandTransitionId(value: string, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new FrameworkError("BAD_REQUEST", `Domain command ${label} is required`, { status: 400 });
+  }
+  return value.trim();
 }
 
 export function domainCommandEventCommand(input: {
@@ -360,6 +405,7 @@ export function domainCommandEventCommand(input: {
   readonly commandName: string;
   readonly commandInput: DocumentData;
   readonly patch: DocumentData;
+  readonly transitions?: readonly DomainCommandTransitionFact[];
   readonly metadata?: DocumentData | undefined;
 }): Omit<
   NewDomainEvent<Extract<DocumentCommandEventPayload, { readonly kind: "DomainCommandApplied" }>>,
@@ -376,17 +422,86 @@ export function domainCommandEventCommand(input: {
     payload: domainCommandAppliedPayload({
       command: input.commandName,
       input: input.commandInput,
-      patch: input.patch
+      patch: input.patch,
+      ...(input.transitions === undefined ? {} : { transitions: input.transitions })
     }),
     metadata: input.metadata ?? {}
   };
 }
 
 export interface WorkflowTransitionPolicyPlan {
+  readonly workflow: string;
+  readonly stateField: string;
+  readonly action: string;
   readonly from: string;
   readonly to: string;
   readonly patch: DocumentData;
   readonly eventType: string;
+}
+
+export interface DomainCommandTransitionsPlan {
+  readonly patch: DocumentData;
+  readonly transitions: readonly DomainCommandTransitionFact[];
+}
+
+export function planDomainCommandTransitions(input: {
+  readonly actor: Actor;
+  readonly doctype: Pick<DocTypeDefinition, "name" | "workflows">;
+  readonly document: DocumentSnapshot;
+  readonly patch: DocumentData;
+  readonly transitions: readonly DomainCommandTransitionIntent[];
+  readonly commandInput: DocumentData;
+}): DomainCommandTransitionsPlan {
+  const controlledFields = new Set((input.doctype.workflows ?? []).map((workflow) => workflow.stateField));
+  const ordinaryPatch = Object.freeze(Object.fromEntries(
+    Object.entries(input.patch).filter(([field]) => !controlledFields.has(field))
+  )) as DocumentData;
+  let proposed = Object.freeze({
+    ...input.document,
+    data: Object.freeze({ ...input.document.data, ...ordinaryPatch })
+  });
+  const authorizedPatch: Record<string, string> = {};
+  const facts: DomainCommandTransitionFact[] = [];
+  for (const intent of input.transitions) {
+    const workflow = requireNamedWorkflowDefinition(input.doctype, intent.workflow);
+    const plan = planWorkflowTransitionPolicy({
+      actor: input.actor,
+      action: intent.action,
+      doctypeName: input.doctype.name,
+      document: proposed,
+      workflow,
+      input: input.commandInput
+    });
+    authorizedPatch[plan.stateField] = plan.to;
+    facts.push(Object.freeze({
+      workflow: plan.workflow,
+      stateField: plan.stateField,
+      action: plan.action,
+      from: plan.from,
+      to: plan.to
+    }));
+    proposed = Object.freeze({
+      ...proposed,
+      data: Object.freeze({ ...proposed.data, ...plan.patch })
+    });
+  }
+  for (const workflow of input.doctype.workflows ?? []) {
+    if (!Object.prototype.hasOwnProperty.call(input.patch, workflow.stateField)) {
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(authorizedPatch, workflow.stateField) ||
+      input.patch[workflow.stateField] !== authorizedPatch[workflow.stateField]) {
+      throw new FrameworkError(
+        "WORKFLOW_STATE_PROTECTED",
+        `Field '${workflow.stateField}' can only be changed by an explicit '${workflow.name}' transition intent`,
+        { status: 409 }
+      );
+    }
+  }
+  return Object.freeze({
+    patch: Object.freeze({ ...ordinaryPatch, ...authorizedPatch }),
+    transitions: Object.freeze(facts)
+  });
 }
 
 export function planWorkflowTransitionPolicy(input: {
@@ -394,27 +509,54 @@ export function planWorkflowTransitionPolicy(input: {
   readonly action: string;
   readonly doctypeName: string;
   readonly document: DocumentSnapshot;
-  readonly workflow: WorkflowDefinition;
+  readonly workflow: NamedWorkflowDefinition;
+  readonly input?: DocumentData;
 }): WorkflowTransitionPolicyPlan {
-  const from = currentWorkflowState(input.workflow, input.document);
-  const transition = allowedWorkflowTransitions({
+  const decision = evaluateNamedWorkflowTransition({
     actor: input.actor,
+    document: input.document,
     workflow: input.workflow,
-    document: input.document
-  }).find((item) => item.action === input.action);
-  if (!transition) {
+    ...(input.input === undefined ? {} : { input: input.input })
+  }, input.action);
+  if (decision.status === "action-not-found") {
+    throw new FrameworkError(
+      "WORKFLOW_ACTION_NOT_FOUND",
+      `Workflow '${input.workflow.name}' has no action '${input.action}'`,
+      { status: 404 }
+    );
+  }
+  if (decision.status === "state-denied") {
     throw new FrameworkError(
       "WORKFLOW_TRANSITION_DENIED",
-      `Transition '${input.action}' is not allowed from '${from}'`,
+      `Workflow '${input.workflow.name}' action '${input.action}' is not allowed from '${decision.from}'`,
       { status: 409 }
     );
   }
+  if (decision.status === "role-denied") {
+    throw new FrameworkError(
+      "WORKFLOW_TRANSITION_DENIED",
+      `Actor '${input.actor.id}' cannot execute '${input.workflow.name}.${input.action}'`,
+      { status: 403 }
+    );
+  }
+  if (decision.status === "condition-denied") {
+    throw new FrameworkError(
+      "WORKFLOW_TRANSITION_CONDITION_FAILED",
+      `Workflow '${input.workflow.name}' action '${input.action}' conditions were not met`,
+      { status: 409 }
+    );
+  }
+  const transition = decision.transition;
   return {
-    from,
+    workflow: input.workflow.name,
+    stateField: input.workflow.stateField,
+    action: input.action,
+    from: decision.from,
     to: transition.to,
-    patch: { [input.workflow.stateField ?? "workflow_state"]: transition.to },
+    patch: { [input.workflow.stateField]: transition.to },
     eventType: workflowTransitionEventType({
       doctypeName: input.doctypeName,
+      workflow: input.workflow.name,
       action: input.action,
       transitionEventType: transition.eventType
     })
@@ -444,6 +586,8 @@ export function workflowTransitionEventCommand(input: {
     actorId: input.actorId,
     occurredAt: input.occurredAt,
     payload: workflowTransitionedPayload({
+      workflow: input.plan.workflow,
+      stateField: input.plan.stateField,
       action: input.action,
       from: input.plan.from,
       to: input.plan.to,

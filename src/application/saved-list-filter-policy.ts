@@ -4,8 +4,7 @@ import { can } from "../core/permissions.js";
 import type {
   Actor,
   DocTypeDefinition,
-  ListDocumentsFilter,
-  ListFilterExpression,
+  PredicateExpression,
   TenantId
 } from "../core/types.js";
 
@@ -86,8 +85,7 @@ export function projectSavedListFilterSave(input: {
   readonly id: string;
   readonly label: string;
   readonly ownerId: string;
-  readonly filters: readonly ListDocumentsFilter[];
-  readonly filterExpression?: ListFilterExpression | undefined;
+  readonly predicate?: PredicateExpression | undefined;
   readonly existing?: SavedListFilter | undefined;
   readonly now: string;
 }): SavedListFilter {
@@ -97,8 +95,7 @@ export function projectSavedListFilterSave(input: {
     id: input.id,
     label: input.label,
     ownerId: input.ownerId,
-    filters: input.filters,
-    ...(input.filterExpression === undefined ? {} : { filterExpression: input.filterExpression }),
+    ...(input.predicate === undefined ? {} : { predicate: input.predicate }),
     createdAt: input.existing?.createdAt ?? input.now,
     updatedAt: input.now
   };

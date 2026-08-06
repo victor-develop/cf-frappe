@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { FieldPropertyService } from "../../application/field-property-service.js";
 import { badRequest } from "../../core/errors.js";
-import type { FieldPropertyOverrides, JsonValue, ListFilterExpression } from "../../core/types.js";
+import type { FieldPropertyOverrides, JsonValue, PredicateExpression } from "../../core/types.js";
 import type { ActorResolver } from "./actor.js";
-import { readJsonObject, requestMetadata } from "./request.js";
+import { predicateExpressionFromValue, readJsonObject, requestMetadata } from "./request.js";
 
 export interface FieldPropertyApiOptions {
   readonly fieldProperties: FieldPropertyService;
@@ -66,11 +66,11 @@ function overridesValue(value: JsonValue | undefined): FieldPropertyOverrides {
     ...optionalString(value.description, "overrides.description", "description"),
     ...optionalString(value.placeholder, "overrides.placeholder", "placeholder"),
     ...optionalBoolean(value.required, "overrides.required", "required"),
-    ...optionalListFilterExpression(value.mandatoryDependsOn, "overrides.mandatoryDependsOn", "mandatoryDependsOn"),
+    ...optionalPredicateExpression(value.mandatoryDependsOn, "overrides.mandatoryDependsOn", "mandatoryDependsOn"),
     ...optionalBoolean(value.readOnly, "overrides.readOnly", "readOnly"),
-    ...optionalListFilterExpression(value.readOnlyDependsOn, "overrides.readOnlyDependsOn", "readOnlyDependsOn"),
+    ...optionalPredicateExpression(value.readOnlyDependsOn, "overrides.readOnlyDependsOn", "readOnlyDependsOn"),
     ...optionalBoolean(value.hidden, "overrides.hidden", "hidden"),
-    ...optionalListFilterExpression(value.hiddenDependsOn, "overrides.hiddenDependsOn", "hiddenDependsOn"),
+    ...optionalPredicateExpression(value.hiddenDependsOn, "overrides.hiddenDependsOn", "hiddenDependsOn"),
     ...optionalBoolean(value.printHide, "overrides.printHide", "printHide"),
     ...optionalBoolean(value.printHideIfNoValue, "overrides.printHideIfNoValue", "printHideIfNoValue"),
     ...optionalBoolean(value.noCopy, "overrides.noCopy", "noCopy"),
@@ -130,18 +130,15 @@ function optionalStringArray<TKey extends string>(
   return { [key]: value } as unknown as { readonly [K in TKey]: readonly string[] };
 }
 
-function optionalListFilterExpression<TKey extends string>(
+function optionalPredicateExpression<TKey extends string>(
   value: JsonValue | undefined,
   field: string,
   key: TKey
-): { readonly [K in TKey]?: ListFilterExpression } {
+): { readonly [K in TKey]?: PredicateExpression } {
   if (value === undefined) {
     return {};
   }
-  if (!isRecord(value)) {
-    throw badRequest(`${field} must be an object`);
-  }
-  return { [key]: value } as unknown as { readonly [K in TKey]: ListFilterExpression };
+  return { [key]: predicateExpressionFromValue(value, field) } as { readonly [K in TKey]: PredicateExpression };
 }
 
 function optionalNumber<TKey extends string>(

@@ -13,6 +13,7 @@ export interface WebFormResolvedField {
   readonly placeholder?: string;
   readonly type: FieldDefinition["type"];
   readonly required: boolean;
+  readonly serverSupplied?: boolean;
   readonly options?: readonly string[];
   readonly linkTo?: string;
 }
@@ -76,9 +77,44 @@ export function webFormSubmissionData(
   metadata: WebFormMetadata,
   input: WebFormSubmitInput
 ): MutableDocumentData {
+  return buildWebFormSubmissionData(metadata, input);
+}
+
+export function webFormServerSubmissionData(
+  metadata: WebFormMetadata,
+  input: WebFormSubmitInput,
+  serverData: Readonly<Record<string, JsonValue | undefined>>
+): MutableDocumentData {
+  const serverFields = new Set(
+    metadata.fields.filter((field) => field.serverSupplied === true).map((field) => field.field)
+  );
+  for (const field of Object.keys(serverData)) {
+    if (!serverFields.has(field)) {
+      throw badRequest(`Web form field '${field}' is not server-supplied`);
+    }
+  }
+  return buildWebFormSubmissionData(metadata, input, serverData);
+}
+
+function buildWebFormSubmissionData(
+  metadata: WebFormMetadata,
+  input: WebFormSubmitInput,
+  serverData?: Readonly<Record<string, JsonValue | undefined>>
+): MutableDocumentData {
+  const configuredFields = new Set(metadata.fields.map((field) => field.field));
+  for (const field of Object.keys(input.data)) {
+    if (!configuredFields.has(field)) {
+      throw badRequest(`Web form field '${field}' is not configured`);
+    }
+  }
   const data: MutableDocumentData = {};
   for (const field of metadata.fields) {
-    data[field.field] = input.data[field.field];
+    if (field.serverSupplied === true && Object.prototype.hasOwnProperty.call(input.data, field.field)) {
+      throw badRequest(`Web form field '${field.field}' is server-supplied`);
+    }
+    data[field.field] = field.serverSupplied === true
+      ? serverData?.[field.field]
+      : input.data[field.field];
     if (field.required && isMissingRequiredWebFormValue(data[field.field])) {
       throw badRequest(`Web form field '${field.field}' is required`);
     }
@@ -111,6 +147,7 @@ function resolveWebFormField(
     ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
     type: field.type,
     required: formField.required ?? field.required ?? false,
+    ...(formField.serverSupplied === true ? { serverSupplied: true } : {}),
     ...(field.options === undefined ? {} : { options: field.options }),
     ...(field.linkTo === undefined ? {} : { linkTo: field.linkTo })
   };

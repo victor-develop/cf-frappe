@@ -1,59 +1,95 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import {
-  WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS,
-  foldWorkflowDefinition,
-  isWorkflowDefinitionStatePayloadKind,
-  workflowDefinitionStateEventType,
-  type WorkflowDefinitionState,
-  type WorkflowDefinitionStateEventPayload,
-  type WorkflowDefinitionStatePayloadKind
+  NAMED_WORKFLOW_STATE_PAYLOAD_KINDS,
+  foldNamedWorkflowDefinition,
+  isNamedWorkflowStatePayloadKind,
+  namedWorkflowStateEventType,
+  type NamedWorkflowDefinitionState,
+  type NamedWorkflowStateEventPayload,
+  type NamedWorkflowStatePayloadKind
 } from "../core/workflow.js";
 import type {
   Actor,
   DocTypeName,
   DocumentData,
   DomainEvent,
+  NamedWorkflowDefinition,
   NewDomainEvent,
   StreamName,
-  TenantId,
-  WorkflowDefinition
+  TenantId
 } from "../core/types.js";
 
-export type WorkflowEventPayload = WorkflowDefinitionStateEventPayload;
+export type NamedWorkflowEventPayload = NamedWorkflowStateEventPayload;
+export type NamedWorkflowPayloadKind = NamedWorkflowStatePayloadKind;
+export const NAMED_WORKFLOW_PAYLOAD_KINDS = NAMED_WORKFLOW_STATE_PAYLOAD_KINDS;
 
-export type WorkflowPayloadKind = WorkflowDefinitionStatePayloadKind;
+export type NamedWorkflowFieldOwnershipEventPayload =
+  | {
+      readonly kind: "NamedWorkflowFieldClaimed";
+      readonly doctypeName: DocTypeName;
+      readonly stateField: string;
+      readonly workflowName: string;
+    }
+  | {
+      readonly kind: "NamedWorkflowFieldReleased";
+      readonly doctypeName: DocTypeName;
+      readonly stateField: string;
+      readonly workflowName: string;
+    };
 
-export const WORKFLOW_DEFINITION_PAYLOAD_KINDS = WORKFLOW_DEFINITION_STATE_PAYLOAD_KINDS;
-
-export interface WorkflowDefinitionSavedPayloadInput {
+export interface NamedWorkflowFieldOwnershipState {
+  readonly tenantId: TenantId;
   readonly doctypeName: DocTypeName;
-  readonly workflow: WorkflowDefinition;
+  readonly stateField: string;
+  readonly version: number;
+  readonly workflowName?: string;
 }
 
-export interface WorkflowDefinitionClearedPayloadInput {
-  readonly doctypeName: DocTypeName;
-}
+export const NAMED_WORKFLOW_FIELD_OWNERSHIP_PAYLOAD_KINDS = [
+  "NamedWorkflowFieldClaimed",
+  "NamedWorkflowFieldReleased"
+] as const;
 
-export function workflowDefinitionSavedPayload(
-  input: WorkflowDefinitionSavedPayloadInput
-): Extract<WorkflowEventPayload, { readonly kind: "WorkflowDefinitionSaved" }> {
+export function namedWorkflowSavedPayload(input: {
+  readonly doctypeName: DocTypeName;
+  readonly workflow: NamedWorkflowDefinition;
+}): Extract<NamedWorkflowEventPayload, { readonly kind: "NamedWorkflowSaved" }> {
   return {
-    kind: "WorkflowDefinitionSaved",
+    kind: "NamedWorkflowSaved",
     doctypeName: input.doctypeName,
+    workflowName: input.workflow.name,
     workflow: input.workflow
   };
 }
 
-export function workflowDefinitionClearedPayload(
-  input: WorkflowDefinitionClearedPayloadInput
-): Extract<WorkflowEventPayload, { readonly kind: "WorkflowDefinitionCleared" }> {
+export function namedWorkflowClearedPayload(input: {
+  readonly doctypeName: DocTypeName;
+  readonly workflowName: string;
+}): Extract<NamedWorkflowEventPayload, { readonly kind: "NamedWorkflowCleared" }> {
   return {
-    kind: "WorkflowDefinitionCleared",
-    doctypeName: input.doctypeName
+    kind: "NamedWorkflowCleared",
+    doctypeName: input.doctypeName,
+    workflowName: input.workflowName
   };
 }
 
-export interface WorkflowDefinitionEventOptions<TPayload extends WorkflowEventPayload> {
+export function namedWorkflowFieldClaimedPayload(input: {
+  readonly doctypeName: DocTypeName;
+  readonly stateField: string;
+  readonly workflowName: string;
+}): Extract<NamedWorkflowFieldOwnershipEventPayload, { readonly kind: "NamedWorkflowFieldClaimed" }> {
+  return { kind: "NamedWorkflowFieldClaimed", ...input };
+}
+
+export function namedWorkflowFieldReleasedPayload(input: {
+  readonly doctypeName: DocTypeName;
+  readonly stateField: string;
+  readonly workflowName: string;
+}): Extract<NamedWorkflowFieldOwnershipEventPayload, { readonly kind: "NamedWorkflowFieldReleased" }> {
+  return { kind: "NamedWorkflowFieldReleased", ...input };
+}
+
+export function namedWorkflowDefinitionEvent<TPayload extends NamedWorkflowEventPayload>(options: {
   readonly id: string;
   readonly tenantId: TenantId;
   readonly stream: StreamName;
@@ -61,18 +97,14 @@ export interface WorkflowDefinitionEventOptions<TPayload extends WorkflowEventPa
   readonly occurredAt: string;
   readonly payload: TPayload;
   readonly metadata?: DocumentData;
-}
-
-export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
-  options: WorkflowDefinitionEventOptions<TPayload>
-): NewDomainEvent<TPayload> {
+}): NewDomainEvent<TPayload> {
   return {
     id: options.id,
     tenantId: options.tenantId,
     stream: options.stream,
-    type: workflowDefinitionEventType(options.payload),
-    doctype: "__Workflows",
-    documentName: options.payload.doctypeName,
+    type: namedWorkflowDefinitionEventType(options.payload),
+    doctype: "__NamedWorkflows",
+    documentName: `${options.payload.doctypeName}:${options.payload.workflowName}`,
     actorId: options.actor.id,
     occurredAt: options.occurredAt,
     payload: options.payload,
@@ -80,42 +112,112 @@ export function workflowDefinitionEvent<TPayload extends WorkflowEventPayload>(
   };
 }
 
-export function workflowDefinitionEventType(payload: WorkflowEventPayload): WorkflowPayloadKind {
-  return workflowDefinitionStateEventType(payload);
+export function namedWorkflowFieldOwnershipEvent<TPayload extends NamedWorkflowFieldOwnershipEventPayload>(options: {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly stream: StreamName;
+  readonly actor: Actor;
+  readonly occurredAt: string;
+  readonly payload: TPayload;
+  readonly metadata?: DocumentData;
+}): NewDomainEvent<TPayload> {
+  return {
+    id: options.id,
+    tenantId: options.tenantId,
+    stream: options.stream,
+    type: options.payload.kind,
+    doctype: "__NamedWorkflowFields",
+    documentName: `${options.payload.doctypeName}:${options.payload.stateField}`,
+    actorId: options.actor.id,
+    occurredAt: options.occurredAt,
+    payload: options.payload,
+    metadata: options.metadata ?? {}
+  };
 }
 
-export function isWorkflowPayloadKind(kind: string): kind is WorkflowPayloadKind {
-  return isWorkflowDefinitionStatePayloadKind(kind);
+export function namedWorkflowDefinitionEventType(
+  payload: NamedWorkflowEventPayload
+): NamedWorkflowPayloadKind {
+  return namedWorkflowStateEventType(payload);
 }
 
-export function isWorkflowEvent(event: DomainEvent): event is DomainEvent<WorkflowEventPayload> {
-  return isWorkflowPayloadKind(domainEventPayloadKind(event));
+export function isNamedWorkflowPayloadKind(kind: string): kind is NamedWorkflowPayloadKind {
+  return isNamedWorkflowStatePayloadKind(kind);
 }
 
-export function workflowEventsVisibleAt(
+export function isNamedWorkflowEvent(event: DomainEvent): event is DomainEvent<NamedWorkflowEventPayload> {
+  return isNamedWorkflowPayloadKind(domainEventPayloadKind(event));
+}
+
+export function namedWorkflowEventsVisibleAt(
   events: readonly DomainEvent[],
   occurredAt: string | undefined
 ): readonly DomainEvent[] {
   return occurredAt === undefined ? events : events.filter((event) => event.occurredAt <= occurredAt);
 }
 
-export function replayWorkflowDefinitionAppend(
-  state: WorkflowDefinitionState,
+export function replayNamedWorkflowAppend(
+  state: NamedWorkflowDefinitionState,
   previousEvents: readonly DomainEvent[],
   savedEvents: readonly DomainEvent[]
-): WorkflowDefinitionState {
-  return foldWorkflowDefinition(state.tenantId, state.doctypeName, [...previousEvents, ...savedEvents]);
+): NamedWorkflowDefinitionState {
+  return foldNamedWorkflowDefinition(
+    state.tenantId,
+    state.doctypeName,
+    state.workflowName,
+    [...previousEvents, ...savedEvents]
+  );
+}
+
+export function foldNamedWorkflowFieldOwnership(
+  tenantId: TenantId,
+  doctypeName: DocTypeName,
+  stateField: string,
+  events: readonly DomainEvent[]
+): NamedWorkflowFieldOwnershipState {
+  let workflowName: string | undefined;
+  let version = 0;
+  for (const event of events) {
+    if (event.payload.kind !== "NamedWorkflowFieldClaimed" &&
+      event.payload.kind !== "NamedWorkflowFieldReleased") {
+      continue;
+    }
+    if (event.payload.doctypeName !== doctypeName || event.payload.stateField !== stateField) {
+      continue;
+    }
+    version = Math.max(version, event.sequence);
+    if (event.payload.kind === "NamedWorkflowFieldClaimed") {
+      workflowName = event.payload.workflowName;
+    } else if (workflowName === event.payload.workflowName) {
+      workflowName = undefined;
+    }
+  }
+  return Object.freeze({
+    tenantId,
+    doctypeName,
+    stateField,
+    version,
+    ...(workflowName === undefined ? {} : { workflowName })
+  });
 }
 
 declare module "../core/types.js" {
   interface DomainEventPayloadMap {
-    readonly WorkflowDefinitionSaved: Extract<
-      WorkflowEventPayload,
-      { readonly kind: "WorkflowDefinitionSaved" }
+    readonly NamedWorkflowSaved: Extract<
+      NamedWorkflowEventPayload,
+      { readonly kind: "NamedWorkflowSaved" }
     >;
-    readonly WorkflowDefinitionCleared: Extract<
-      WorkflowEventPayload,
-      { readonly kind: "WorkflowDefinitionCleared" }
+    readonly NamedWorkflowCleared: Extract<
+      NamedWorkflowEventPayload,
+      { readonly kind: "NamedWorkflowCleared" }
+    >;
+    readonly NamedWorkflowFieldClaimed: Extract<
+      NamedWorkflowFieldOwnershipEventPayload,
+      { readonly kind: "NamedWorkflowFieldClaimed" }
+    >;
+    readonly NamedWorkflowFieldReleased: Extract<
+      NamedWorkflowFieldOwnershipEventPayload,
+      { readonly kind: "NamedWorkflowFieldReleased" }
     >;
   }
 }

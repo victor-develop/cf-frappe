@@ -3,7 +3,7 @@ import { DurableObjectCommandExecutor, type RpcDurableObjectNamespace } from "..
 import { createTestRegistry, data, owner, supportTicketDocType } from "../helpers";
 
 describe("DurableObjectCommandExecutor", () => {
-  it("routes create commands by tenant, doctype, and previewed document name", async () => {
+  it("routes all creates through the stable DocType creation coordinator", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];
     const namespace = fakeNamespace(names, calls);
@@ -14,11 +14,11 @@ describe("DurableObjectCommandExecutor", () => {
 
     await executor.create({ actor: owner, doctype: "Note", data: data() });
 
-    expect(names).toEqual(["acme:Note:My Note"]);
+    expect(names).toEqual(["acme:Note:_create"]);
     expect(calls).toMatchObject([{ kind: "create", doctype: "Note" }]);
   });
 
-  it("routes series-named creates through a shared series aggregate", async () => {
+  it("keeps runtime naming overrides on the same creation coordinator", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];
     const namespace = fakeNamespace(names, calls);
@@ -31,8 +31,8 @@ describe("DurableObjectCommandExecutor", () => {
     await executor.create({ actor: owner, doctype: "Support Ticket", name: "MANUAL-1", data: { subject: "Second" } });
 
     expect(names).toEqual([
-      "acme:Support Ticket:_series:TICK-.####",
-      "acme:Support Ticket:_series:TICK-.####"
+      "acme:Support Ticket:_create",
+      "acme:Support Ticket:_create"
     ]);
     expect(calls).toMatchObject([
       { kind: "create", doctype: "Support Ticket" },
@@ -40,7 +40,24 @@ describe("DurableObjectCommandExecutor", () => {
     ]);
   });
 
-  it("routes duplicate commands by destination name or naming-series aggregate", async () => {
+  it("uses the default tenant for global creation commands", async () => {
+    const calls: unknown[] = [];
+    const names: string[] = [];
+    const executor = new DurableObjectCommandExecutor({
+      registry: createTestRegistry(),
+      namespace: fakeNamespace(names, calls)
+    });
+
+    await executor.create({
+      actor: { id: "global", roles: ["System Manager"] },
+      doctype: "Note",
+      data: data()
+    });
+
+    expect(names).toEqual(["default:Note:_create"]);
+  });
+
+  it("routes duplicate commands through the destination DocType creation coordinator", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];
     const namespace = fakeNamespace(names, calls);
@@ -78,16 +95,16 @@ describe("DurableObjectCommandExecutor", () => {
       expectedVersion: 1
     });
 
-    expect(names).toEqual(["acme:Note:My Note Copy", "acme:Note:Manual Copy"]);
+    expect(names).toEqual(["acme:Note:_create", "acme:Note:_create"]);
     expect(calls).toMatchObject([
       { kind: "duplicate", name: "My Note", data: { title: "My Note Copy" }, expectedVersion: 1 },
       { kind: "duplicate", name: "My Note", newName: "Manual Copy", expectedVersion: 1 }
     ]);
-    expect(seriesNames).toEqual(["acme:Support Ticket:_series:TICK-.####"]);
+    expect(seriesNames).toEqual(["acme:Support Ticket:_create"]);
     expect(seriesCalls).toMatchObject([{ kind: "duplicate", doctype: "Support Ticket" }]);
   });
 
-  it("routes amend commands by destination name or naming-series aggregate", async () => {
+  it("routes amend commands through the destination DocType creation coordinator", async () => {
     const calls: unknown[] = [];
     const names: string[] = [];
     const namespace = fakeNamespace(names, calls);
@@ -125,12 +142,12 @@ describe("DurableObjectCommandExecutor", () => {
       expectedVersion: 3
     });
 
-    expect(names).toEqual(["acme:Note:My Note Rev 1", "acme:Note:Manual Rev 1"]);
+    expect(names).toEqual(["acme:Note:_create", "acme:Note:_create"]);
     expect(calls).toMatchObject([
       { kind: "amend", name: "My Note", data: { title: "My Note Rev 1" }, expectedVersion: 3 },
       { kind: "amend", name: "My Note", newName: "Manual Rev 1", expectedVersion: 3 }
     ]);
-    expect(seriesNames).toEqual(["acme:Support Ticket:_series:TICK-.####"]);
+    expect(seriesNames).toEqual(["acme:Support Ticket:_create"]);
     expect(seriesCalls).toMatchObject([{ kind: "amend", doctype: "Support Ticket" }]);
   });
 
@@ -147,7 +164,7 @@ describe("DurableObjectCommandExecutor", () => {
     await executor.merge({ actor: owner, doctype: "Note", name: "My Note", baseVersion: 1, patch: { title: "Merged" } });
     await executor.submit({ actor: owner, doctype: "Note", name: "My Note" });
     await executor.cancel({ actor: owner, doctype: "Note", name: "My Note" });
-    await executor.transition({ actor: owner, doctype: "Note", name: "My Note", action: "close" });
+    await executor.transition({ actor: owner, doctype: "Note", name: "My Note", workflow: "lifecycle", action: "close" });
     await executor.execute({ actor: owner, doctype: "Note", name: "My Note", command: "archive", input: {} });
     await executor.comment({ actor: owner, doctype: "Note", name: "My Note", text: "Routed comment" });
     await executor.recordActivity({ actor: owner, doctype: "Note", name: "My Note", subject: "Follow-up sent" });
@@ -276,6 +293,7 @@ describe("DurableObjectCommandExecutor", () => {
     const transitioned = await executor.bulkTransition({
       actor: owner,
       doctype: "Note",
+      workflow: "lifecycle",
       action: "close",
       documents: [{ name: "Transition Note", expectedVersion: 1 }]
     });

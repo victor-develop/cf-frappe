@@ -7,6 +7,7 @@ import {
   unsafeHeaderActorResolver
 } from "../../src";
 import { createServices, now } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const adminHeaders = {
   "content-type": "application/json",
@@ -36,7 +37,7 @@ describe("assignment rule api", () => {
             { kind: "user", userId: "manager@example.com" },
             { kind: "field", field: "created_by" }
           ],
-          condition: { field: "priority", value: "High" },
+          condition: afterField("priority", "High"),
           excludeActor: true
         }
       })
@@ -49,7 +50,7 @@ describe("assignment rule api", () => {
           {
             rule: {
               name: "High priority triage",
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               excludeActor: true
             },
             enabled: true
@@ -74,7 +75,7 @@ describe("assignment rule api", () => {
                 { kind: "user", userId: "manager@example.com" },
                 { kind: "field", field: "created_by" }
               ],
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               excludeActor: true
             }
           }
@@ -97,7 +98,7 @@ describe("assignment rule api", () => {
             rule: {
               name: "High priority triage",
               enabled: false,
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               excludeActor: true
             }
           }
@@ -120,7 +121,7 @@ describe("assignment rule api", () => {
             rule: {
               name: "High priority triage",
               enabled: true,
-              condition: { field: "priority", value: "High" },
+              condition: afterField("priority", "High"),
               excludeActor: true
             }
           }
@@ -203,7 +204,7 @@ describe("assignment rule api", () => {
         rule: {
           events: ["DocumentCreated"],
           assignees: [{ kind: "user", userId: "manager@example.com" }],
-          condition: { field: "metadata", value: "x" }
+          condition: afterField("metadata", "x")
         }
       })
     });

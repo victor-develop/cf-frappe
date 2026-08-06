@@ -240,4 +240,71 @@ describe("registry", () => {
 
     expect(() => createRegistry({ doctypes: [Invoice] })).toThrow(FrameworkError);
   });
+
+  it("rejects Automation actions with unknown target doctypes or patch fields at registration", () => {
+    const target = defineDocType({
+      name: "Target",
+      fields: [{ name: "title", type: "text" }]
+    });
+    const automationSource = (targetDoctype: string, patchField: string) => defineDocType({
+      name: "Source",
+      fields: [{ name: "title", type: "text" }],
+      automationRules: [{
+        id: "sync",
+        name: "Sync",
+        trigger: { events: ["DocumentUpdated"] },
+        actions: [{
+          id: "update",
+          kind: "updateDocument",
+          target: { doctype: targetDoctype, name: { kind: "documentName" } },
+          patch: { [patchField]: { kind: "literal", value: "Updated" } }
+        }]
+      }]
+    });
+
+    expect(() => createRegistry({ doctypes: [automationSource("Missing", "title")] }))
+      .toThrow("targets unregistered DocType 'Missing'");
+    expect(() => createRegistry({ doctypes: [target, automationSource("Target", "titel")] }))
+      .toThrow("patch field 'titel' is not defined on DocType 'Target'");
+  });
+
+  it("rejects Automation patches that violate static target field constraints", () => {
+    const constrainedTarget = defineDocType({
+      name: "Constrained Target",
+      fields: [
+        { name: "locked", type: "text", readOnly: true },
+        { name: "priority", type: "select", options: ["Low", "High"] },
+        { name: "status", type: "select", options: ["Open", "Done"] }
+      ],
+      workflows: [{
+        name: "lifecycle",
+        stateField: "status",
+        initialState: "Open",
+        states: ["Open", "Done"],
+        transitions: [{ action: "finish", from: "Open", to: "Done", roles: ["User"] }]
+      }]
+    });
+    const automationSource = (field: string, value: string) => defineDocType({
+      name: "Source",
+      fields: [{ name: "title", type: "text" }],
+      automationRules: [{
+        id: "sync",
+        name: "Sync",
+        trigger: { events: ["DocumentUpdated"] },
+        actions: [{
+          id: "update",
+          kind: "updateDocument",
+          target: { doctype: "Constrained Target", name: { kind: "documentName" } },
+          patch: { [field]: { kind: "literal", value } }
+        }]
+      }]
+    });
+
+    expect(() => createRegistry({ doctypes: [constrainedTarget, automationSource("locked", "Updated")] }))
+      .toThrow("patch field 'locked' is read only");
+    expect(() => createRegistry({ doctypes: [constrainedTarget, automationSource("status", "Done")] }))
+      .toThrow("patch field 'status' is controlled by a Workflow");
+    expect(() => createRegistry({ doctypes: [constrainedTarget, automationSource("priority", "Urgent")] }))
+      .toThrow("must be one of Low, High");
+  });
 });

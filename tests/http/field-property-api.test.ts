@@ -10,6 +10,7 @@ import {
   type DocTypeDefinition
 } from "../../src";
 import { createServices, now } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 const adminHeaders = {
   "content-type": "application/json",
@@ -37,9 +38,9 @@ describe("field property api", () => {
           label: "Urgency",
           description: "Pick the operational urgency.",
           placeholder: "Choose a priority",
-          mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
-          readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
-          hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
+          mandatoryDependsOn: afterField("title", "set", "is"),
+          readOnlyDependsOn: afterField("workflow_state", "Closed"),
+          hiddenDependsOn: afterField("title", "not set", "is"),
           printHide: true,
           printHideIfNoValue: true,
           noCopy: true,
@@ -61,9 +62,9 @@ describe("field property api", () => {
               label: "Urgency",
               description: "Pick the operational urgency.",
               placeholder: "Choose a priority",
-              mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
-              readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
-              hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
+              mandatoryDependsOn: afterField("title", "set", "is"),
+              readOnlyDependsOn: afterField("workflow_state", "Closed"),
+              hiddenDependsOn: afterField("title", "not set", "is"),
               printHide: true,
               printHideIfNoValue: true,
               noCopy: true,
@@ -85,9 +86,9 @@ describe("field property api", () => {
             label: "Urgency",
             description: "Pick the operational urgency.",
             placeholder: "Choose a priority",
-            mandatoryDependsOn: { field: "title", operator: "is", value: "set" },
-            readOnlyDependsOn: { field: "workflow_state", value: "Closed" },
-            hiddenDependsOn: { field: "title", operator: "is", value: "not set" },
+            mandatoryDependsOn: afterField("title", "set", "is"),
+            readOnlyDependsOn: afterField("workflow_state", "Closed"),
+            hiddenDependsOn: afterField("title", "not set", "is"),
             printHide: true,
             printHideIfNoValue: true,
             noCopy: true,

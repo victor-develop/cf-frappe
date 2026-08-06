@@ -4,6 +4,8 @@ import type { DocTypeName, DocumentData, DomainEvent } from "../core/types.js";
 export type DocumentCommandEventPayload =
   | {
       readonly kind: "WorkflowTransitioned";
+      readonly workflow: string;
+      readonly stateField: string;
       readonly action: string;
       readonly from: string;
       readonly to: string;
@@ -14,7 +16,16 @@ export type DocumentCommandEventPayload =
       readonly command: string;
       readonly input: DocumentData;
       readonly patch: DocumentData;
+      readonly transitions: readonly DomainCommandTransitionFact[];
     };
+
+export interface DomainCommandTransitionFact {
+  readonly workflow: string;
+  readonly stateField: string;
+  readonly action: string;
+  readonly from: string;
+  readonly to: string;
+}
 
 export type DocumentCommandPayloadKind = DocumentCommandEventPayload["kind"];
 
@@ -26,6 +37,8 @@ export const DOCUMENT_COMMAND_PAYLOAD_KINDS = Object.freeze([
 const DOCUMENT_COMMAND_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_COMMAND_PAYLOAD_KINDS);
 
 export interface WorkflowTransitionPayloadInput {
+  readonly workflow: string;
+  readonly stateField: string;
   readonly action: string;
   readonly from: string;
   readonly to: string;
@@ -36,6 +49,7 @@ export interface DomainCommandAppliedPayloadInput {
   readonly command: string;
   readonly input: DocumentData;
   readonly patch: DocumentData;
+  readonly transitions?: readonly DomainCommandTransitionFact[];
 }
 
 export function workflowTransitionedPayload(
@@ -43,6 +57,8 @@ export function workflowTransitionedPayload(
 ): Extract<DocumentCommandEventPayload, { readonly kind: "WorkflowTransitioned" }> {
   return {
     kind: "WorkflowTransitioned",
+    workflow: input.workflow,
+    stateField: input.stateField,
     action: input.action,
     from: input.from,
     to: input.to,
@@ -57,18 +73,21 @@ export function domainCommandAppliedPayload(
     kind: "DomainCommandApplied",
     command: input.command,
     input: input.input,
-    patch: input.patch
+    patch: input.patch,
+    transitions: Object.freeze([...(input.transitions ?? [])])
   };
 }
 
 export interface WorkflowTransitionEventTypeOptions {
   readonly doctypeName: DocTypeName;
+  readonly workflow: string;
   readonly action: string;
   readonly transitionEventType?: string | undefined;
 }
 
 export function workflowTransitionEventType(options: WorkflowTransitionEventTypeOptions): string {
-  return options.transitionEventType ?? `${options.doctypeName}${capitalizeAction(options.action)}`;
+  return options.transitionEventType ??
+    `${options.doctypeName}${capitalizeAction(options.workflow)}${capitalizeAction(options.action)}`;
 }
 
 export function isDocumentCommandPayloadKind(kind: string): kind is DocumentCommandPayloadKind {

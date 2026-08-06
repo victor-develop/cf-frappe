@@ -1,195 +1,129 @@
+import { describe, expect, it } from "vitest";
+
 import {
-  foldWorkflowDefinition,
-  isWorkflowEvent,
-  isWorkflowPayloadKind,
-  replayWorkflowDefinitionAppend,
-  WORKFLOW_DEFINITION_PAYLOAD_KINDS,
-  workflowDefinitionClearedPayload,
-  workflowDefinitionEvent,
-  workflowDefinitionEventType,
-  workflowDefinitionSavedPayload,
-  workflowEventsVisibleAt
+  NAMED_WORKFLOW_PAYLOAD_KINDS,
+  foldNamedWorkflowDefinition,
+  isNamedWorkflowEvent,
+  isNamedWorkflowPayloadKind,
+  namedWorkflowClearedPayload,
+  namedWorkflowDefinitionEvent,
+  namedWorkflowDefinitionEventType,
+  namedWorkflowEventsVisibleAt,
+  namedWorkflowSavedPayload,
+  namedWorkflowStream,
+  replayNamedWorkflowAppend,
+  type DomainEvent,
+  type NamedWorkflowDefinition
 } from "../../src";
-import type { WorkflowEventPayload } from "../../src";
-import type { DomainEvent, WorkflowDefinition } from "../../src";
 
-const admin = {
-  id: "admin@example.com",
-  roles: ["System Manager", "User"],
-  tenantId: "acme"
+const workflow: NamedWorkflowDefinition = {
+  name: "review",
+  stateField: "review_state",
+  initialState: "Pending",
+  states: ["Pending", "Approved"],
+  transitions: [{ action: "approve", from: "Pending", to: "Approved" }]
 };
 
-const workflow: WorkflowDefinition = {
-  initialState: "Open",
-  states: ["Open", "Closed"],
-  transitions: [{ action: "approve", from: "Open", to: "Closed", roles: ["User"], eventType: "NoteApproved" }]
-};
-
-describe("workflow events", () => {
-  it("derives workflow definition event types from payload identity", () => {
-    expect(workflowDefinitionEventType({
-      kind: "WorkflowDefinitionSaved",
-      doctypeName: "Note",
+describe("named workflow events", () => {
+  it("builds workflow-qualified saved and cleared payloads", () => {
+    expect(namedWorkflowSavedPayload({ doctypeName: "Task", workflow })).toEqual({
+      kind: "NamedWorkflowSaved",
+      doctypeName: "Task",
+      workflowName: "review",
       workflow
-    })).toBe("WorkflowDefinitionSaved");
-    expect(workflowDefinitionEventType({
-      kind: "WorkflowDefinitionCleared",
-      doctypeName: "Note"
-    })).toBe("WorkflowDefinitionCleared");
-  });
-
-  it("builds saved workflow definition payloads", () => {
-    expect(workflowPayload(workflowDefinitionSavedPayload({
-      doctypeName: "Note",
-      workflow
-    }))).toEqual({
-      kind: "WorkflowDefinitionSaved",
-      doctypeName: "Note",
-      workflow
+    });
+    expect(namedWorkflowClearedPayload({ doctypeName: "Task", workflowName: "review" })).toEqual({
+      kind: "NamedWorkflowCleared",
+      doctypeName: "Task",
+      workflowName: "review"
     });
   });
 
-  it("builds cleared workflow definition payloads", () => {
-    expect(workflowPayload(workflowDefinitionClearedPayload({ doctypeName: "Note" }))).toEqual({
-      kind: "WorkflowDefinitionCleared",
-      doctypeName: "Note"
-    });
-  });
-
-  it("creates typed workflow definition events from payload identity", () => {
-    expect(workflowDefinitionEvent({
-      id: "evt_workflow",
+  it("builds resource-local domain events and narrows by payload kind", () => {
+    const payload = namedWorkflowSavedPayload({ doctypeName: "Task", workflow });
+    const event = namedWorkflowDefinitionEvent({
+      id: "evt-1",
       tenantId: "acme",
-      stream: "acme:__WorkflowDefinitions",
-      actor: admin,
+      stream: namedWorkflowStream("acme", "Task", "review"),
+      actor: { id: "admin", roles: ["System Manager"] },
       occurredAt: "2026-01-01T00:00:00.000Z",
-      payload: {
-        kind: "WorkflowDefinitionSaved",
-        doctypeName: "Note",
-        workflow
-      }
-    })).toMatchObject({
-      id: "evt_workflow",
-      type: "WorkflowDefinitionSaved",
-      doctype: "__Workflows",
-      documentName: "Note",
-      actorId: admin.id,
-      payload: { kind: "WorkflowDefinitionSaved", doctypeName: "Note" },
-      metadata: {}
+      payload,
+      metadata: { source: "test" }
     });
+
+    expect(event).toMatchObject({
+      type: "NamedWorkflowSaved",
+      doctype: "__NamedWorkflows",
+      documentName: "Task:review",
+      payload,
+      metadata: { source: "test" }
+    });
+    expect(namedWorkflowDefinitionEventType(payload)).toBe("NamedWorkflowSaved");
+    expect(isNamedWorkflowEvent({ ...event, sequence: 1 })).toBe(true);
+    expect(isNamedWorkflowEvent(otherEvent())).toBe(false);
   });
 
-  it("replays appended events against the previous stream prefix", () => {
-    const previous = [savedEvent(1, workflow)];
-    const state = foldWorkflowDefinition("acme", "Note", previous);
-    const replayed = replayWorkflowDefinitionAppend(state, previous, [clearedEvent(2)]);
-
-    expect(replayed).toMatchObject({ tenantId: "acme", doctypeName: "Note", version: 2 });
-    expect(replayed.workflow).toBeUndefined();
+  it("exposes only the new event contract", () => {
+    expect(NAMED_WORKFLOW_PAYLOAD_KINDS).toEqual(["NamedWorkflowSaved", "NamedWorkflowCleared"]);
+    expect(isNamedWorkflowPayloadKind("NamedWorkflowCleared")).toBe(true);
+    expect(isNamedWorkflowPayloadKind("WorkflowDefinitionCleared")).toBe(false);
   });
 
-  it("folds workflow definition state by payload kind when event type names are custom", () => {
-    const misleadingUnrelated = otherEvent({ kind: "DocumentDeleted" }, "WorkflowDefinitionSaved");
-    const customTypedSaved = {
-      ...savedEvent(2, workflow),
-      type: "NoteWorkflowConfigured"
-    };
+  it("filters history by time and replays appended events", () => {
+    const saved = savedEvent(1, "2026-01-01T00:00:00.000Z");
+    const cleared = clearedEvent(2, "2026-01-02T00:00:00.000Z");
+    const state = foldNamedWorkflowDefinition("acme", "Task", "review", [saved]);
 
-    const state = foldWorkflowDefinition("acme", "Note", [misleadingUnrelated, customTypedSaved]);
-
-    expect(state.version).toBe(2);
-    expect(state.workflow).toEqual(workflow);
-  });
-
-  it("filters workflow events by occurrence time for temporal reads", () => {
-    const events = [
-      savedEvent(1, workflow, "2026-01-01T00:00:00.000Z"),
-      clearedEvent(2, "2026-01-01T00:05:00.000Z")
-    ];
-
-    expect(workflowEventsVisibleAt(events, "2026-01-01T00:01:00.000Z").map((event) => event.sequence)).toEqual([1]);
-    expect(workflowEventsVisibleAt(events, undefined).map((event) => event.sequence)).toEqual([1, 2]);
-  });
-
-  it("exposes the bounded workflow payload kind set", () => {
-    expect(WORKFLOW_DEFINITION_PAYLOAD_KINDS).toEqual([
-      "WorkflowDefinitionSaved",
-      "WorkflowDefinitionCleared"
-    ]);
-  });
-
-  it("narrows workflow events by payload kind when event type names are custom", () => {
-    const saved = {
-      ...savedEvent(1, workflow),
-      type: "NoteWorkflowConfigured"
-    };
-
-    expect(isWorkflowPayloadKind("WorkflowDefinitionSaved")).toBe(true);
-    expect(isWorkflowPayloadKind("DocumentDeleted")).toBe(false);
-    expect(isWorkflowEvent(saved)).toBe(true);
-    expect(isWorkflowEvent(otherEvent({ kind: "DocumentDeleted" }))).toBe(false);
+    expect(namedWorkflowEventsVisibleAt([saved, cleared], undefined)).toEqual([saved, cleared]);
+    expect(namedWorkflowEventsVisibleAt([saved, cleared], "2026-01-01T12:00:00.000Z")).toEqual([saved]);
+    expect(replayNamedWorkflowAppend(state, [saved], [cleared])).toMatchObject({
+      workflowName: "review",
+      version: 2,
+      cleared: true
+    });
   });
 });
 
-function workflowPayload(payload: WorkflowEventPayload): WorkflowEventPayload {
-  return payload;
+function savedEvent(sequence: number, occurredAt: string): DomainEvent {
+  return {
+    ...namedWorkflowDefinitionEvent({
+      id: `evt-${String(sequence)}`,
+      tenantId: "acme",
+      stream: namedWorkflowStream("acme", "Task", "review"),
+      actor: { id: "admin", roles: ["System Manager"] },
+      occurredAt,
+      payload: namedWorkflowSavedPayload({ doctypeName: "Task", workflow })
+    }),
+    sequence
+  };
 }
 
-function otherEvent(payload: DomainEvent["payload"], type: string = payload.kind): DomainEvent {
+function clearedEvent(sequence: number, occurredAt: string): DomainEvent {
   return {
-    id: "evt_other",
+    ...namedWorkflowDefinitionEvent({
+      id: `evt-${String(sequence)}`,
+      tenantId: "acme",
+      stream: namedWorkflowStream("acme", "Task", "review"),
+      actor: { id: "admin", roles: ["System Manager"] },
+      occurredAt,
+      payload: namedWorkflowClearedPayload({ doctypeName: "Task", workflowName: "review" })
+    }),
+    sequence
+  };
+}
+
+function otherEvent(): DomainEvent {
+  return {
+    id: "evt-other",
     tenantId: "acme",
-    stream: "acme:Note:NOTE-1",
+    stream: "acme:Task:TASK-1",
     sequence: 1,
-    type,
-    doctype: "Note",
-    documentName: "NOTE-1",
-    actorId: admin.id,
+    type: "DocumentDeleted",
+    doctype: "Task",
+    documentName: "TASK-1",
+    actorId: "admin",
     occurredAt: "2026-01-01T00:00:00.000Z",
-    payload,
-    metadata: {}
-  };
-}
-
-function savedEvent(
-  sequence: number,
-  definition: WorkflowDefinition,
-  occurredAt = "2026-01-01T00:00:00.000Z"
-): DomainEvent {
-  return {
-    id: `evt_${sequence}`,
-    tenantId: "acme",
-    stream: "acme:__WorkflowDefinitions",
-    sequence,
-    type: "WorkflowDefinitionSaved",
-    doctype: "__Workflows",
-    documentName: "Note",
-    actorId: admin.id,
-    occurredAt,
-    payload: {
-      kind: "WorkflowDefinitionSaved",
-      doctypeName: "Note",
-      workflow: definition
-    },
-    metadata: {}
-  };
-}
-
-function clearedEvent(sequence: number, occurredAt = "2026-01-01T00:05:00.000Z"): DomainEvent {
-  return {
-    id: `evt_${sequence}`,
-    tenantId: "acme",
-    stream: "acme:__WorkflowDefinitions",
-    sequence,
-    type: "WorkflowDefinitionCleared",
-    doctype: "__Workflows",
-    documentName: "Note",
-    actorId: admin.id,
-    occurredAt,
-    payload: {
-      kind: "WorkflowDefinitionCleared",
-      doctypeName: "Note"
-    },
+    payload: { kind: "DocumentDeleted" },
     metadata: {}
   };
 }

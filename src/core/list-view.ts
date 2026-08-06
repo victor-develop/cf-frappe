@@ -1,4 +1,9 @@
 import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
+import {
+  evaluatePredicateExpression,
+  normalizePredicateExpression,
+  predicateExpressionFromListFilterExpression
+} from "./predicates.js";
 import type {
   DocTypeDefinition,
   DocumentSnapshot,
@@ -17,6 +22,7 @@ import type {
   ListFilterOperatorOption,
   ListOrderDirection,
   ListOrderOption,
+  PredicateExpression,
   ResolvedListView
 } from "./types.js";
 
@@ -219,18 +225,28 @@ export function normalizeListFilterExpression(
   doctype: DocTypeDefinition,
   expression: ListFilterExpression,
   options: NormalizeListFiltersOptions = {}
-): ListFilterExpression {
+): PredicateExpression {
   const errorCode = options.errorCode ?? "BAD_REQUEST";
   const budget: ListFilterExpressionBudget = {
     remaining: options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES
   };
-  return normalizeListFilterExpressionNode(doctype, fieldMap(doctype), expression, {
+  const predicate = normalizeListFilterExpressionNode(doctype, fieldMap(doctype), expression, {
     budget,
     depth: 1,
     errorCode,
     maxDepth: options.maxExpressionDepth ?? MAX_LIST_FILTER_EXPRESSION_DEPTH,
     maxNodes: options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES
   });
+  return normalizePredicateExpression(
+    doctype,
+    predicate,
+    {
+      availableScopes: ["after"],
+      errorCode,
+      maxDepth: options.maxExpressionDepth ?? MAX_LIST_FILTER_EXPRESSION_DEPTH,
+      maxNodes: options.maxExpressionNodes ?? MAX_LIST_FILTER_EXPRESSION_NODES
+    }
+  );
 }
 
 export function assertListFilterExpressionShape(
@@ -365,19 +381,18 @@ export function andListFilterExpressions(
   };
 }
 
-export function matchesListFilterExpression(
+export function matchesPredicateExpression(
   document: DocumentSnapshot,
-  expression: ListFilterExpression | undefined
+  expression: PredicateExpression | undefined
 ): boolean {
   if (expression === undefined) {
     return true;
   }
-  if (isListFilterGroup(expression)) {
-    return expression.match === "all"
-      ? expression.filters.every((filter) => matchesListFilterExpression(document, filter))
-      : expression.filters.some((filter) => matchesListFilterExpression(document, filter));
-  }
-  return matchesListFilterPredicate(document, expression);
+  return evaluatePredicateExpression(expression, {
+    before: null,
+    after: document,
+    input: {}
+  });
 }
 
 export function mergeListFilters(
@@ -420,7 +435,7 @@ function normalizeListFilterExpressionNode(
     readonly maxDepth: number;
     readonly maxNodes: number;
   }
-): ListFilterExpression {
+): PredicateExpression {
   options.budget.remaining -= 1;
   if (options.budget.remaining < 0) {
     throw new FrameworkError(
@@ -445,18 +460,20 @@ function normalizeListFilterExpressionNode(
         status: 400
       });
     }
-    return {
+    return Object.freeze({
       kind: "group",
       match: expression.match,
-      filters: expression.filters.map((filter) =>
+      predicates: Object.freeze(expression.filters.map((filter) =>
         normalizeListFilterExpressionNode(doctype, fields, filter, {
           ...options,
           depth: options.depth + 1
         })
-      )
-    };
+      ))
+    });
   }
-  return normalizeListFilterPredicate(doctype, fields, expression, options.errorCode);
+  return predicateExpressionFromListFilterExpression(
+    normalizeListFilterPredicate(doctype, fields, expression, options.errorCode)
+  );
 }
 
 function normalizeListFilterPredicate(
@@ -492,90 +509,6 @@ function normalizeListFilterPredicate(
   };
 }
 
-function matchesListFilterPredicate(document: DocumentSnapshot, filter: ListDocumentsFilter): boolean {
-  const actual = listFilterDocumentValue(document, filter.field);
-  switch (filter.operator ?? "eq") {
-    case "eq":
-      return actual === scalarFilterValue(filter);
-    case "ne":
-      return actual !== undefined && actual !== null && actual !== scalarFilterValue(filter);
-    case "in":
-      return actual !== undefined && actual !== null && arrayIncludes(filter.value, actual);
-    case "not_in":
-      return actual !== undefined && actual !== null && !arrayIncludes(filter.value, actual);
-    case "is":
-      return presenceFilterValue(filter) === "set"
-        ? actual !== undefined && actual !== null
-        : actual === undefined || actual === null;
-    case "contains":
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      return String(actual).toLowerCase().includes(String(scalarFilterValue(filter)).toLowerCase());
-    case "like":
-      return actual !== undefined && actual !== null && likePatternMatches(actual, patternFilterValue(filter));
-    case "not_like":
-      return actual !== undefined && actual !== null && !likePatternMatches(actual, patternFilterValue(filter));
-    case "gt":
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      return compareValues(actual, scalarFilterValue(filter)) > 0;
-    case "gte":
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      return compareValues(actual, scalarFilterValue(filter)) >= 0;
-    case "lt":
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      return compareValues(actual, scalarFilterValue(filter)) < 0;
-    case "lte":
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      return compareValues(actual, scalarFilterValue(filter)) <= 0;
-    case "between": {
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      const [minimum, maximum] = rangeFilterValues(filter);
-      return compareValues(actual, minimum) >= 0 && compareValues(actual, maximum) <= 0;
-    }
-    case "not_between": {
-      if (actual === undefined || actual === null) {
-        return false;
-      }
-      const [minimum, maximum] = rangeFilterValues(filter);
-      return compareValues(actual, minimum) < 0 || compareValues(actual, maximum) > 0;
-    }
-  }
-}
-
-function listFilterDocumentValue(document: DocumentSnapshot, field: string): JsonValue | undefined {
-  if (field === "system.name") {
-    return document.name;
-  }
-  if (field === "system.docstatus") {
-    return document.docstatus;
-  }
-  if (field === "system.createdAt") {
-    return document.createdAt;
-  }
-  if (field === "system.updatedAt") {
-    return document.updatedAt;
-  }
-  if (field === "system.version") {
-    return document.version;
-  }
-  return document.data[field];
-}
-
-function arrayIncludes(expected: ListDocumentsFilter["value"], actual: JsonValue): boolean {
-  return Array.isArray(expected) && expected.some((value) => actual === value);
-}
-
 function scalarFilterValue(filter: ListDocumentsFilter): JsonPrimitive {
   if (isFilterValueArray(filter.value)) {
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a scalar value`);
@@ -590,49 +523,6 @@ function presenceFilterValue(filter: ListDocumentsFilter): "set" | "not set" {
   throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires set or not set`);
 }
 
-function patternFilterValue(filter: ListDocumentsFilter): string {
-  const value = scalarFilterValue(filter);
-  if (value === null) {
-    throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires a non-null pattern value`);
-  }
-  return String(value);
-}
-
-function likePatternMatches(actual: JsonValue, pattern: string): boolean {
-  return new RegExp(`^${likePatternRegex(pattern)}$`, "i").test(String(actual));
-}
-
-function likePatternRegex(pattern: string): string {
-  let regex = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    if (char === "\\") {
-      const next = pattern[index + 1];
-      if (next === undefined) {
-        regex += "(?!)";
-        continue;
-      }
-      regex += escapeRegex(next);
-      index += 1;
-      continue;
-    }
-    if (char === "%") {
-      regex += "[\\s\\S]*";
-      continue;
-    }
-    if (char === "_") {
-      regex += "[\\s\\S]";
-      continue;
-    }
-    regex += escapeRegex(char ?? "");
-  }
-  return regex;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-}
-
 function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive, JsonPrimitive] {
   if (!isFilterValueArray(filter.value) || filter.value.length !== 2) {
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires exactly two values`);
@@ -643,13 +533,6 @@ function rangeFilterValues(filter: ListDocumentsFilter): readonly [JsonPrimitive
     throw new Error(`List filter operator '${filter.operator ?? "eq"}' requires non-null range values`);
   }
   return [minimum, maximum];
-}
-
-function compareValues(actual: JsonValue | undefined, expected: JsonPrimitive): number {
-  if (typeof actual === "number" && typeof expected === "number") {
-    return actual - expected;
-  }
-  return String(actual ?? "").localeCompare(String(expected));
 }
 
 function resolveListColumns(doctype: DocTypeDefinition): readonly FieldDefinition[] {

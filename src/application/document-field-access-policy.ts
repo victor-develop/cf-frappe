@@ -56,6 +56,13 @@ export interface DocumentFieldWriteOptions {
   readonly unset?: readonly string[];
 }
 
+export interface DocumentFormFieldAccessProjectionOptions {
+  readonly actor: Actor;
+  readonly doctype: DocTypeDefinition;
+  readonly document: DocumentSnapshot;
+  readonly canUpdateDocument: boolean;
+}
+
 export function projectDocTypeForFieldAccess(
   options: FieldAccessDocTypeProjectionOptions
 ): DocTypeDefinition {
@@ -66,6 +73,37 @@ export function projectDocTypeForFieldAccess(
       field
     })
   );
+  return projectDocTypeFields(options.doctype, fields, options.actor);
+}
+
+export function projectDocTypeForDocumentFormAccess(
+  options: DocumentFormFieldAccessProjectionOptions
+): DocTypeDefinition {
+  const fields = options.doctype.fields
+    .filter((field) =>
+      canFieldAppearInMetadata({
+        actor: options.actor,
+        action: "read",
+        field
+      })
+    )
+    .map((field) => {
+      const value = options.document.data[field.name];
+      const writable = options.canUpdateDocument &&
+        field.readOnly !== true &&
+        canWriteField({
+          actor: options.actor,
+          action: "update",
+          doctype: options.doctype,
+          field,
+          document: options.document,
+          tenantId: options.document.tenantId,
+          ...(value === undefined ? {} : { value })
+        });
+      return writable || field.readOnly === true
+        ? field
+        : Object.freeze({ ...field, readOnly: true });
+    });
   return projectDocTypeFields(options.doctype, fields, options.actor);
 }
 

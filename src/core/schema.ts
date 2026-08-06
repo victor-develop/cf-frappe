@@ -10,22 +10,21 @@ import type {
   MutableDocumentData,
   PermissionRule,
   RetiredIndexDefinition,
-  ValidationIssue,
-  WorkflowDefinition
+  ValidationIssue
 } from "./types.js";
 import { FIELD_PERMISSION_ACTIONS } from "./types.js";
 import { normalizeAssignmentRules } from "./assignment-rules.js";
-import { normalizeAutomationRules } from "./automation-rules.js";
+import { normalizeAutomationRules, type AutomationNormalizationLimits } from "./automation-rules.js";
 import { FrameworkError } from "./errors.js";
 import { assertFormViewDefinition } from "./form-view.js";
 import { cloneJsonValue } from "./json.js";
+import { evaluatePredicateExpression, normalizePredicateExpression } from "./predicates.js";
+import { normalizeNamedWorkflows, type WorkflowNormalizationLimits } from "./workflow.js";
+import { normalizeNamingStrategy } from "./naming.js";
 import {
   assertListViewDefinition,
   freezeListFilter,
-  freezeListFilterExpression,
-  matchesListFilterExpression,
-  normalizeListFilters,
-  normalizeListFilterExpression
+  normalizeListFilters
 } from "./list-view.js";
 
 export interface ValidationOptions {
@@ -34,9 +33,22 @@ export interface ValidationOptions {
   readonly relatedDocType?: (doctype: string) => DocTypeDefinition | undefined;
 }
 
+export interface DocTypeNormalizationOptions {
+  readonly automationLimits?: AutomationNormalizationLimits;
+  readonly workflowLimits?: WorkflowNormalizationLimits;
+}
+
 export function defineDocType<TData extends DocumentData>(
-  definition: DocTypeDefinition<TData>
+  definition: DocTypeDefinition<TData>,
+  options: DocTypeNormalizationOptions = {}
 ): DocTypeDefinition<TData> {
+  if (Object.prototype.hasOwnProperty.call(definition, "workflow")) {
+    throw new FrameworkError(
+      "WORKFLOW_INVALID",
+      `DocType '${definition.name}' uses removed singular Workflow metadata; define named workflows[] instead`,
+      { status: 400 }
+    );
+  }
   assertIdentifier(definition.name, "doctype name");
   const seen = new Set<string>();
   for (const field of definition.fields) {
@@ -54,15 +66,15 @@ export function defineDocType<TData extends DocumentData>(
     assertFieldPermissionRulesDefinition(definition, field);
     seen.add(field.name);
   }
-  assertNamingStrategyDefinition(definition);
+  const naming = definition.naming === undefined ? undefined : normalizeNamingStrategy(definition, definition.naming);
   assertFormViewDefinition(definition);
   assertListViewDefinition(definition);
   const formView = definition.formView ? freezeFormView(definition.formView) : undefined;
   const listView = definition.listView ? freezeListView(definition, definition.listView) : undefined;
   const assignmentRules = normalizeAssignmentRules(definition, definition.assignmentRules);
-  const automationRules = normalizeAutomationRules(definition, definition.automationRules);
+  const automationRules = normalizeAutomationRules(definition, definition.automationRules, options.automationLimits);
   const permissions = definition.permissions ? freezePermissionRules(definition.permissions) : undefined;
-  const workflow = definition.workflow ? freezeWorkflowDefinition(definition.workflow) : undefined;
+  const workflows = normalizeNamedWorkflows(definition, definition.workflows, options.workflowLimits);
   const commands = definition.commands ? freezeCommandDefinitions(definition.commands) : undefined;
   const indexes = definition.indexes ? freezeProjectionIndexes(definition.indexes) : undefined;
   const retiredIndexes = definition.retiredIndexes ? freezeRetiredIndexes(definition.retiredIndexes) : undefined;
@@ -70,10 +82,11 @@ export function defineDocType<TData extends DocumentData>(
   return Object.freeze({
     ...definition,
     fields,
+    ...(naming ? { naming } : {}),
     ...(formView ? { formView } : {}),
     ...(listView ? { listView } : {}),
     ...(permissions ? { permissions } : {}),
-    ...(workflow ? { workflow } : {}),
+    ...(workflows ? { workflows } : {}),
     ...(commands ? { commands } : {}),
     ...(indexes ? { indexes } : {}),
     ...(retiredIndexes ? { retiredIndexes } : {}),
@@ -95,10 +108,9 @@ export function applyDefaults(
     const defaultValue = typeof field.defaultValue === "function" ? field.defaultValue(context) : field.defaultValue;
     data[field.name] = cloneJsonValue(defaultValue);
   }
-  if (definition.workflow) {
-    const stateField = definition.workflow.stateField ?? "workflow_state";
-    if (data[stateField] === undefined) {
-      data[stateField] = definition.workflow.initialState;
+  for (const workflow of definition.workflows ?? []) {
+    if (data[workflow.stateField] === undefined) {
+      data[workflow.stateField] = workflow.initialState;
     }
   }
   return compactData(data);
@@ -140,7 +152,11 @@ export function validateDocumentData(
       finalValue === "" ||
       (field.type === "table" && Array.isArray(finalValue) && finalValue.length === 0);
     const mandatoryByDependency = field.mandatoryDependsOn !== undefined &&
-      matchesListFilterExpression(validationDocument, field.mandatoryDependsOn);
+      evaluatePredicateExpression(field.mandatoryDependsOn, {
+        before: null,
+        after: validationDocument,
+        input: compactData(input)
+      });
     if (
       (field.required && isMissing && (!options.partial || !isOmitted)) ||
       (mandatoryByDependency && isFinalMissing)
@@ -284,20 +300,6 @@ function assertIdentifier(value: string, label: string): void {
   }
 }
 
-function assertNamingStrategyDefinition(doctype: DocTypeDefinition): void {
-  const naming = doctype.naming;
-  if (!naming || naming.kind !== "series") {
-    return;
-  }
-  if (naming.pattern.trim().length === 0 || !/#+/.test(naming.pattern)) {
-    throw new FrameworkError(
-      "DOCTYPE_NAMING_INVALID",
-      `Naming series on ${doctype.name} must include at least one # placeholder`,
-      { status: 400 }
-    );
-  }
-}
-
 function assertLinkFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
   if (field.type === "link") {
     if (!field.linkTo) {
@@ -394,21 +396,30 @@ function assertMandatoryDependsOnDefinition(doctype: DocTypeDefinition, field: F
   if (field.mandatoryDependsOn === undefined) {
     return;
   }
-  normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
+  normalizePredicateExpression(doctype, field.mandatoryDependsOn, {
+    availableScopes: ["after"],
+    errorCode: "DOCTYPE_FIELD_INVALID"
+  });
 }
 
 function assertReadOnlyDependsOnDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
   if (field.readOnlyDependsOn === undefined) {
     return;
   }
-  normalizeListFilterExpression(doctype, field.readOnlyDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
+  normalizePredicateExpression(doctype, field.readOnlyDependsOn, {
+    availableScopes: ["after"],
+    errorCode: "DOCTYPE_FIELD_INVALID"
+  });
 }
 
 function assertHiddenDependsOnDefinition(doctype: DocTypeDefinition, field: FieldDefinition): void {
   if (field.hiddenDependsOn === undefined) {
     return;
   }
-  normalizeListFilterExpression(doctype, field.hiddenDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" });
+  normalizePredicateExpression(doctype, field.hiddenDependsOn, {
+    availableScopes: ["after"],
+    errorCode: "DOCTYPE_FIELD_INVALID"
+  });
 }
 
 function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinition): FieldDefinition {
@@ -423,23 +434,26 @@ function freezeFieldDefinition(doctype: DocTypeDefinition, field: FieldDefinitio
     ...(field.mandatoryDependsOn === undefined
       ? {}
       : {
-          mandatoryDependsOn: freezeListFilterExpression(
-            normalizeListFilterExpression(doctype, field.mandatoryDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
-          )
+          mandatoryDependsOn: normalizePredicateExpression(doctype, field.mandatoryDependsOn, {
+            availableScopes: ["after"],
+            errorCode: "DOCTYPE_FIELD_INVALID"
+          })
         }),
     ...(field.readOnlyDependsOn === undefined
       ? {}
       : {
-          readOnlyDependsOn: freezeListFilterExpression(
-            normalizeListFilterExpression(doctype, field.readOnlyDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
-          )
+          readOnlyDependsOn: normalizePredicateExpression(doctype, field.readOnlyDependsOn, {
+            availableScopes: ["after"],
+            errorCode: "DOCTYPE_FIELD_INVALID"
+          })
         }),
     ...(field.hiddenDependsOn === undefined
       ? {}
       : {
-          hiddenDependsOn: freezeListFilterExpression(
-            normalizeListFilterExpression(doctype, field.hiddenDependsOn, { errorCode: "DOCTYPE_FIELD_INVALID" })
-          )
+          hiddenDependsOn: normalizePredicateExpression(doctype, field.hiddenDependsOn, {
+            availableScopes: ["after"],
+            errorCode: "DOCTYPE_FIELD_INVALID"
+          })
         }),
     ...(field.permissions === undefined ? {} : { permissions: freezeFieldPermissionRules(doctype, field) })
   });
@@ -582,22 +596,12 @@ function freezePermissionRules(permissions: readonly PermissionRule[]): readonly
   );
 }
 
-function freezeWorkflowDefinition(workflow: WorkflowDefinition): WorkflowDefinition {
-  return Object.freeze({
-    ...workflow,
-    states: Object.freeze([...workflow.states]),
-    transitions: Object.freeze(
-      workflow.transitions.map((transition) =>
-        Object.freeze({
-          ...transition,
-          ...(transition.roles === undefined ? {} : { roles: Object.freeze([...transition.roles]) })
-        })
-      )
-    )
-  });
-}
-
 function freezeCommandDefinitions(commands: readonly DomainCommandDefinition[]): readonly DomainCommandDefinition[] {
+  for (const command of commands) {
+    if (command.buildPatch !== undefined && command.buildPlan !== undefined) {
+      throw new Error(`Domain command '${command.name}' cannot define both buildPatch and buildPlan`);
+    }
+  }
   return Object.freeze(
     commands.map((command) =>
       Object.freeze({

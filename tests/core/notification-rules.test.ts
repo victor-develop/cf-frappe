@@ -8,6 +8,7 @@ import {
   type NotificationRuleDefinition
 } from "../../src";
 import { noteDocType, now, owner } from "../helpers";
+import { afterField } from "../predicate-fixtures.js";
 
 describe("notification rules", () => {
   it("folds saved and cleared notification rule metadata events", () => {
@@ -64,7 +65,7 @@ describe("notification rules", () => {
         { kind: "user", userId: " support@example.com " }
       ],
       channels: ["email", "inbox"],
-      condition: { field: "priority", value: "High" },
+      condition: afterField("priority", "High"),
       subject: "  {{ doctype }} {{ name }} changed  ",
       excludeActor: false
     });
@@ -79,7 +80,7 @@ describe("notification rules", () => {
         { kind: "user", userId: "support@example.com" }
       ],
       channels: ["email", "inbox"],
-      condition: { field: "priority", value: "High" },
+      condition: afterField("priority", "High"),
       subject: "{{ doctype }} {{ name }} changed",
       excludeActor: false
     });
@@ -110,9 +111,9 @@ describe("notification rules", () => {
         name: "Bad condition",
         events: ["DocumentUpdated"],
         recipients: [{ kind: "user", userId: "support@example.com" }],
-        condition: { field: "metadata", value: "x" }
+        condition: afterField("metadata", "x")
       })
-    ).toThrow("Filter field 'metadata' is not defined on Note");
+    ).toThrow("Predicate field 'metadata' is not defined on Note");
   });
 
   it("evaluates matching rules into deduplicated user notification payloads", () => {
@@ -161,7 +162,7 @@ describe("notification rules", () => {
       name: "High priority alert",
       events: ["DocumentUpdated"],
       recipients: [{ kind: "user", userId: "manager@example.com" }],
-      condition: { field: "priority", value: "High" }
+      condition: afterField("priority", "High")
     });
 
     expect(
@@ -276,6 +277,45 @@ describe("notification rules", () => {
         text: expect.stringContaining("Event: DocumentSubmitted")
       }
     ]);
+  });
+
+  it("carries named workflow identity into inbox and email outputs", () => {
+    const event: DomainEvent = {
+      ...documentEvent("evt_transition", "DocumentUpdated"),
+      type: "NoteReviewApproved",
+      payload: {
+        kind: "WorkflowTransitioned",
+        workflow: "review",
+        stateField: "review_state",
+        action: "approve",
+        from: "Pending",
+        to: "Approved",
+        patch: { review_state: "Approved" }
+      }
+    };
+    const snapshot = noteSnapshot({ created_by: owner.id });
+    const rule = normalizeNotificationRule(noteDocType, {
+      name: "Workflow alert",
+      events: ["WorkflowTransitioned"],
+      recipients: [{ kind: "user", userId: "reviewer@example.com" }],
+      channels: ["inbox", "email"]
+    });
+    const identity = {
+      workflowName: "review",
+      workflowAction: "approve",
+      workflowTransitions: [{
+        workflow: "review",
+        stateField: "review_state",
+        action: "approve",
+        from: "Pending",
+        to: "Approved"
+      }]
+    };
+
+    expect(notificationRuleUserNotificationsFromDomainEvent({ event, snapshot, rules: [rule] }))
+      .toMatchObject([{ recipientId: "reviewer@example.com", ...identity }]);
+    expect(notificationRuleEmailNotificationsFromDomainEvent({ event, snapshot, rules: [rule] }))
+      .toMatchObject([{ recipientId: "reviewer@example.com", ...identity }]);
   });
 });
 

@@ -1,4 +1,5 @@
 import { FrameworkError } from "../../core/errors.js";
+import { isCurrentWorkflowTransitionPayload } from "../../core/domain-events.js";
 import { isJsonValue } from "../../core/json.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, JsonValue } from "../../core/types.js";
 import type { JobExecutionRecord } from "../../ports/job-execution-log.js";
@@ -175,5 +176,7 @@ function parseDocumentData(row: DocumentRow, value: string): DocumentData {
 }
 
 function isDomainEventPayload(value: unknown): value is DomainEvent["payload"] {
-  return isJsonRecord(value) && typeof value.kind === "string";
+  return isJsonRecord(value) &&
+    typeof value.kind === "string" &&
+    (value.kind !== "WorkflowTransitioned" || isCurrentWorkflowTransitionPayload(value));
 }

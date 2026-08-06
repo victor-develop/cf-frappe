@@ -1,5 +1,5 @@
 import { FrameworkError } from "../core/errors.js";
-import { fieldPropertyOverridesStream } from "../core/streams.js";
+import { fieldPropertyOverridesStream, namingConfigurationStream } from "../core/streams.js";
 import {
   applyFieldPropertyOverridesToDocType,
   foldFieldPropertyOverrides,
@@ -39,6 +39,15 @@ import type { ModelRegistry } from "../core/registry.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
+import {
+  applyNamingConfigurationToDocType,
+  foldNamingConfiguration
+} from "../core/naming-configuration.js";
+import {
+  appendMetadataMutation,
+  metadataRevisionVersion,
+  type MetadataMutationStore
+} from "./metadata-revision.js";
 
 export type { FieldPropertyEventPayload } from "./field-property-events.js";
 
@@ -49,7 +58,7 @@ export type PrePropertyDocTypeResolver = (
 
 export interface FieldPropertyServiceOptions {
   readonly registry: ModelRegistry;
-  readonly events: EventStore;
+  readonly events: MetadataMutationStore;
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly adminRoles?: readonly string[];
@@ -77,7 +86,7 @@ export interface ClearFieldPropertyOverrideCommand {
 
 export class FieldPropertyService {
   private readonly registry: ModelRegistry;
-  private readonly events: EventStore;
+  private readonly events: MetadataMutationStore;
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
   private readonly adminRoles: readonly string[];
@@ -113,6 +122,7 @@ export class FieldPropertyService {
 
   async save(command: SaveFieldPropertyOverrideCommand): Promise<FieldPropertyOverrideState> {
     const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
+    const metadataRevision = await metadataRevisionVersion(this.events, tenantId, command.doctype);
     const doctype = await this.prePropertyDocTypeFor(command.doctype, tenantId);
     const field = requireFieldPropertyField(doctype, command.fieldName);
     let overrides = normalizeFieldPropertyOverrides(field, command.overrides);
@@ -121,11 +131,12 @@ export class FieldPropertyService {
     const pending = replaceFieldPropertyOverride(state, field.name, overrides, this.clock.now());
     const effective = applyFieldPropertyOverridesToDocType(doctype, pending);
     overrides = normalizeFieldPropertyOverrideExpressions(effective, field.name, overrides);
+    await this.assertNamingConfigurationRemainsValid(tenantId, effective);
     const existing = findFieldPropertyOverride(state, field.name);
     if (planFieldPropertyOverrideSave(existing, overrides).status === "noop") {
       return state;
     }
-    return this.appendAndFold(state, {
+    return this.appendAndFold(state, metadataRevision, {
       actor: command.actor,
       metadata: command.metadata,
       payload: fieldPropertyOverrideSavedPayload({
@@ -138,6 +149,7 @@ export class FieldPropertyService {
 
   async clear(command: ClearFieldPropertyOverrideCommand): Promise<FieldPropertyOverrideState> {
     const tenantId = this.authorizeAdministration(command.actor, command.tenantId);
+    const metadataRevision = await metadataRevisionVersion(this.events, tenantId, command.doctype);
     const doctype = await this.prePropertyDocTypeFor(command.doctype, tenantId);
     const fieldName = normalizeRequiredFieldPropertyText(command.fieldName, "Field name");
     const state = await this.stateFor(tenantId, doctype.name);
@@ -151,7 +163,15 @@ export class FieldPropertyService {
     if (planFieldPropertyOverrideClear(existing).status === "noop") {
       return state;
     }
-    return this.appendAndFold(state, {
+    const pending = Object.freeze({
+      ...state,
+      fields: Object.freeze(state.fields.filter((entry) => entry.fieldName !== fieldName))
+    });
+    await this.assertNamingConfigurationRemainsValid(
+      tenantId,
+      applyFieldPropertyOverridesToDocType(doctype, pending)
+    );
+    return this.appendAndFold(state, metadataRevision, {
       actor: command.actor,
       metadata: command.metadata,
       payload: fieldPropertyOverrideClearedPayload({
@@ -178,6 +198,7 @@ export class FieldPropertyService {
 
   private async appendAndFold<TPayload extends FieldPropertyEventPayload>(
     state: FieldPropertyOverrideState,
+    metadataRevision: number,
     options: {
       readonly actor: Actor;
       readonly metadata: DocumentData | undefined;
@@ -197,11 +218,30 @@ export class FieldPropertyService {
       payload: options.payload,
       metadata: options.metadata ?? {}
     };
-    const saved = await this.events.append(stream, state.version, [event]);
+    const saved = await appendMetadataMutation(this.events, {
+      tenantId: state.tenantId,
+      doctype: state.doctype,
+      sourceStream: stream,
+      sourceExpectedVersion: state.version,
+      sourceEvent: event,
+      metadataRevision
+    });
     return foldFieldPropertyOverrides(
       state.tenantId,
       state.doctype,
-      [...(await this.events.readStream(stream, { maxSequence: state.version })), ...saved]
+      [...(await this.events.readStream(stream, { maxSequence: state.version })), saved]
     );
+  }
+
+  private async assertNamingConfigurationRemainsValid(
+    tenantId: TenantId,
+    doctype: DocTypeDefinition
+  ): Promise<void> {
+    const namingState = foldNamingConfiguration(
+      tenantId,
+      doctype,
+      await this.events.readStream(namingConfigurationStream(tenantId, doctype.name))
+    );
+    applyNamingConfigurationToDocType(doctype, namingState);
   }
 }

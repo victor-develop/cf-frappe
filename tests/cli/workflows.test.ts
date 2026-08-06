@@ -4,11 +4,28 @@ describe("cf-frappe CLI remote workflows", () => {
   it("parses remote workflow operator commands", () => {
     expect(parseCliArgs([
       "workflows",
+      "list",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Sales Invoice"
+    ])).toEqual({
+      kind: "workflows",
+      action: "list",
+      url: "https://app.example",
+      headers: [],
+      doctype: "Sales Invoice"
+    });
+
+    expect(parseCliArgs([
+      "workflows",
       "get",
       "--url",
       "https://app.example",
       "--doctype",
       "Sales Invoice",
+      "--workflow",
+      "approval",
       "--tenant",
       "acme/east",
       "--header",
@@ -24,7 +41,8 @@ describe("cf-frappe CLI remote workflows", () => {
         { kind: "env", name: "Authorization", envName: "CF_FRAPPE_AUTH" }
       ],
       doctype: "Sales Invoice",
-      tenant: "acme/east"
+      tenant: "acme/east",
+      workflowName: "approval"
     });
 
     expect(parseCliArgs([
@@ -34,8 +52,10 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--workflow-json",
-      "{\"initialState\":\"Open\",\"states\":[\"Open\",\"Done\"],\"transitions\":[{\"action\":\"Finish\",\"from\":\"Open\",\"to\":\"Done\"}]}",
+      "{\"name\":\"lifecycle\",\"stateField\":\"status\",\"initialState\":\"Open\",\"states\":[\"Open\",\"Done\"],\"transitions\":[{\"action\":\"Finish\",\"from\":\"Open\",\"to\":\"Done\"}]}",
       "--expected-version",
       "0"
     ])).toEqual({
@@ -44,7 +64,10 @@ describe("cf-frappe CLI remote workflows", () => {
       url: "https://app.example",
       headers: [],
       doctype: "Task",
+      workflowName: "lifecycle",
       workflow: {
+        name: "lifecycle",
+        stateField: "status",
         initialState: "Open",
         states: ["Open", "Done"],
         transitions: [{ action: "Finish", from: "Open", to: "Done" }]
@@ -59,6 +82,8 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--expected-version",
       "2"
     ])).toEqual({
@@ -67,6 +92,7 @@ describe("cf-frappe CLI remote workflows", () => {
       url: "https://app.example",
       headers: [],
       doctype: "Task",
+      workflowName: "lifecycle",
       expectedVersion: 2
     });
   });
@@ -86,6 +112,30 @@ describe("cf-frappe CLI remote workflows", () => {
     });
     expect(parseCliArgs([
       "workflows",
+      "get",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Workflow get requires --workflow"
+    });
+    expect(parseCliArgs([
+      "workflows",
+      "list",
+      "--url",
+      "https://app.example",
+      "--doctype",
+      "Task",
+      "--workflow",
+      "lifecycle"
+    ])).toEqual({
+      kind: "invalid",
+      message: "Cannot use --workflow with workflows list"
+    });
+    expect(parseCliArgs([
+      "workflows",
       "save",
       "--url",
       "https://app.example",
@@ -102,6 +152,8 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--workflow-json",
       "[]"
     ])).toEqual({
@@ -115,6 +167,8 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--workflow-json",
       "{\"initialState\":\"Open\"}"
     ])).toEqual({
@@ -128,6 +182,8 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--expected-version",
       "1"
     ])).toEqual({
@@ -141,6 +197,8 @@ describe("cf-frappe CLI remote workflows", () => {
       "https://app.example",
       "--doctype",
       "Task",
+      "--workflow",
+      "lifecycle",
       "--expected-version",
       "1.5"
     ])).toEqual({
@@ -149,7 +207,48 @@ describe("cf-frappe CLI remote workflows", () => {
     });
   });
 
-  it("gets remote workflow definitions through the generated admin API", async () => {
+  it("lists and gets remote workflow definitions through the generated admin API", async () => {
+    const listCalls: RemoteCall[] = [];
+    const listStdout = textBuffer();
+    const listExit = await runCli(
+      [
+        "workflows",
+        "list",
+        "--url",
+        "https://app.example/cf",
+        "--doctype",
+        "Sales Invoice"
+      ],
+      {
+        cwd: () => "/workspace",
+        fetch: fakeFetch(listCalls, {
+          data: [
+            {
+              tenantId: "default",
+              doctypeName: "Sales Invoice",
+              workflowName: "approval",
+              version: 2,
+              workflow: {
+                name: "approval",
+                stateField: "approval_status",
+                initialState: "Draft",
+                states: ["Draft", "Approved"],
+                transitions: [{ action: "Approve", from: "Draft", to: "Approved" }]
+              }
+            }
+          ]
+        }),
+        stdout: listStdout,
+        stderr: textBuffer()
+      }
+    );
+
+    expect(listExit).toBe(0);
+    expect(listCalls[0]?.url).toBe("https://app.example/cf/api/workflows/Sales%20Invoice");
+    expect(listCalls[0]?.method).toBe("GET");
+    expect(listStdout.text()).toContain("Workflow definitions at https://app.example/cf");
+    expect(listStdout.text()).toContain("- approval: state approval_status initial Draft states Draft, Approved transitions 1 v2");
+
     const calls: RemoteCall[] = [];
     const stdout = textBuffer();
     const exitCode = await runCli(
@@ -160,6 +259,8 @@ describe("cf-frappe CLI remote workflows", () => {
         "https://app.example/cf",
         "--doctype",
         "Sales Invoice",
+        "--workflow",
+        "approval",
         "--tenant",
         "acme/east",
         "--header-env",
@@ -172,8 +273,10 @@ describe("cf-frappe CLI remote workflows", () => {
           data: {
             tenantId: "acme/east",
             doctypeName: "Sales Invoice",
+            workflowName: "approval",
             version: 2,
             workflow: {
+              name: "approval",
               stateField: "status",
               initialState: "Open",
               states: ["Open", "Closed"],
@@ -189,13 +292,13 @@ describe("cf-frappe CLI remote workflows", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(calls[0]?.url).toBe("https://app.example/cf/api/workflows/Sales%20Invoice?tenant=acme%2Feast");
+    expect(calls[0]?.url).toBe("https://app.example/cf/api/workflows/Sales%20Invoice/approval?tenant=acme%2Feast");
     expect(calls[0]?.method).toBe("GET");
     expect(calls[0]?.headers.get("authorization")).toBe("Bearer test-token");
     expect(stdout.text()).toContain("Workflow definition at https://app.example/cf");
     expect(stdout.text()).toContain("DocType: Sales Invoice Tenant: acme/east Version: 2");
-    expect(stdout.text()).toContain("- state status initial Open states Open, Closed transitions 1");
-    expect(stdout.text()).toContain("{\"stateField\":\"status\"");
+    expect(stdout.text()).toContain("- approval: state status initial Open states Open, Closed transitions 1");
+    expect(stdout.text()).toContain("{\"name\":\"approval\",\"stateField\":\"status\"");
   });
 
   it("saves and clears remote workflow definitions through the generated admin API", async () => {
@@ -209,8 +312,10 @@ describe("cf-frappe CLI remote workflows", () => {
         "https://app.example",
         "--doctype",
         "Task Type",
+        "--workflow",
+        "lifecycle",
         "--workflow-json",
-        "{\"stateField\":\"status\",\"initialState\":\"Open\",\"states\":[\"Open\",\"Closed\"],\"transitions\":[{\"action\":\"Close\",\"from\":\"Open\",\"to\":\"Closed\",\"roles\":[\"Support Manager\"],\"eventType\":\"TaskClosed\"}]}",
+        "{\"name\":\"lifecycle\",\"stateField\":\"status\",\"initialState\":\"Open\",\"states\":[\"Open\",\"Closed\"],\"transitions\":[{\"action\":\"Close\",\"from\":\"Open\",\"to\":\"Closed\",\"roles\":[\"Support Manager\"],\"eventType\":\"TaskClosed\"}]}",
         "--tenant",
         "acme/east",
         "--expected-version",
@@ -222,8 +327,10 @@ describe("cf-frappe CLI remote workflows", () => {
           data: {
             tenantId: "acme/east",
             doctypeName: "Task Type",
+            workflowName: "lifecycle",
             version: 1,
             workflow: {
+              name: "lifecycle",
               stateField: "status",
               initialState: "Open",
               states: ["Open", "Closed"],
@@ -245,10 +352,11 @@ describe("cf-frappe CLI remote workflows", () => {
     );
 
     expect(saveExit).toBe(0);
-    expect(saveCalls[0]?.url).toBe("https://app.example/api/workflows/Task%20Type?tenant=acme%2Feast");
+    expect(saveCalls[0]?.url).toBe("https://app.example/api/workflows/Task%20Type/lifecycle?tenant=acme%2Feast");
     expect(saveCalls[0]?.method).toBe("PUT");
     expect(saveCalls[0]?.body).toBe(JSON.stringify({
       workflow: {
+        name: "lifecycle",
         stateField: "status",
         initialState: "Open",
         states: ["Open", "Closed"],
@@ -277,6 +385,8 @@ describe("cf-frappe CLI remote workflows", () => {
         "https://app.example",
         "--doctype",
         "Task Type",
+        "--workflow",
+        "lifecycle",
         "--tenant",
         "default",
         "--expected-version",
@@ -288,6 +398,7 @@ describe("cf-frappe CLI remote workflows", () => {
           data: {
             tenantId: "default",
             doctypeName: "Task Type",
+            workflowName: "lifecycle",
             version: 2
           }
         }),
@@ -297,7 +408,7 @@ describe("cf-frappe CLI remote workflows", () => {
     );
 
     expect(clearExit).toBe(0);
-    expect(clearCalls[0]?.url).toBe("https://app.example/api/workflows/Task%20Type?tenant=default");
+    expect(clearCalls[0]?.url).toBe("https://app.example/api/workflows/Task%20Type/lifecycle?tenant=default");
     expect(clearCalls[0]?.method).toBe("DELETE");
     expect(clearCalls[0]?.body).toBe(JSON.stringify({ expectedVersion: 1 }));
     expect(clearStdout.text()).toContain("Cleared workflow definition at https://app.example");
@@ -311,7 +422,9 @@ describe("cf-frappe CLI remote workflows", () => {
         "--url",
         "https://app.example",
         "--doctype",
-        "Task"
+        "Task",
+        "--workflow",
+        "lifecycle"
       ],
       {
         cwd: () => "/workspace",
@@ -319,6 +432,7 @@ describe("cf-frappe CLI remote workflows", () => {
           data: {
             tenantId: "default",
             doctypeName: "Task",
+            workflowName: "lifecycle",
             version: 3
           }
         }),
@@ -328,7 +442,7 @@ describe("cf-frappe CLI remote workflows", () => {
     );
 
     expect(clearWithoutVersionExit).toBe(0);
-    expect(clearWithoutVersionCalls[0]?.url).toBe("https://app.example/api/workflows/Task");
+    expect(clearWithoutVersionCalls[0]?.url).toBe("https://app.example/api/workflows/Task/lifecycle");
     expect(clearWithoutVersionCalls[0]?.method).toBe("DELETE");
     expect(clearWithoutVersionCalls[0]?.body).toBeUndefined();
   });
@@ -343,13 +457,15 @@ describe("cf-frappe CLI remote workflows", () => {
         "https://app.example",
         "--doctype",
         "Task",
+        "--workflow",
+        "lifecycle",
         "--workflow-json",
-        "{\"stateField\":\"missing_state\",\"initialState\":\"Open\",\"states\":[\"Open\",\"Done\"],\"transitions\":[{\"action\":\"Finish\",\"from\":\"Open\",\"to\":\"Done\"}]}"
+        "{\"name\":\"lifecycle\",\"stateField\":\"missing_state\",\"initialState\":\"Open\",\"states\":[\"Open\",\"Done\"],\"transitions\":[{\"action\":\"Finish\",\"from\":\"Open\",\"to\":\"Done\"}]}"
       ],
       {
         cwd: () => "/workspace",
         fetch: fakeFetch([], {
-          error: { code: "WORKFLOW_INVALID", message: "Workflow state field 'missing_state' is not defined on Task" }
+          error: { code: "WORKFLOW_INVALID", message: "Workflow 'lifecycle' state field 'missing_state' is not defined on Task" }
         }, 400),
         stdout: textBuffer(),
         stderr: remoteStderr
@@ -358,7 +474,7 @@ describe("cf-frappe CLI remote workflows", () => {
 
     expect(remoteExit).toBe(1);
     expect(remoteStderr.text()).toContain(
-      "Remote workflows request failed (400): WORKFLOW_INVALID: Workflow state field 'missing_state' is not defined on Task"
+      "Remote workflows request failed (400): WORKFLOW_INVALID: Workflow 'lifecycle' state field 'missing_state' is not defined on Task"
     );
 
     const calls: RemoteCall[] = [];
@@ -371,6 +487,8 @@ describe("cf-frappe CLI remote workflows", () => {
         "https://app.example",
         "--doctype",
         "Task",
+        "--workflow",
+        "lifecycle",
         "--header-env",
         "Authorization=CF_FRAPPE_AUTH"
       ],

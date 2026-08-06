@@ -31,7 +31,7 @@ interface DocTypeResponse {
   readonly permissions?: unknown;
   readonly commands?: unknown;
   readonly indexes?: unknown;
-  readonly workflow?: unknown;
+  readonly workflows?: unknown;
 }
 
 interface FieldResponse {
@@ -138,7 +138,7 @@ function formatDocType(baseUrl: string, doctype: DocTypeResponse): string {
     `Permissions: ${String(countArray(doctype.permissions, "doctype permissions"))}`,
     `Commands: ${String(countArray(doctype.commands, "doctype commands"))}`,
     `Indexes: ${String(countArray(doctype.indexes, "doctype indexes"))}`,
-    `Workflow: ${doctype.workflow === undefined ? "no" : "yes"}`,
+    `Workflows: ${String(countArray(doctype.workflows, "doctype workflows"))}`,
     ""
   ].join("\n");
 }

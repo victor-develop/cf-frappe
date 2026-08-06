@@ -147,7 +147,20 @@ export function createDocumentAssignmentRuleHooks(
             metadata: {
               sourceEventId: context.event.id,
               sourcePayloadKind: domainEventPayloadKind(context.event),
-              assignmentRuleName: assignment.ruleName
+              assignmentRuleName: assignment.ruleName,
+              ...(assignment.workflowName === undefined ? {} : { workflowName: assignment.workflowName }),
+              ...(assignment.workflowAction === undefined ? {} : { workflowAction: assignment.workflowAction }),
+              ...(assignment.workflowTransitions === undefined
+                ? {}
+                : {
+                    workflowTransitions: assignment.workflowTransitions.map((transition) => ({
+                      workflow: transition.workflow,
+                      stateField: transition.stateField,
+                      action: transition.action,
+                      from: transition.from,
+                      to: transition.to
+                    }))
+                  })
             }
           });
         } catch (error) {

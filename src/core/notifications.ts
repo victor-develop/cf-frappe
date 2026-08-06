@@ -6,14 +6,14 @@ import type {
   NotificationRuleDefinition,
   TenantId
 } from "./types.js";
-import { domainEventPayloadKind } from "./domain-events.js";
+import { domainEventPayloadKind, type DomainEventWorkflowIdentity } from "./domain-events.js";
 import {
   notificationRuleEmailNotificationsFromDomainEvent,
   notificationRuleUserNotificationsFromDomainEvent
 } from "./notification-rules.js";
 import type { DocumentEmailNotificationPayload } from "./notification-rules.js";
 
-export interface DocumentUserNotificationPayload {
+export interface DocumentUserNotificationPayload extends DomainEventWorkflowIdentity {
   readonly kind: "DocumentUserNotification";
   readonly eventId: string;
   readonly eventType: string;

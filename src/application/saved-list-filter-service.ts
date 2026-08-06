@@ -1,18 +1,25 @@
 import { FrameworkError, notFound, permissionDenied } from "../core/errors.js";
 import { normalizeListFilterExpression, normalizeListFilters } from "../core/list-view.js";
+import {
+  andPredicateExpressions,
+  normalizePredicateExpression,
+  predicateExpressionFromListFilterExpression
+} from "../core/predicates.js";
 import type { ModelRegistry } from "../core/registry.js";
 import { savedListFiltersStream } from "../core/streams.js";
 import {
   DEFAULT_TENANT_ID,
   type Actor,
   type DocTypeDefinition,
-  type ListFilterExpression,
+  type JsonValue,
   type ListDocumentsFilter,
+  type ListFilterExpression,
+  type ListFilterValue,
+  type PredicateExpression,
   type TenantId
 } from "../core/types.js";
 import {
   foldSavedListFilters,
-  mergeSavedListFilter,
   mergeSavedListFilterInputs,
   normalizeSavedListFilterLabel,
   SAVED_LIST_FILTER_PAYLOAD_KINDS,
@@ -75,6 +82,11 @@ export interface SavedListFilterMerge {
   readonly filterExpression?: ListFilterExpression;
 }
 
+export interface SavedListFilterPresentation extends Omit<SavedListFilter, "predicate"> {
+  readonly filters: readonly ListDocumentsFilter[];
+  readonly filterExpression?: ListFilterExpression;
+}
+
 export class SavedListFilterService {
   private readonly registry: ModelRegistry;
   private readonly events: EventStore;
@@ -130,9 +142,20 @@ export class SavedListFilterService {
     const label = normalizeSavedListFilterLabel(command.label);
     const queryableDoctype = projectDocTypeForFieldQueries({ actor: command.actor, doctype });
     const normalizedFilters = normalizeListFilters(queryableDoctype, command.filters);
-    const normalizedFilterExpression = command.filterExpression === undefined
+    const filtersPredicate = normalizedFilters.length === 0
+      ? undefined
+      : predicateExpressionFromListFilterExpression({
+          kind: "group",
+          match: "all",
+          filters: normalizedFilters
+        });
+    const expressionPredicate = command.filterExpression === undefined
       ? undefined
       : normalizeListFilterExpression(queryableDoctype, command.filterExpression);
+    const combinedPredicate = andPredicateExpressions([filtersPredicate, expressionPredicate]);
+    const normalizedPredicate = combinedPredicate === undefined
+      ? undefined
+      : normalizePredicateExpression(queryableDoctype, combinedPredicate, { availableScopes: ["after"] });
     const now = this.clock.now();
     const event = savedListFilterEvent({
       id: this.ids.next("evt_"),
@@ -148,8 +171,7 @@ export class SavedListFilterService {
         filterId: id,
         label,
         ownerId: command.actor.id,
-        filters: normalizedFilters,
-        ...(normalizedFilterExpression === undefined ? {} : { filterExpression: normalizedFilterExpression })
+        ...(normalizedPredicate === undefined ? {} : { predicate: normalizedPredicate })
       },
       metadata: {}
     });
@@ -160,8 +182,7 @@ export class SavedListFilterService {
       id,
       label,
       ownerId: command.actor.id,
-      filters: normalizedFilters,
-      filterExpression: normalizedFilterExpression,
+      predicate: normalizedPredicate,
       existing,
       now
     });
@@ -203,23 +224,37 @@ export class SavedListFilterService {
     ]);
   }
 
-  mergeSavedFilter(
-    savedFilter: SavedListFilter | undefined,
-    explicitFilters: readonly ListDocumentsFilter[]
-  ): readonly ListDocumentsFilter[] {
-    return mergeSavedListFilter(savedFilter, explicitFilters);
-  }
-
   mergeSavedFilterInputs(
     savedFilter: SavedListFilter | undefined,
     explicitFilters: readonly ListDocumentsFilter[],
     explicitFilterExpression: ListFilterExpression | undefined
   ): SavedListFilterMerge {
-    return mergeSavedListFilterInputs({
+    if (savedFilter === undefined) {
+      return {
+        filters: explicitFilters,
+        ...(explicitFilterExpression === undefined
+          ? {}
+          : { filterExpression: explicitFilterExpression })
+      };
+    }
+
+    const explicitFiltersPredicate = explicitFilters.length === 0
+      ? undefined
+      : predicateExpressionFromListFilterExpression({
+          kind: "group",
+          match: "all",
+          filters: explicitFilters
+        });
+    const explicitExpressionPredicate = explicitFilterExpression === undefined
+      ? undefined
+      : predicateExpressionFromListFilterExpression(explicitFilterExpression);
+    const merged = mergeSavedListFilterInputs({
       savedFilter,
-      explicitFilters,
-      explicitFilterExpression
+      ...((explicitFiltersPredicate === undefined && explicitExpressionPredicate === undefined)
+        ? {}
+        : { explicitPredicate: andPredicateExpressions([explicitFiltersPredicate, explicitExpressionPredicate]) })
     });
+    return listFilterInputFromPredicate(merged.predicate);
   }
 
   private async readableDoctype(actor: Actor, doctypeName: string, tenantId: TenantId): Promise<DocTypeDefinition> {
@@ -260,9 +295,9 @@ function resolveTenant(actor: Actor, explicitTenantId?: TenantId): TenantId {
 
 function savedFilterIsQueryable(doctype: DocTypeDefinition, filter: SavedListFilter): boolean {
   try {
-    normalizeListFilters(doctype, filter.filters);
-    if (filter.filterExpression !== undefined) {
-      normalizeListFilterExpression(doctype, filter.filterExpression);
+    if (filter.predicate !== undefined) {
+      const normalized = normalizePredicateExpression(doctype, filter.predicate, { availableScopes: ["after"] });
+      listFilterExpressionFromPredicate(normalized);
     }
     return true;
   } catch (error) {
@@ -271,4 +306,95 @@ function savedFilterIsQueryable(doctype: DocTypeDefinition, filter: SavedListFil
     }
     throw error;
   }
+}
+
+export function presentSavedListFilter(filter: SavedListFilter): SavedListFilterPresentation {
+  const input = listFilterInputFromPredicate(filter.predicate);
+  return {
+    tenantId: filter.tenantId,
+    doctype: filter.doctype,
+    id: filter.id,
+    label: filter.label,
+    ownerId: filter.ownerId,
+    ...input,
+    createdAt: filter.createdAt,
+    updatedAt: filter.updatedAt
+  };
+}
+
+function listFilterInputFromPredicate(predicate: PredicateExpression | undefined): SavedListFilterMerge {
+  if (predicate === undefined) {
+    return { filters: [] };
+  }
+  const filters: ListDocumentsFilter[] = [];
+  const residual: PredicateExpression[] = [];
+  for (const expression of flattenAllPredicates(predicate)) {
+    if (expression.kind === "compare") {
+      filters.push(listFilterFromPredicateComparison(expression));
+    } else {
+      residual.push(expression);
+    }
+  }
+  const filterExpression = residual.length === 0
+    ? undefined
+    : listFilterExpressionFromPredicate(residual.length === 1
+      ? residual[0]!
+      : { kind: "group", match: "all", predicates: residual });
+  return {
+    filters: Object.freeze(filters),
+    ...(filterExpression === undefined ? {} : { filterExpression })
+  };
+}
+
+function flattenAllPredicates(expression: PredicateExpression): readonly PredicateExpression[] {
+  return expression.kind === "group" && expression.match === "all"
+    ? expression.predicates
+    : [expression];
+}
+
+function listFilterExpressionFromPredicate(expression: PredicateExpression): ListFilterExpression {
+  switch (expression.kind) {
+    case "group":
+      return {
+        kind: "group",
+        match: expression.match,
+        filters: expression.predicates.map(listFilterExpressionFromPredicate)
+      };
+    case "compare":
+      return listFilterFromPredicateComparison(expression);
+    case "not":
+      throw new FrameworkError("BAD_REQUEST", "Saved filter predicate cannot be represented as a list filter", {
+        status: 400
+      });
+  }
+}
+
+function listFilterFromPredicateComparison(
+  expression: Extract<PredicateExpression, { readonly kind: "compare" }>
+): ListDocumentsFilter {
+  if (
+    expression.left.kind !== "field" ||
+    expression.left.scope !== "after" ||
+    expression.right.kind !== "literal" ||
+    !isListFilterValue(expression.right.value)
+  ) {
+    throw new FrameworkError("BAD_REQUEST", "Saved filter predicate cannot be represented as a list filter", {
+      status: 400
+    });
+  }
+  return {
+    field: expression.left.field,
+    ...(expression.operator === "eq" ? {} : { operator: expression.operator }),
+    value: expression.right.value
+  };
+}
+
+function isListFilterValue(value: JsonValue): value is ListFilterValue {
+  return value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    (Array.isArray(value) && value.every((item) =>
+      item === null || typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+    ));
 }

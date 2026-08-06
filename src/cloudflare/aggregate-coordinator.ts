@@ -10,6 +10,7 @@ import { DocumentService } from "../application/document-service.js";
 import { bulkDocumentFailure, bulkFailureDocumentName } from "../application/document-bulk-policy.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
+import { NamingService } from "../application/naming-service.js";
 import { WorkflowService } from "../application/workflow-service.js";
 import {
   DocumentDeliveryOutboxService,
@@ -147,8 +148,16 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         events,
         preWorkflowDocTypeResolver: preWorkflowDocType
       });
-      const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+      const preNamingDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
         workflows.effectiveDocType(base.name, context.tenantId);
+      const naming = new NamingService({
+        registry: options.registry,
+        events,
+        store: new D1DocumentStore(env.DB),
+        preNamingDocTypeResolver: preNamingDocType
+      });
+      const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
+        naming.effectiveDocType(base.name, context.tenantId);
       const notificationRules = new NotificationRuleService({
         registry: options.registry,
         events,

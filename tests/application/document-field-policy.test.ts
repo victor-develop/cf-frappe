@@ -1,5 +1,6 @@
 import { CHILD_TABLE_ROW_INDEX_FIELD, defineDocType } from "../../src";
 import type { DocumentSnapshot } from "../../src";
+import { afterField } from "../predicate-fixtures.js";
 import {
   allowOnSubmitIssues,
   childTableOriginIssues,
@@ -18,7 +19,7 @@ const InvoiceItem = defineDocType({
     { name: "sku", type: "text", required: true },
     { name: "line_id", type: "text", readOnly: true },
     { name: "internal_note", type: "text", noCopy: true },
-    { name: "approval_note", type: "text", readOnlyDependsOn: { field: "sku", value: "LOCKED" } }
+    { name: "approval_note", type: "text", readOnlyDependsOn: afterField("sku", "LOCKED") }
   ]
 });
 
@@ -27,7 +28,7 @@ const Invoice = defineDocType({
   fields: [
     { name: "title", type: "text", required: true },
     { name: "status", type: "select", options: ["Draft", "Approved"] },
-    { name: "approval_note", type: "text", readOnlyDependsOn: { field: "status", value: "Approved" } },
+    { name: "approval_note", type: "text", readOnlyDependsOn: afterField("status", "Approved") },
     { name: "revision_note", type: "text", allowOnSubmit: true },
     { name: "token", type: "text", noCopy: true },
     { name: "items", type: "table", tableOf: "Invoice Item" }
@@ -40,11 +41,13 @@ const Ticket = defineDocType({
     { name: "title", type: "text" },
     { name: "workflow_state", type: "select", options: ["Open", "Closed"], defaultValue: "Open" }
   ],
-  workflow: {
+  workflows: [{
+    name: "lifecycle",
+    stateField: "workflow_state",
     initialState: "Open",
     states: ["Open", "Closed"],
     transitions: [{ action: "close", from: "Open", to: "Closed" }]
-  }
+  }]
 });
 
 const relatedDocType = (name: string) => name === InvoiceItem.name ? InvoiceItem : undefined;

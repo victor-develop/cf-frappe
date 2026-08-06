@@ -130,7 +130,7 @@ describe("web form policy", () => {
     });
   });
 
-  it("builds submission document data only from declared fields", () => {
+  it("builds submission document data from declared fields and rejects unknown keys", () => {
     const metadata = resolveWebFormMetadata(LeadForm, Lead);
 
     expect(webFormSubmissionData(metadata, {
@@ -139,8 +139,7 @@ describe("web form policy", () => {
         email: "jane@example.com",
         priority: "High",
         account: "Acme",
-        accepted: true,
-        created_by: "attacker@example.com"
+        accepted: true
       }
     })).toEqual({
       title: "Jane Buyer",
@@ -149,6 +148,9 @@ describe("web form policy", () => {
       account: "Acme",
       accepted: true
     });
+    expect(() => webFormSubmissionData(metadata, {
+      data: { title: "Jane Buyer", created_by: "attacker@example.com" }
+    })).toThrow("not configured");
   });
 
   it("rejects missing required Web Form values before command execution", () => {

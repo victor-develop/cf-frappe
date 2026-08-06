@@ -32,7 +32,7 @@ import type {
 import { bulkNamedCommand, runBulkDocumentSelections } from "../application/document-bulk-policy.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocumentSnapshot } from "../core/types.js";
-import { DEFAULT_TENANT_ID, type DocTypeDefinition } from "../core/types.js";
+import { DEFAULT_TENANT_ID } from "../core/types.js";
 import type {
   AggregateCoordinatorCommand,
   AggregateCoordinatorCommandResult,
@@ -148,6 +148,7 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
   bulkTransition(command: BulkTransitionDocumentsCommand): Promise<BulkDocumentCommandResult> {
     return this.runBulkDocumentCommand(command, (selection) => ({
       ...bulkNamedCommand(command, selection),
+      workflow: command.workflow,
       action: command.action,
       kind: "transition" as const
     }));
@@ -235,28 +236,17 @@ export class DurableObjectCommandExecutor implements DocumentCommandExecutor {
 
   private stubForCreate(command: CreateDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
-    const name = previewSeriesAggregateName(doctype) ?? command.name ?? previewName(doctype, command.data) ?? "_new";
-    return this.stub(resolveTenant(command), doctype.name, name);
+    return this.stub(resolveTenant(command), doctype.name, "_create");
   }
 
   private stubForDuplicate(command: DuplicateDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
-    const name =
-      previewSeriesAggregateName(doctype) ??
-      command.newName ??
-      previewName(doctype, command.data ?? {}) ??
-      "_new";
-    return this.stub(resolveTenant(command), doctype.name, name);
+    return this.stub(resolveTenant(command), doctype.name, "_create");
   }
 
   private stubForAmend(command: AmendDocumentCommand): AggregateCoordinatorRpc {
     const doctype = this.registry.get(command.doctype);
-    const name =
-      previewSeriesAggregateName(doctype) ??
-      command.newName ??
-      previewName(doctype, command.data ?? {}) ??
-      "_new";
-    return this.stub(resolveTenant(command), doctype.name, name);
+    return this.stub(resolveTenant(command), doctype.name, "_create");
   }
 
   private stubForNamed(command: { readonly actor: { readonly tenantId?: string }; readonly tenantId?: string; readonly doctype: string; readonly name: string }): AggregateCoordinatorRpc {
@@ -276,21 +266,4 @@ function snapshotResult(result: AggregateCoordinatorCommandResult): DocumentSnap
 
 function resolveTenant(command: { readonly actor: { readonly tenantId?: string }; readonly tenantId?: string }): string {
   return command.tenantId ?? command.actor.tenantId ?? DEFAULT_TENANT_ID;
-}
-
-function previewName(doctype: DocTypeDefinition, data: Record<string, unknown>): string | null {
-  const naming = doctype.naming ?? { kind: "uuid" };
-  if (naming.kind === "field") {
-    const value = data[naming.field];
-    return typeof value === "string" && value.length > 0 ? value : null;
-  }
-  if (naming.kind === "provided") {
-    const value = data[naming.field ?? "name"];
-    return typeof value === "string" && value.length > 0 ? value : null;
-  }
-  return null;
-}
-
-function previewSeriesAggregateName(doctype: DocTypeDefinition): string | null {
-  return doctype.naming?.kind === "series" ? `_series:${doctype.naming.pattern}` : null;
 }
