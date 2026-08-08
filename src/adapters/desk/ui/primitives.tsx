@@ -12,7 +12,7 @@
  * incrementally, page by page, without signature changes.
  */
 import type { Child, FC } from "hono/jsx";
-import { raw } from "hono/html";
+import { html, raw } from "hono/html";
 import { DESK_STYLES_PATH } from "./styles.js";
 
 /** Minimal shape of a rendered hono/jsx element. */
@@ -118,17 +118,38 @@ export const DeskLayout: FC<DeskLayoutProps> = ({ title, navSections = [], messa
 );
 
 export type PanelProps = {
-  readonly title?: string;
+  /** Optional element id (rendered before `class`, e.g. deep-link anchors). */
+  readonly id?: string | undefined;
+  /** Extra class fragment appended to `panel`, e.g. "printing-section". */
+  readonly variant?: string | undefined;
+  readonly title?: string | undefined;
+  /**
+   * Muted heading metadata (counts, versions, "Read only"). When set, the
+   * heading renders as `div.form-head > h2 + p` instead of a bare `h2`.
+   */
+  readonly meta?: Child | undefined;
   readonly children?: Child;
 };
 
 /** Standard content card (`section.panel`) with an optional heading. */
-export const Panel: FC<PanelProps> = ({ title, children }) => (
-  <section class="panel">
-    {title !== undefined ? <h2>{title}</h2> : null}
+export const Panel: FC<PanelProps> = ({ id, variant, title, meta, children }) => (
+  <section id={id} class={variant !== undefined && variant !== "" ? `panel ${variant}` : "panel"}>
+    {meta !== undefined ? (
+      <div class="form-head">
+        <h2>{title}</h2>
+        <p>{meta}</p>
+      </div>
+    ) : title !== undefined ? (
+      <h2>{title}</h2>
+    ) : null}
     {children}
   </section>
 );
+
+export type ToolbarProps = { readonly children?: Child };
+
+/** Top-of-page command strip (`section.toolbar`). */
+export const Toolbar: FC<ToolbarProps> = ({ children }) => <section class="toolbar">{children}</section>;
 
 export type DataTableColumn<Row> = {
   readonly key: string;
@@ -206,6 +227,31 @@ export const Field: FC<FieldProps> = ({ label, variant, hint, children }) => (
     {children}
     {hint !== undefined ? <small>{hint}</small> : null}
   </label>
+);
+
+export type SelectOptionSpec = {
+  readonly value: string;
+  /** Visible option text; defaults to `value`. */
+  readonly label?: string | undefined;
+  readonly selected?: boolean | undefined;
+};
+
+/**
+ * Option list for a native `<select>`.
+ *
+ * Rendered through hono's `html` tagged template (which escapes interpolated
+ * values) instead of JSX attributes, because hono/jsx serializes boolean
+ * attributes as `selected=""` while the Desk test suite asserts the bare
+ * `<option value="A4" selected>` form byte-for-byte. Keep using this for any
+ * converted view that marks a selected option.
+ */
+export const SelectOptions: FC<{ readonly options: readonly SelectOptionSpec[] }> = ({ options }) => (
+  <>
+    {options.map(
+      (option) =>
+        html`<option value="${option.value}"${option.selected === true ? raw(" selected") : raw("")}>${option.label ?? option.value}</option>`
+    )}
+  </>
 );
 
 export type FormRowProps = {
