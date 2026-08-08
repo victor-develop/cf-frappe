@@ -7,6 +7,6 @@
     "sourceMap": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["tests/**/*.ts", "examples/**/*.ts", "dist", "node_modules"]
 }

@@ -721,7 +721,9 @@ describe("cf-frappe CLI scaffold", () => {
             },
             lib: ["ES2022", "DOM", "DOM.Iterable"],
             typeRoots: [join(repoRoot, "node_modules")],
-            types: ["@cloudflare/workers-types"]
+            types: ["@cloudflare/workers-types"],
+            jsx: "react-jsx",
+            jsxImportSource: "hono/jsx"
           }
         },
         null,

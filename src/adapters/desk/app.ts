@@ -180,6 +180,7 @@ import {
   renderPrintReport
 } from "../print/index.js";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
+import { DESK_STYLES_PATH, deskCss } from "./ui/styles.js";
 import {
   deskReportFieldLabel,
   deskReportSumSummaryLabel,
@@ -374,6 +375,15 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       headers: {
         "cache-control": "public, max-age=3600",
         "content-type": "application/javascript; charset=utf-8"
+      }
+    })
+  );
+
+  app.get(DESK_STYLES_PATH, () =>
+    new Response(deskCss(), {
+      headers: {
+        "cache-control": "public, max-age=3600",
+        "content-type": "text/css; charset=utf-8"
       }
     })
   );
