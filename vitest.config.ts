@@ -38,6 +38,7 @@ export default defineConfig({
         "src/adapters/desk/client-src/http.ts",
         "src/adapters/desk/client-src/bodies.ts",
         "src/adapters/desk/client-src/topics.ts",
+        "src/adapters/desk/client-src/uploads.ts",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
