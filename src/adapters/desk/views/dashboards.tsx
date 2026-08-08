@@ -1,59 +1,112 @@
+import type { FC } from "hono/jsx";
 import { type DashboardDefinition } from "../../../core/dashboard.js";
 import { type DashboardRunResult } from "../../../application/dashboard-service.js";
 import { type JsonValue, type ListDocumentsFilter, type ListFilterOperator } from "../../../core/types.js";
 import { type ReportRunResult } from "../../../application/report-service.js";
-import { escapeHtml, formatValue, renderReportChartBody, renderTableCell } from "./shared.js";
+import { UnsafeRawHtml, renderFragment } from "../ui/primitives.js";
+import { formatValue, renderReportChartBody } from "./shared.js";
 
 export function renderDashboardList(dashboards: readonly DashboardDefinition[]): string {
-  const rows = dashboards
-    .map(
-      (dashboard) => `<tr>
-        ${renderTableCell("Dashboard", `<a href="/desk/dashboards/${encodeURIComponent(dashboard.name)}">${escapeHtml(dashboard.label ?? dashboard.name)}</a>`)}
-        ${renderTableCell("Module", escapeHtml(dashboard.module ?? ""))}
-        ${renderTableCell("Cards", String(dashboard.cards.length))}
-        ${renderTableCell("Description", escapeHtml(dashboard.description ?? ""))}
-      </tr>`
-    )
-    .join("");
-  return `<section class="panel">
+  return renderFragment(<DashboardList dashboards={dashboards} />);
+}
+
+const DashboardList: FC<{ dashboards: readonly DashboardDefinition[] }> = ({ dashboards }) => (
+  <section class="panel">
     <div class="table-wrap">
       <table class="responsive-table">
-        <thead><tr><th>Dashboard</th><th>Module</th><th>Cards</th><th>Description</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="empty">No readable dashboards.</td></tr>`}</tbody>
+        <thead>
+          <tr>
+            <th>Dashboard</th>
+            <th>Module</th>
+            <th>Cards</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dashboards.length === 0 ? (
+            <tr>
+              <td colspan={4} class="empty">
+                No readable dashboards.
+              </td>
+            </tr>
+          ) : (
+            dashboards.map((dashboard) => (
+              <tr>
+                <td data-label="Dashboard">
+                  <a href={`/desk/dashboards/${encodeURIComponent(dashboard.name)}`}>{dashboard.label ?? dashboard.name}</a>
+                </td>
+                <td data-label="Module">{dashboard.module ?? ""}</td>
+                <td data-label="Cards">{String(dashboard.cards.length)}</td>
+                <td data-label="Description">{dashboard.description ?? ""}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
       </table>
     </div>
-  </section>`;
-}
+  </section>
+);
 
 export function renderDashboardView(result: DashboardRunResult): string {
-  const description = result.dashboard.description
-    ? `<p class="muted">${escapeHtml(result.dashboard.description)}</p>`
-    : "";
-  const cards = result.cards.map(renderDashboardCard).join("");
-  return `${description}<section class="dashboard-grid">${cards || `<p class="empty">No dashboard cards.</p>`}</section>`;
+  return renderFragment(<DashboardView result={result} />);
 }
 
-function renderDashboardCard(card: DashboardRunResult["cards"][number]): string {
+const DashboardView: FC<{ result: DashboardRunResult }> = ({ result }) => (
+  <>
+    {result.dashboard.description ? <p class="muted">{result.dashboard.description}</p> : null}
+    <section class="dashboard-grid">
+      {result.cards.length === 0 ? (
+        <p class="empty">No dashboard cards.</p>
+      ) : (
+        result.cards.map((card) => <DashboardCard card={card} />)
+      )}
+    </section>
+  </>
+);
+
+const DashboardCard: FC<{ card: DashboardRunResult["cards"][number] }> = ({ card }) => {
   if (card.source.kind === "reportChart") {
     const chart = dashboardChartValue(card.value);
-    return `<section class="dashboard-card dashboard-chart-card">
-      ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
-      ${chart === undefined
-        ? `<h2>${escapeHtml(card.label)}</h2><p class="empty">No chart data.</p>`
-        : renderReportChartBody(chart, dashboardReportChartHref(card.source), card.label)}
-      <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>
-    </section>`;
+    return (
+      <section class="dashboard-card dashboard-chart-card">
+        {card.description === undefined ? null : <p>{card.description}</p>}
+        {chart === undefined ? (
+          <>
+            <h2>{card.label}</h2>
+            <p class="empty">No chart data.</p>
+          </>
+        ) : (
+          <UnsafeRawHtml
+            reason="output of shared renderReportChartBody (prebuilt SVG chart markup); every interpolated value is escaped internally via escapeHtml"
+            html={renderReportChartBody(chart, dashboardReportChartHref(card.source), card.label)}
+          />
+        )}
+        <small>{dashboardCardSourceLabel(card.source)}</small>
+      </section>
+    );
   }
   const href = dashboardMetricHref(card.source);
-  const content = `<span>${escapeHtml(card.label)}</span>
-    <strong>${escapeHtml(formatValue(dashboardMetricValue(card.value)))}</strong>
-    ${card.indicator === undefined ? "" : `<em>${escapeHtml(card.indicator)}</em>`}
-    ${card.description === undefined ? "" : `<p>${escapeHtml(card.description)}</p>`}
-    <small>${escapeHtml(dashboardCardSourceLabel(card.source))}</small>`;
-  return `<section class="dashboard-card">
-    ${href === undefined ? content : `<a class="dashboard-card-link" href="${escapeHtml(href)}">${content}</a>`}
-  </section>`;
-}
+  const content = (
+    <>
+      <span>{card.label}</span>
+      <strong>{formatValue(dashboardMetricValue(card.value))}</strong>
+      {card.indicator === undefined ? null : <em>{card.indicator}</em>}
+      {card.description === undefined ? null : <p>{card.description}</p>}
+      <small>{dashboardCardSourceLabel(card.source)}</small>
+    </>
+  );
+  return (
+    <section class="dashboard-card">
+      {href === undefined ? (
+        content
+      ) : (
+        <a class="dashboard-card-link" href={href}>
+          {content}
+        </a>
+      )}
+    </section>
+  );
+};
 
 function dashboardMetricValue(value: DashboardRunResult["cards"][number]["value"]): JsonValue | undefined {
   return dashboardChartValue(value) === undefined ? value as JsonValue : undefined;
