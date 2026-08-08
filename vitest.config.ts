@@ -44,6 +44,8 @@ export default defineConfig({
         "src/adapters/desk/client-src/alerts.ts",
         "src/adapters/desk/client-src/forms.ts",
         "src/adapters/desk/client-src/merge.ts",
+        "src/adapters/desk/client-src/realtime.ts",
+        "src/adapters/desk/client-src/presence.ts",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
