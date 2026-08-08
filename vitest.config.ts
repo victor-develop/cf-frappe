@@ -39,6 +39,8 @@ export default defineConfig({
         "src/adapters/desk/client-src/bodies.ts",
         "src/adapters/desk/client-src/topics.ts",
         "src/adapters/desk/client-src/uploads.ts",
+        "src/adapters/desk/client-src/filter-builder.ts",
+        "src/adapters/desk/client-src/formula-builder.ts",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
