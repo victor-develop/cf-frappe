@@ -46,6 +46,12 @@ export default defineConfig({
         "src/adapters/desk/client-src/merge.ts",
         "src/adapters/desk/client-src/realtime.ts",
         "src/adapters/desk/client-src/presence.ts",
+        "src/adapters/desk/islands-src/loader.ts",
+        "src/adapters/desk/islands-src/events.ts",
+        "src/adapters/desk/islands-src/kanban-logic.ts",
+        "src/adapters/desk/islands-src/kanban-io.ts",
+        "src/adapters/desk/islands-src/islands/kanban-island.tsx",
+        "src/adapters/desk/islands-src/islands/kanban.tsx",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
@@ -66,7 +72,12 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-          exclude: ["**/node_modules/**", "**/dist/**", "tests/desk-client-src/**"]
+          exclude: [
+            "**/node_modules/**",
+            "**/dist/**",
+            "tests/desk-client-src/**",
+            "tests/desk-islands/**"
+          ]
         }
       },
       {
@@ -75,6 +86,14 @@ export default defineConfig({
           name: "desk-client",
           environment: "happy-dom",
           include: ["tests/desk-client-src/**/*.test.ts"]
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: "desk-islands",
+          environment: "happy-dom",
+          include: ["tests/desk-islands/**/*.test.ts", "tests/desk-islands/**/*.test.tsx"]
         }
       }
     ]

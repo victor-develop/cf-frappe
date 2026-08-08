@@ -2,20 +2,31 @@
 /**
  * Deterministic desk client bundle build.
  *
- * Bundles src/adapters/desk/client-src/main.ts with esbuild (iife, es2022, unminified for
- * readable diffs) and writes BOTH:
- *   - dist/client/desk-client.js                        (raw browser asset)
- *   - src/adapters/desk/client-bundle.generated.ts      (checked-in module exporting the
- *     bundle string + sha256-16 hash, served by the worker after the flip)
+ * 1. Bundles src/adapters/desk/client-src/main.ts with esbuild (iife, es2022, unminified for
+ *    readable diffs) and writes BOTH:
+ *      - dist/client/desk-client.js                        (raw browser asset)
+ *      - src/adapters/desk/client-bundle.generated.ts      (checked-in module exporting the
+ *        bundle string + sha256-16 hash, served by the worker after the flip)
+ *
+ * 2. Builds the React island assets (src/adapters/desk/islands-src/) as multi-entry ESM with
+ *    code splitting, in two passes:
+ *      - pass 1: vendor anchor + one entry per island -> react/react-dom land in a shared
+ *        vendor chunk, each island gets its own lazy chunk, all names content-hashed;
+ *      - pass 2: the loader, with the island-name -> hashed-chunk manifest injected via
+ *        `define` so the loader can only import the chunks it was built with.
+ *    Outputs land in dist/client/islands/ and src/adapters/desk/islands-bundle.generated.ts
+ *    (assets map + manifest served by the worker at /desk/islands/<hashed-file>).
  *
  * Determinism: no timestamps, no absolute paths (esbuild path comments are relative to the
- * repo root via absWorkingDir), no minification, LF newlines.
+ * repo root via absWorkingDir), content-hashed island names, LF newlines. Island bundles are
+ * minified with NODE_ENV=production so React ships its production build.
  */
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,4 +78,141 @@ console.log(
   `desk client bundle: ${bundle.length} bytes, sha256-16 ${hash}\n` +
     `  wrote dist/client/desk-client.js\n` +
     `  ${previous === generated ? "unchanged" : "wrote"} src/adapters/desk/client-bundle.generated.ts`
+);
+
+// ---------------------------------------------------------------------------
+// Desk islands (React) — multi-entry ESM with code splitting.
+// ---------------------------------------------------------------------------
+
+/** Declared islands: name -> entry module. The loader may import ONLY these. */
+const ISLAND_ENTRIES = {
+  kanban: "src/adapters/desk/islands-src/islands/kanban.tsx"
+};
+
+const islandBuildDefaults = {
+  absWorkingDir: repoRoot,
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  minify: true,
+  sourcemap: false,
+  legalComments: "none",
+  charset: "utf8",
+  write: false,
+  define: { "process.env.NODE_ENV": JSON.stringify("production") },
+  logLevel: "silent"
+};
+
+// Pass 1: vendor anchor + island entries. Splitting extracts modules shared
+// between entries (react, react-dom, react/jsx-runtime — anchored by
+// vendor.ts) into content-hashed shared chunks.
+const islandsResult = await build({
+  ...islandBuildDefaults,
+  entryPoints: ["src/adapters/desk/islands-src/vendor.ts", ...Object.values(ISLAND_ENTRIES)],
+  splitting: true,
+  metafile: true,
+  outdir: "islands",
+  entryNames: "[name]-[hash]",
+  chunkNames: "vendor-chunk-[hash]",
+  assetNames: "[name]-[hash]"
+});
+
+const islandFiles = new Map();
+for (const output of islandsResult.outputFiles) {
+  islandFiles.set(basename(output.path), output.text.replace(/\r\n/g, "\n"));
+}
+const entryFileByEntryPoint = new Map();
+for (const [outputPath, meta] of Object.entries(islandsResult.metafile.outputs)) {
+  if (meta.entryPoint) {
+    entryFileByEntryPoint.set(meta.entryPoint, basename(outputPath));
+  }
+}
+
+const islandManifest = {};
+for (const [name, entryPoint] of Object.entries(ISLAND_ENTRIES)) {
+  const file = entryFileByEntryPoint.get(entryPoint);
+  if (!file) {
+    throw new Error(`island build produced no entry output for '${name}' (${entryPoint})`);
+  }
+  islandManifest[name] = file;
+}
+
+// Pass 2: the loader, with the manifest baked in via define.
+const loaderResult = await build({
+  ...islandBuildDefaults,
+  entryPoints: ["src/adapters/desk/islands-src/loader-main.ts"],
+  outdir: "islands",
+  entryNames: "loader-[hash]",
+  define: {
+    ...islandBuildDefaults.define,
+    __DESK_ISLAND_MANIFEST__: JSON.stringify(islandManifest)
+  }
+});
+const [loaderOutput] = loaderResult.outputFiles;
+if (!loaderOutput) {
+  throw new Error("esbuild produced no output for the desk island loader");
+}
+const loaderFile = basename(loaderOutput.path);
+islandFiles.set(loaderFile, loaderOutput.text.replace(/\r\n/g, "\n"));
+
+const islandsDistDir = join(repoRoot, "dist", "client", "islands");
+mkdirSync(islandsDistDir, { recursive: true });
+const sortedIslandFiles = [...islandFiles.keys()].sort();
+for (const file of sortedIslandFiles) {
+  writeFileSync(join(islandsDistDir, file), islandFiles.get(file), "utf8");
+}
+
+const islandsHash = createHash("sha256")
+  .update(sortedIslandFiles.map((file) => `${file}\n${islandFiles.get(file)}`).join("\n"), "utf8")
+  .digest("hex")
+  .slice(0, 16);
+
+const assetsLiteral = sortedIslandFiles
+  .map((file) => `  ${JSON.stringify(file)}: ${JSON.stringify(islandFiles.get(file))}`)
+  .join(",\n");
+const entriesLiteral = Object.keys(ISLAND_ENTRIES)
+  .sort()
+  .map((name) => `  ${JSON.stringify(name)}: ${JSON.stringify(islandManifest[name])}`)
+  .join(",\n");
+
+const islandsGeneratedPath = join(repoRoot, "src", "adapters", "desk", "islands-bundle.generated.ts");
+const islandsGenerated = `// DO NOT EDIT — generated by scripts/build-desk-client.mjs (npm run build:client).
+// Source: src/adapters/desk/islands-src/. CI guards drift via npm run check:client-fresh.
+/* eslint-disable */
+
+export const DESK_ISLANDS_BUNDLE_HASH = ${JSON.stringify(islandsHash)};
+
+/** Hashed file name of the island loader module script. */
+export const DESK_ISLAND_LOADER_ASSET = ${JSON.stringify(loaderFile)};
+
+/** Declared islands: island name -> hashed entry chunk file name. */
+export const DESK_ISLAND_ENTRIES = {
+${entriesLiteral}
+} as const;
+
+/** Every servable island asset (loader, entries, shared vendor chunks). */
+export const DESK_ISLAND_ASSETS: Readonly<Record<string, string>> = {
+${assetsLiteral}
+};
+`;
+
+const previousIslands = existsSync(islandsGeneratedPath) ? readFileSync(islandsGeneratedPath, "utf8") : undefined;
+if (previousIslands !== islandsGenerated) {
+  writeFileSync(islandsGeneratedPath, islandsGenerated, "utf8");
+}
+
+const gzipSize = (text) => gzipSync(Buffer.from(text, "utf8"), { level: 9 }).length;
+const sizeReport = sortedIslandFiles
+  .map((file) => {
+    const source = islandFiles.get(file);
+    return `  ${file}: ${source.length} bytes raw, ${gzipSize(source)} bytes gzip`;
+  })
+  .join("\n");
+
+console.log(
+  `desk island assets: ${sortedIslandFiles.length} files, sha256-16 ${islandsHash}\n` +
+    `${sizeReport}\n` +
+    `  wrote dist/client/islands/\n` +
+    `  ${previousIslands === islandsGenerated ? "unchanged" : "wrote"} src/adapters/desk/islands-bundle.generated.ts`
 );

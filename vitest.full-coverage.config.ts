@@ -26,7 +26,12 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-          exclude: ["**/node_modules/**", "**/dist/**", "tests/desk-client-src/**"]
+          exclude: [
+            "**/node_modules/**",
+            "**/dist/**",
+            "tests/desk-client-src/**",
+            "tests/desk-islands/**"
+          ]
         }
       },
       {
@@ -35,6 +40,14 @@ export default defineConfig({
           name: "desk-client",
           environment: "happy-dom",
           include: ["tests/desk-client-src/**/*.test.ts"]
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: "desk-islands",
+          environment: "happy-dom",
+          include: ["tests/desk-islands/**/*.test.ts", "tests/desk-islands/**/*.test.tsx"]
         }
       }
     ]

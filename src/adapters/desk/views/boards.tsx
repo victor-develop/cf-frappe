@@ -3,6 +3,7 @@ import { type CalendarDefinition } from "../../../core/calendar.js";
 import { type CalendarRunResult } from "../../../application/calendar-service.js";
 import { type KanbanCardResult, type KanbanRunResult } from "../../../application/kanban-service.js";
 import { type KanbanDefinition } from "../../../core/kanban.js";
+import { IslandLoaderScript, IslandMount } from "../ui/islands.js";
 import { renderFragment } from "../ui/primitives.js";
 import { slug } from "./shared.js";
 
@@ -58,28 +59,38 @@ const KanbanView: FC<{ result: KanbanRunResult }> = ({ result }) => (
       <a class="button primary" href={`/desk/${encodeURIComponent(result.board.doctype)}/new`}>New {result.board.doctype}</a>
       <a class="button" href={`/desk/${encodeURIComponent(result.board.doctype)}`}>List</a>
       <a class="button" href={`/desk/kanbans/${encodeURIComponent(result.board.name)}`}>Refresh</a>
-      <span class="board-mode">Read-only board</span>
+      <span class="board-mode">Moves load as an enhancement; without JavaScript, open a card to edit it</span>
     </section>
-    <section class="kanban-board">
-      {result.columns.length === 0 ? (
-        <p class="empty">No kanban columns.</p>
-      ) : (
-        result.columns.map((column) => (
-          <section class="kanban-column">
-            <header>
-              <h2>{column.label}</h2>
-              <span>{String(column.total)}</span>
-            </header>
-            {column.cards.length === 0 ? (
-              <p class="empty">No cards.</p>
-            ) : (
-              column.cards.map((card) => <KanbanCard card={card} />)
-            )}
-            {column.hasMore ? <p class="muted">More cards hidden by board limit.</p> : null}
-          </section>
-        ))
-      )}
-    </section>
+    <IslandMount
+      name="kanban"
+      props={{
+        board: result.board.name,
+        "run-url": `/api/kanban/${encodeURIComponent(result.board.name)}/run`,
+        "doctype-meta-url": `/api/meta/doctypes/${encodeURIComponent(result.board.doctype)}`
+      }}
+    >
+      <section class="kanban-board">
+        {result.columns.length === 0 ? (
+          <p class="empty">No kanban columns.</p>
+        ) : (
+          result.columns.map((column) => (
+            <section class="kanban-column">
+              <header>
+                <h2>{column.label}</h2>
+                <span>{String(column.total)}</span>
+              </header>
+              {column.cards.length === 0 ? (
+                <p class="empty">No cards.</p>
+              ) : (
+                column.cards.map((card) => <KanbanCard card={card} />)
+              )}
+              {column.hasMore ? <p class="muted">More cards hidden by board limit.</p> : null}
+            </section>
+          ))
+        )}
+      </section>
+    </IslandMount>
+    <IslandLoaderScript />
   </>
 );
 

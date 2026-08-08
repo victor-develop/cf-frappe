@@ -359,6 +359,49 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 .kanban-card-meta small {
   overflow-wrap: anywhere;
 }
+.kanban-board-island {
+  display: block;
+}
+.kanban-island-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.kanban-island-instructions {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.kanban-card-island {
+  cursor: grab;
+}
+.kanban-card-island:focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: 2px;
+}
+.kanban-card-grabbed {
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.25);
+}
+.kanban-column-target {
+  border-color: #1f6feb;
+  background: #eef4ff;
+}
+.kanban-card-target-hint {
+  color: #1f6feb;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .calendar-list {
   display: grid;
   gap: 10px;

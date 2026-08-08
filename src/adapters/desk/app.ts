@@ -180,6 +180,8 @@ import {
   renderPrintReport
 } from "../print/index.js";
 import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
+import { DESK_ISLAND_ASSETS } from "./islands-bundle.generated.js";
+import { DESK_ISLAND_ASSET_BASE_PATH } from "./ui/islands.js";
 import { DESK_STYLES_PATH, deskCss } from "./ui/styles.js";
 import {
   deskReportFieldLabel,
@@ -387,6 +389,23 @@ export function createDeskApp(options: DeskAppOptions): Hono {
       }
     })
   );
+
+  // Hashed, immutable React island assets (loader, vendor chunk, island
+  // chunks). Lookup is an exact own-key match on the generated asset map, so
+  // no path can escape the bundle.
+  app.get(`${DESK_ISLAND_ASSET_BASE_PATH}/:asset`, (c) => {
+    const asset = c.req.param("asset");
+    const source = Object.hasOwn(DESK_ISLAND_ASSETS, asset) ? DESK_ISLAND_ASSETS[asset] : undefined;
+    if (source === undefined) {
+      return c.notFound();
+    }
+    return new Response(source, {
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": "application/javascript; charset=utf-8"
+      }
+    });
+  });
 
   app.get("/desk", async (c) => {
     const actor = await options.actor(c.req.raw);
