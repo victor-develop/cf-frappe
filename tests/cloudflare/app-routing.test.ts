@@ -78,7 +78,7 @@ describe("CloudFrappe Worker routing", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/javascript");
-    await expect(response.text()).resolves.toContain("root.cfFrappe");
+    await expect(response.text()).resolves.toContain("window.cfFrappe");
   });
 
   it("mounts metadata dashboard Desk routes through Worker routing", async () => {

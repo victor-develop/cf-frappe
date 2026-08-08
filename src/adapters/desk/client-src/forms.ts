@@ -1033,6 +1033,8 @@ export function registerFormsModule(): void {
   registerNamespaceContribution(formsNamespaceContribution);
 }
 
+registerFormsModule();
+
 /** Test seam (mirrors `boot.resetRegistries`): clears handler registry and cached binding. */
 export function resetFormsState(): void {
   Object.keys(formHandlers).forEach((key) => {

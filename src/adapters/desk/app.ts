@@ -179,7 +179,8 @@ import {
   renderPrintPdfReport,
   renderPrintReport
 } from "../print/index.js";
-import { DESK_CLIENT_SCRIPT_PATH, renderDeskClientScript } from "./client.js";
+import { DESK_CLIENT_BUNDLE_PATH, DESK_CLIENT_SCRIPT_PATH } from "./client-assets.js";
+import { DESK_CLIENT_BUNDLE } from "./client-bundle.generated.js";
 import { DESK_ISLAND_ASSETS } from "./islands-bundle.generated.js";
 import { DESK_ISLAND_ASSET_BASE_PATH } from "./ui/islands.js";
 import { DESK_STYLES_PATH, deskCss } from "./ui/styles.js";
@@ -372,8 +373,21 @@ export function createDeskApp(options: DeskAppOptions): Hono {
 
   app.onError((error, c) => renderDeskFailure(options, c.req.raw, error));
 
+  // Content-hashed desk client bundle (what Desk pages reference): immutable cache,
+  // a rebuilt bundle changes DESK_CLIENT_BUNDLE_PATH so clients can never go stale.
+  app.get(DESK_CLIENT_BUNDLE_PATH, () =>
+    new Response(DESK_CLIENT_BUNDLE, {
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": "application/javascript; charset=utf-8"
+      }
+    })
+  );
+
+  // Stable alias (legacy contract for external/model client scripts): same bundle,
+  // short-lived cache since the URL does not change across deploys.
   app.get(DESK_CLIENT_SCRIPT_PATH, () =>
-    new Response(renderDeskClientScript(), {
+    new Response(DESK_CLIENT_BUNDLE, {
       headers: {
         "cache-control": "public, max-age=3600",
         "content-type": "application/javascript; charset=utf-8"

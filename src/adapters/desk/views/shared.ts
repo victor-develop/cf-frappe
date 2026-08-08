@@ -1,5 +1,5 @@
 import { type ClientScriptDefinition, type ClientScriptScope } from "../../../core/client-script.js";
-import { DESK_CLIENT_SCRIPT_PATH } from "../client.js";
+import { DESK_CLIENT_BUNDLE_PATH } from "../client-assets.js";
 import { type DocTypeDefinition, type DocumentSnapshot, type FieldDefinition, type FieldType, type JsonValue, type ListDocumentsFilter, type ListFilterBuilderField, type ListFilterGroupMatch } from "../../../core/types.js";
 import { type ReportRunResult } from "../../../application/report-service.js";
 import { isReportChartColor } from "../../../core/reports.js";
@@ -235,7 +235,7 @@ export function renderClientScripts(
   const realtimeAttribute = realtimeRoute === undefined
     ? ""
     : ` data-realtime-route="${escapeHtml(realtimeRoute)}"`;
-  const runtime = `<script src="${DESK_CLIENT_SCRIPT_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${documentVersionAttribute}${documentStatusAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
+  const runtime = `<script src="${DESK_CLIENT_BUNDLE_PATH}" data-cf-frappe-runtime="desk" data-doctype="${escapeHtml(doctype)}" data-scope="${scope}"${documentAttribute}${documentVersionAttribute}${documentStatusAttribute}${tenantAttribute}${realtimeAttribute}></script>`;
   const declared = scripts
     .map((script) => {
       const type = (script.type ?? "module") === "module" ? ' type="module"' : "";

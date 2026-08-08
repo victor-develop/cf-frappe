@@ -5,6 +5,10 @@ import {
   CustomFieldService,
   createDeskApp,
   createDataPatchApplyJob,
+  DESK_CLIENT_BUNDLE,
+  DESK_CLIENT_BUNDLE_HASH,
+  DESK_CLIENT_BUNDLE_PATH,
+  DESK_CLIENT_SCRIPT_PATH,
   createDataPatchRollbackJob,
   createDataPatchRollbackRetryJob,
   createRegistry,
@@ -75,6 +79,7 @@ import {
   owner
 } from "../helpers";
 import { afterField } from "../predicate-fixtures.js";
+import { createHash } from "node:crypto";
 
 class RecordingPrintPdfRenderer implements PrintPdfRenderer {
   readonly calls: RenderPrintPdfCommand[] = [];
@@ -1780,7 +1785,7 @@ describe("Desk app", () => {
     const builder = await app.request("/desk/report-builder/Note");
     expect(builder.status).toBe(200);
     const builderHtml = await builder.text();
-    expect(builderHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(builderHtml).toContain(`src="${DESK_CLIENT_BUNDLE_PATH}" data-cf-frappe-runtime="desk"`);
     expect(builderHtml).toContain('data-scope="report-builder"');
     expect(builderHtml).toContain('data-filter-expression-kind="report"');
     expect(builderHtml).toContain('name="filter_expression"');
@@ -3580,10 +3585,10 @@ describe("Desk app", () => {
     const list = await app.request("/desk/Note");
     expect(list.status).toBe(200);
     const listHtml = await list.text();
-    expect(listHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(listHtml).toContain(`src="${DESK_CLIENT_BUNDLE_PATH}" data-cf-frappe-runtime="desk"`);
     expect(listHtml).toContain('data-cf-frappe-runtime="desk" data-doctype="Note" data-scope="list"');
     expect(listHtml).toContain('src="/assets/note-list.js" data-cf-frappe-script="note-list"');
-    expect(listHtml.indexOf('src="/desk/client.js"')).toBeLessThan(listHtml.indexOf('src="/assets/note-list.js"'));
+    expect(listHtml.indexOf(`src="${DESK_CLIENT_BUNDLE_PATH}"`)).toBeLessThan(listHtml.indexOf('src="/assets/note-list.js"'));
     expect(listHtml).toContain('data-scope="list"');
     expect(listHtml).toContain('src="/assets/note-shared.js"');
     expect(listHtml).not.toContain('src="/assets/note-form.js"');
@@ -3592,7 +3597,7 @@ describe("Desk app", () => {
     const create = await app.request("/desk/Note/new");
     expect(create.status).toBe(200);
     const createHtml = await create.text();
-    expect(createHtml).toContain('src="/desk/client.js" data-cf-frappe-runtime="desk"');
+    expect(createHtml).toContain(`src="${DESK_CLIENT_BUNDLE_PATH}" data-cf-frappe-runtime="desk"`);
     expect(createHtml).toContain('data-cf-frappe-runtime="desk" data-doctype="Note" data-scope="form"');
     expect(createHtml).toContain('type="module" src="/assets/note-form.js"');
     expect(createHtml).toContain('data-scope="form"');
@@ -3658,39 +3663,44 @@ describe("Desk app", () => {
     expect(html).toContain('data-realtime-route="/live/realtime"');
   });
 
-  it("serves a built-in Desk client API for model client scripts", async () => {
+  it("serves the built desk client bundle at the immutable hashed path", async () => {
     const { app } = makeDesk();
 
-    const response = await app.request("/desk/client.js");
+    const response = await app.request(DESK_CLIENT_BUNDLE_PATH);
 
+    expect(DESK_CLIENT_BUNDLE_PATH).toBe(`/desk/assets/desk-client-${DESK_CLIENT_BUNDLE_HASH}.js`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/javascript");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     const source = await response.text();
-    expect(source).toContain("root.cfFrappe");
-    expect(source).toContain("audit: Object.freeze");
-    expect(source).toContain("auth: Object.freeze");
-    expect(source).toContain("customFields: Object.freeze");
-    expect(source).toContain("dataPatches: Object.freeze");
-    expect(source).toContain("form: Object.freeze");
-    expect(source).toContain("files: Object.freeze");
-    expect(source).toContain("jobs: Object.freeze");
-    expect(source).toContain("notifications: Object.freeze");
-    expect(source).toContain("notificationRules: Object.freeze");
-    expect(source).toContain("assignmentRules: Object.freeze");
-    expect(source).toContain("print: Object.freeze");
-    expect(source).toContain("profiles: Object.freeze");
-    expect(source).toContain("reportBuilder: Object.freeze");
-    expect(source).toContain("roles: Object.freeze");
-    expect(source).toContain("userPermissions: Object.freeze");
-    expect(source).toContain("documentTopic(tenantId, doctype, name)");
-    expect(source).toContain("userTopic(tenantId, userId)");
-    expect(source).toContain("resourcePath(doctype, name) + \"/workflows/\"");
-    expect(source).toContain("resourcePath(doctype) + \"/workflows/\"");
-    expect(source).toContain("new WebSocket(realtimeUrl(topic, options)");
+    expect(source).toBe(DESK_CLIENT_BUNDLE);
+    expect(createHash("sha256").update(source, "utf8").digest("hex").slice(0, 16)).toBe(DESK_CLIENT_BUNDLE_HASH);
+    // Behavior markers: frozen namespace install + every legacy hydrator slice.
+    expect(source).toContain("window.cfFrappe");
+    expect(source).toContain("Object.freeze");
+    expect(source).toContain("form-binding");
+    expect(source).toContain("file-upload-forms");
+    expect(source).toContain("compound-filter-builder");
+    expect(source).toContain("report-formula-builder");
+    expect(source).toContain("presence-panels");
     expect(source).toContain("subscribeDocument");
     expect(source).toContain("DocumentUserNotification");
     expect(source).toContain("cf-frappe.realtime.replay");
+    expect(source).toContain("new WebSocket");
+    expect(source).toContain("mergePlan");
     expect(() => new Function(source)).not.toThrow();
+  });
+
+  it("serves the same bundle at the stable /desk/client.js alias for model client scripts", async () => {
+    const { app } = makeDesk();
+
+    const response = await app.request(DESK_CLIENT_SCRIPT_PATH);
+
+    expect(DESK_CLIENT_SCRIPT_PATH).toBe("/desk/client.js");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/javascript");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=3600");
+    await expect(response.text()).resolves.toBe(DESK_CLIENT_BUNDLE);
   });
 
   it("renders metadata-driven list filters", async () => {

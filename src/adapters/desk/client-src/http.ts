@@ -71,11 +71,19 @@ export function requestInit(options?: RequestOptions): RequestInit {
     headers.set("content-type", "application/json");
     body = JSON.stringify(body);
   }
-  return Object.assign({}, init, {
-    body: (body ?? null) as BodyInit | null,
+  // Legacy parity: no body means the init carries `body: undefined` (NOT `null`)
+  // so GET/HEAD requests are indistinguishable from the generated-string client's
+  // fetches.
+  const result = Object.assign({}, init, {
     credentials: init.credentials ?? "same-origin",
     headers
-  });
+  }) as RequestInit & { body?: BodyInit | null };
+  if (body === undefined) {
+    delete result.body;
+  } else {
+    result.body = body as BodyInit | null;
+  }
+  return result;
 }
 
 export async function readResponsePayload(response: Response): Promise<unknown> {

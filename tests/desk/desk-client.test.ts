@@ -1,4 +1,4 @@
-import { renderDeskClientScript } from "../../src/adapters/desk/client";
+import { DESK_CLIENT_BUNDLE } from "../../src/adapters/desk/client-bundle.generated";
 import { MAX_MULTIPART_FILE_PARTS, MIN_MULTIPART_FILE_PART_BYTES } from "../../src";
 
 type DeskWebFormUrlInput =
@@ -5905,7 +5905,7 @@ function evaluateDeskClient(
     "Blob",
     "WebSocket",
     "document",
-    renderDeskClientScript()
+    DESK_CLIENT_BUNDLE
   )(fakeWindow, fetchImpl, Headers, FormData, URLSearchParams, Blob, fakeWebSocketClass(sockets), documentImpl);
 
   if (!fakeWindow.cfFrappe) {

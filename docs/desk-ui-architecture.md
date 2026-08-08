@@ -1,7 +1,10 @@
 # Desk UI Architecture
 
-Status: Phase 1 (rendering foundation) of the Hono JSX migration described in
-[issue #19](https://github.com/victor-develop/cf-frappe/issues/19).
+Status: Phases 1–5 of the Hono JSX migration described in
+[issue #19](https://github.com/victor-develop/cf-frappe/issues/19) are
+complete: JSX rendering foundation, view migration, typed client modules
+served as a built bundle (legacy generated string removed), and React
+islands (Kanban).
 
 Desk is server-first: native links, forms, POST-Redirect-GET, and full-page
 SSR are the default interaction model. This document defines the conventions
@@ -15,7 +18,8 @@ introduced by the JSX foundation and the contracts later phases must follow.
 | `src/adapters/desk/ui/styles.ts` | The Desk stylesheet as an independently testable string asset (`deskCss()`), served at `DESK_STYLES_PATH` (`/desk/styles.css`) with `cache-control: public, max-age=3600`. Pages reference it via `<link rel="stylesheet">`; CSS is no longer inlined per page. |
 | `src/adapters/desk/render.ts` | Legacy string renderers. Signatures are frozen; pages migrate off this file incrementally by delegating to JSX components internally, page by page. |
 | `src/adapters/desk/app.ts` | Hono routes. Handlers stay focused on request parsing, authorization-aware service calls, and typed view-model construction — never HTML concatenation. |
-| `src/adapters/desk/client.ts` | Legacy generated browser script. Untouched in this phase; replaced by real TypeScript modules in a later phase. |
+| `src/adapters/desk/client-src/` | The desk client runtime as real TypeScript modules (context/url/http/bodies/topics core + uploads, filter-builder, formula-builder, forms, merge, alerts, realtime, presence behavior modules). Bundled by `npm run build:client` into `client-bundle.generated.ts`; the legacy generated-string `client.ts` is deleted. |
+| `src/adapters/desk/client-assets.ts` | Client bundle paths: `DESK_CLIENT_BUNDLE_PATH` (`/desk/assets/desk-client-<hash>.js`, immutable cache, referenced by every Desk page) and the stable `DESK_CLIENT_SCRIPT_PATH` alias (`/desk/client.js`, 1h cache, legacy contract for model client scripts). |
 
 TypeScript is configured with `"jsx": "react-jsx"` and
 `"jsxImportSource": "hono/jsx"` (tsconfig.json / tsconfig.build.json). No new
@@ -202,6 +206,25 @@ semantics, and `aria-live` announcements for every state change.
   document form remain fully usable.
 - Page integration: successful moves dispatch the typed
   `cf-frappe:kanban-move` CustomEvent on the mount element.
+
+## Bundle sizes (measured, 2026-08-09, flip of issue #19 phase 4)
+
+Reproduce with `npm run build:client` (raw sizes are printed; gzip level 9).
+
+| Asset | Raw | Gzip | Served at | Cache |
+| --- | ---: | ---: | --- | --- |
+| Desk client bundle (`desk-client.js`) | 171,538 B | 29,788 B | `/desk/assets/desk-client-<hash>.js` (+ `/desk/client.js` alias) | immutable / 1h |
+| Island loader (`loader-<hash>.js`) | 771 B | 494 B | `/desk/islands/<file>` | immutable |
+| React vendor chunk (`vendor-chunk-<hash>.js`) | 192,406 B | 60,063 B | `/desk/islands/<file>` | immutable |
+| Vendor anchor entry (`vendor-<hash>.js`) | 106 B | 111 B | `/desk/islands/<file>` | immutable |
+| Kanban island (`kanban-<hash>.js`) | 9,130 B | 3,596 B | `/desk/islands/<file>` | immutable |
+
+- **Non-island pages** download only the desk client bundle: 171,538 B raw /
+  29,788 B gzip of total JS. Zero React bytes
+  (`tests/desk/desk-islands.test.ts` enforces this).
+- **The Kanban island page** adds the loader (771 B) up front and lazily the
+  vendor chunk + island chunk (201,536 B raw / 63,659 B gzip) on first mount;
+  the vendor chunk is content-hashed and stays cached across island releases.
 
 ## Verification expectations
 
