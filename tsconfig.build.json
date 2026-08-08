@@ -8,5 +8,5 @@
     "types": ["@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["tests/**/*.ts", "examples/**/*.ts", "dist", "node_modules"]
+  "exclude": ["tests/**/*.ts", "examples/**/*.ts", "dist", "node_modules", "src/adapters/desk/client-src"]
 }

@@ -33,6 +33,11 @@ export default defineConfig({
         "src/adapters/http/naming-api.ts",
         "src/adapters/http/web-form-input.ts",
         "src/application/web-form-policy.ts",
+        "src/adapters/desk/client-src/url.ts",
+        "src/adapters/desk/client-src/context.ts",
+        "src/adapters/desk/client-src/http.ts",
+        "src/adapters/desk/client-src/bodies.ts",
+        "src/adapters/desk/client-src/topics.ts",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
@@ -44,6 +49,26 @@ export default defineConfig({
     environment: "node",
     globals: true,
     testTimeout: 30_000,
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"]
+    // NOTE: no root-level `include` here — `extends: true` merges (concatenates) arrays,
+    // so a root include would leak every test into the desk-client project.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "server",
+          environment: "node",
+          include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+          exclude: ["**/node_modules/**", "**/dist/**", "tests/desk-client-src/**"]
+        }
+      },
+      {
+        extends: true,
+        test: {
+          name: "desk-client",
+          environment: "happy-dom",
+          include: ["tests/desk-client-src/**/*.test.ts"]
+        }
+      }
+    ]
   }
 });
