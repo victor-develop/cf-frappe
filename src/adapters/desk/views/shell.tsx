@@ -163,10 +163,8 @@ const DeskShell: FC<{ options: DeskLayoutOptions }> = ({ options }) => {
   return (
     <html lang="en">
       <head>
-        <UnsafeRawHtml
-          reason="static head void elements; hono/jsx serializes <meta>/<link> self-closing while desk tests assert the legacy non-self-closing <link rel=stylesheet ...> byte form; contains no dynamic input"
-          html={`<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`}
-        />
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{options.title} - cf-frappe Desk</title>
         <UnsafeRawHtml
           reason="static stylesheet link tag; must render as <link ...> (not <link .../>) to match byte-level test assertions; href is the DESK_STYLES_PATH constant"

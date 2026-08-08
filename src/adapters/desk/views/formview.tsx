@@ -373,7 +373,7 @@ const TimelineChanges: FC<{ changes: DocumentTimeline["entries"][number]["change
         <li>
           <span>{change.field}</span>
           <span>{formatValue(change.oldValue)}</span>
-          <span aria-hidden="true"><UnsafeRawHtml reason="static right-arrow HTML entity between old and new values; no dynamic content" html="&rarr;" /></span>
+          <span aria-hidden="true">{"→"}</span>
           <span>{formatValue(change.newValue)}</span>
         </li>
       ))}
