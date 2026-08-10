@@ -52,6 +52,8 @@ export default defineConfig({
         "src/adapters/desk/islands-src/kanban-io.ts",
         "src/adapters/desk/islands-src/islands/kanban-island.tsx",
         "src/adapters/desk/islands-src/islands/kanban.tsx",
+        "src/adapters/desk/views/**/*.tsx",
+        "src/adapters/desk/ui/**/*.tsx",
         "examples/returns/public-intake.ts"
       ],
       provider: "v8",
