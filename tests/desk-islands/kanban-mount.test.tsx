@@ -122,15 +122,22 @@ describe("kanban island mount entry", () => {
       mountKanbanIsland(element);
     });
     await act(async () => {});
-    const card = element.querySelector<HTMLElement>('[data-card-name="RET-1"]');
-    expect(card).not.toBeNull();
+    const grabButton = () =>
+      element.querySelector<HTMLElement>('[data-card-name="RET-1"] button.kanban-card-move');
+    expect(grabButton()).not.toBeNull();
     // With no workflow in the meta this board uses plain field updates, so
-    // the neighbouring column is a valid keyboard drop target.
-    for (const key of ["Enter", "ArrowRight", "Enter"]) {
-      await act(async () => {
-        card!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-      });
-    }
+    // the neighbouring column is a valid keyboard drop target. Click grabs
+    // (native Enter/Space on the button also arrive as clicks), the arrow
+    // retargets, the second click drops.
+    await act(async () => {
+      grabButton()!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      grabButton()!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      grabButton()!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
 
     expect(seen).toEqual([
       { board: "Case Board", doctype: "Return Request", card: "RET-1", from: "Draft", to: "Submitted" }

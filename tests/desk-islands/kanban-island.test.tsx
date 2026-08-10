@@ -87,9 +87,24 @@ function cardElement(container: HTMLElement, name = "RET-1"): HTMLElement {
   return element;
 }
 
+function moveButton(container: HTMLElement, name = "RET-1"): HTMLElement {
+  const element = cardElement(container, name).querySelector<HTMLElement>("button.kanban-card-move");
+  if (element === null) {
+    throw new Error(`card ${name} rendered no Move button`);
+  }
+  return element;
+}
+
 async function pressKey(element: HTMLElement, key: string): Promise<void> {
   await act(async () => {
     element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  });
+}
+
+/** Native click — what mice, touch, and AT-synthesized activations dispatch. */
+async function clickElement(element: HTMLElement): Promise<void> {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   });
 }
 
@@ -156,14 +171,43 @@ describe("KanbanIsland", () => {
     expect(io.loadMoveRules).toHaveBeenCalledWith("case_state");
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(container.querySelectorAll(".kanban-column")).toHaveLength(3);
-    expect(cardElement(container).getAttribute("aria-pressed")).toBe("false");
+    expect(moveButton(container).getAttribute("aria-pressed")).toBe("false");
+    expect(moveButton(container).getAttribute("aria-label")).toBe("Move Return one");
     expect(container.textContent).toContain("Return one");
     expect(container.textContent).toContain("High");
     expect(container.textContent).toContain("More cards hidden by board limit.");
     expect(container.textContent).toContain("No cards.");
 
-    await pressKey(cardElement(container), "Enter");
+    await clickElement(moveButton(container));
     expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the document link and the move control as separate, non-nested interactives", async () => {
+    // ARIA: role=button descendants are presentational, so the open link must
+    // live OUTSIDE the grab control instead of nested inside it.
+    const container = await renderIsland(stubIo());
+    const card = cardElement(container);
+    expect(card.getAttribute("role")).toBeNull();
+    expect(card.getAttribute("tabindex")).toBeNull();
+    const link = card.querySelector("a");
+    const button = moveButton(container);
+    expect(link?.getAttribute("href")).toBe("/desk/Return%20Request/RET-1");
+    expect(button.contains(link)).toBe(false);
+    expect(link?.contains(button)).toBe(false);
+  });
+
+  it("grabs and cancels through click activation alone (mouse, touch, AT-synthesized clicks)", async () => {
+    const io = stubIo();
+    const container = await renderIsland(io);
+
+    await clickElement(moveButton(container));
+    expect(moveButton(container).getAttribute("aria-pressed")).toBe("true");
+    expect(announcementText(container)).toContain("Picked up Return one from Draft.");
+
+    await clickElement(moveButton(container));
+    expect(moveButton(container).getAttribute("aria-pressed")).toBe("false");
+    expect(announcementText(container)).toBe("Cancelled moving Return one.");
+    expect(io.postMove).not.toHaveBeenCalled();
   });
 
   it("keeps the SSR fallback (renders nothing) when bootstrap data fails to load", async () => {
@@ -192,18 +236,17 @@ describe("KanbanIsland", () => {
     const io = stubIo();
     io.loadBoard.mockResolvedValueOnce(baseBoard).mockResolvedValue(fresh);
     const container = await renderIsland(io, { emitMove });
-    const card = cardElement(container);
 
-    await pressKey(card, "Enter");
-    expect(card.getAttribute("aria-pressed")).toBe("true");
+    await clickElement(moveButton(container));
+    expect(moveButton(container).getAttribute("aria-pressed")).toBe("true");
     expect(announcementText(container)).toContain("Picked up Return one from Draft.");
 
-    await pressKey(card, "ArrowRight");
+    await pressKey(moveButton(container), "ArrowRight");
     expect(announcementText(container)).toContain("Return one targeting Submitted.");
     expect(container.querySelectorAll(".kanban-column-target")).toHaveLength(1);
     expect(container.textContent).toContain("Drop target: Submitted");
 
-    await pressKey(card, "Enter");
+    await clickElement(moveButton(container));
     expect(io.postMove).toHaveBeenCalledWith("/desk/Return%20Request/RET-1/workflows/case/transition/submit", {
       expectedVersion: "3"
     });
@@ -223,25 +266,23 @@ describe("KanbanIsland", () => {
   it("cycles the keyboard target left with wrap-around and cancels with Escape", async () => {
     const io = stubIo();
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, " ");
-    await pressKey(card, "ArrowLeft");
+    await clickElement(moveButton(container));
+    await pressKey(moveButton(container), "ArrowLeft");
     expect(announcementText(container)).toContain("Return one targeting Closed.");
 
-    await pressKey(card, "Escape");
+    await pressKey(moveButton(container), "Escape");
     expect(announcementText(container)).toBe("Cancelled moving Return one.");
-    expect(card.getAttribute("aria-pressed")).toBe("false");
+    expect(moveButton(container).getAttribute("aria-pressed")).toBe("false");
     expect(io.postMove).not.toHaveBeenCalled();
   });
 
   it("treats dropping a grabbed card on its own column as a cancel", async () => {
     const io = stubIo();
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, "Enter");
-    await pressKey(card, "Enter");
+    await clickElement(moveButton(container));
+    await clickElement(moveButton(container));
 
     expect(announcementText(container)).toBe("Cancelled moving Return one.");
     expect(io.postMove).not.toHaveBeenCalled();
@@ -250,25 +291,23 @@ describe("KanbanIsland", () => {
   it("ignores arrows and other keys when the card is not grabbed", async () => {
     const io = stubIo();
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, "ArrowRight");
-    await pressKey(card, "Escape");
+    await pressKey(moveButton(container), "ArrowRight");
+    await pressKey(moveButton(container), "Escape");
     expect(announcementText(container)).toBe("");
 
-    await pressKey(card, "Enter");
-    await pressKey(card, "a");
+    await clickElement(moveButton(container));
+    await pressKey(moveButton(container), "a");
     expect(announcementText(container)).toContain("Picked up Return one from Draft.");
   });
 
   it("announces a blocked move when no workflow transition matches, without posting", async () => {
     const io = stubIo();
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, "Enter");
-    await pressKey(card, "ArrowLeft");
-    await pressKey(card, "Enter");
+    await clickElement(moveButton(container));
+    await pressKey(moveButton(container), "ArrowLeft");
+    await clickElement(moveButton(container));
 
     expect(io.postMove).not.toHaveBeenCalled();
     expect(announcementText(container)).toBe(
@@ -282,11 +321,10 @@ describe("KanbanIsland", () => {
       postMove: vi.fn(async () => ({ ok: false, message: "the server rejected the move (HTTP 409)." }))
     });
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, "Enter");
-    await pressKey(card, "ArrowRight");
-    await pressKey(card, "Enter");
+    await clickElement(moveButton(container));
+    await pressKey(moveButton(container), "ArrowRight");
+    await clickElement(moveButton(container));
 
     expect(io.postMove).toHaveBeenCalledTimes(1);
     expect(cardElement(container).getAttribute("data-card-column")).toBe("Draft");
@@ -300,11 +338,10 @@ describe("KanbanIsland", () => {
     const io = stubIo();
     io.loadBoard.mockResolvedValueOnce(baseBoard).mockRejectedValue(new Error("offline"));
     const container = await renderIsland(io);
-    const card = cardElement(container);
 
-    await pressKey(card, "Enter");
-    await pressKey(card, "ArrowRight");
-    await pressKey(card, "Enter");
+    await clickElement(moveButton(container));
+    await pressKey(moveButton(container), "ArrowRight");
+    await clickElement(moveButton(container));
 
     expect(announcementText(container)).toBe("Moved Return one to Submitted.");
     expect(cardElement(container).getAttribute("data-card-column")).toBe("Submitted");

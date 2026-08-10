@@ -25,9 +25,17 @@ test("Kanban island: keyboard card moves persist, with a working no-JS style fal
   const card = page.locator(`[data-card-name="${draftReturn}"]`);
   await expect(card).toHaveAttribute("data-card-column", "Draft");
   const cardTitle = (await card.locator("strong").innerText()).trim();
+  const moveButton = card.getByRole("button", { name: `Move ${cardTitle}`, exact: true });
 
-  // Keyboard journey: pick up, target the next column, drop.
-  await card.focus();
+  // The document link and the move control are separate interactives (no
+  // link nested inside a role=button element).
+  await expect(card.getByRole("link", { name: draftReturn, exact: true })).toHaveAttribute(
+    "href",
+    `/desk/Return%20Request/${encodeURIComponent(draftReturn)}`
+  );
+
+  // Keyboard journey: pick up via the Move button, target the next column, drop.
+  await moveButton.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".kanban-live")).toContainText(`Picked up ${cardTitle} from Draft.`);
   await page.keyboard.press("ArrowRight");
@@ -54,9 +62,12 @@ test("Kanban island: keyboard card moves persist, with a working no-JS style fal
   }));
   expect(widths.scroll).toBeLessThanOrEqual(widths.client);
 
+  // Click activation (what touch taps and AT-synthesized clicks dispatch)
+  // grabs the card; arrows + Enter finish the move.
   const mobileCard = page.locator(`[data-card-name="${draftReturn}"]`);
-  await mobileCard.focus();
-  await page.keyboard.press("Enter");
+  const mobileMoveButton = mobileCard.getByRole("button", { name: `Move ${cardTitle}`, exact: true });
+  await mobileMoveButton.click();
+  await expect(mobileMoveButton).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("ArrowRight");
   await expect(page.locator(".kanban-live")).toContainText("targeting Processing");
   await page.keyboard.press("Enter");
@@ -71,7 +82,7 @@ test("Kanban island: keyboard card moves persist, with a working no-JS style fal
   // Blocked transitions are announced and never posted: Processing -> Closed
   // has no direct workflow transition.
   const blockedCard = page.locator(`[data-card-name="${draftReturn}"]`);
-  await blockedCard.focus();
+  await blockedCard.getByRole("button", { name: `Move ${cardTitle}`, exact: true }).focus();
   await page.keyboard.press("Enter");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");

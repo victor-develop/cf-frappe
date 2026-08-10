@@ -376,9 +376,25 @@ h3 { margin: 0 0 12px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
 .kanban-card-island {
   cursor: grab;
 }
-.kanban-card-island:focus-visible {
+.kanban-card-move {
+  justify-self: start;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f2f5fa;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kanban-card-move:focus-visible {
   outline: 2px solid #1f6feb;
   outline-offset: 2px;
+}
+.kanban-card-move[aria-pressed="true"] {
+  border-color: #1f6feb;
+  background: #eef4ff;
+  color: #1f6feb;
 }
 .kanban-card-grabbed {
   border-color: #1f6feb;

@@ -141,21 +141,28 @@ export function KanbanIsland({ io, onReady, emitMove }: KanbanIslandProps): Reac
     return null;
   }
 
-  const handleCardKeyDown = (event: KeyboardEvent<HTMLElement>, card: IslandKanbanCard, from: string): void => {
+  /**
+   * Grab/drop toggle shared by every activation path of the Move button.
+   * Native `click` covers mouse, touch, raw Enter/Space on the button, AND
+   * assistive technologies that synthesize click events (screen-reader
+   * browse-mode activation, mobile double-tap).
+   */
+  const toggleGrab = (card: IslandKanbanCard, from: string): void => {
     const grabbed = grab !== undefined && grab.card === card.name;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (!grabbed) {
-        setGrab({ card: card.name, from, target: from });
-        setAnnouncement(grabAnnouncement(board, card, from));
-      } else if (grab.target === grab.from) {
-        setGrab(undefined);
-        setAnnouncement(cancelAnnouncement(card));
-      } else {
-        void commitMove(card.name, grab.from, grab.target);
-      }
-      return;
+    if (!grabbed) {
+      setGrab({ card: card.name, from, target: from });
+      setAnnouncement(grabAnnouncement(board, card, from));
+    } else if (grab.target === grab.from) {
+      setGrab(undefined);
+      setAnnouncement(cancelAnnouncement(card));
+    } else {
+      void commitMove(card.name, grab.from, grab.target);
     }
+  };
+
+  /** Arrow/Escape handling while grabbed; Enter/Space activate natively as clicks. */
+  const handleMoveButtonKeyDown = (event: KeyboardEvent<HTMLElement>, card: IslandKanbanCard): void => {
+    const grabbed = grab !== undefined && grab.card === card.name;
     if (!grabbed) {
       return;
     }
@@ -198,7 +205,7 @@ export function KanbanIsland({ io, onReady, emitMove }: KanbanIslandProps): Reac
   return (
     <section className="kanban-board kanban-board-island" aria-label="Kanban board" data-island-view="kanban">
       <p id={instructionsId} className="kanban-island-instructions">
-        Drag cards between columns, or focus a card and use the keyboard: {KANBAN_GRAB_INSTRUCTIONS}
+        Drag cards between columns, or use a card&apos;s Move button: {KANBAN_GRAB_INSTRUCTIONS}
       </p>
       <div className="kanban-island-columns">
         {board.columns.map((column) => {
@@ -234,26 +241,10 @@ export function KanbanIsland({ io, onReady, emitMove }: KanbanIslandProps): Reac
                 return (
                   <article
                     key={card.name}
-                    ref={(element) => {
-                      if (element === null) {
-                        cardElementsRef.current.delete(card.name);
-                      } else {
-                        cardElementsRef.current.set(card.name, element);
-                      }
-                    }}
                     className={`kanban-card kanban-card-island${grabbed ? " kanban-card-grabbed" : ""}`}
-                    role="button"
-                    tabIndex={0}
                     draggable
-                    aria-roledescription="Kanban card"
-                    aria-pressed={grabbed}
-                    aria-describedby={instructionsId}
-                    aria-disabled={busy}
                     data-card-name={card.name}
                     data-card-column={column.value}
-                    onKeyDown={(event) => {
-                      handleCardKeyDown(event, card, column.value);
-                    }}
                     onDragStart={(event) => {
                       handleDragStart(event, card, column.value);
                     }}
@@ -271,6 +262,29 @@ export function KanbanIsland({ io, onReady, emitMove }: KanbanIslandProps): Reac
                         v{String(card.version)} · {card.updatedAt}
                       </small>
                     </div>
+                    <button
+                      type="button"
+                      ref={(element) => {
+                        if (element === null) {
+                          cardElementsRef.current.delete(card.name);
+                        } else {
+                          cardElementsRef.current.set(card.name, element);
+                        }
+                      }}
+                      className="kanban-card-move"
+                      aria-label={`Move ${card.title}`}
+                      aria-pressed={grabbed}
+                      aria-describedby={instructionsId}
+                      aria-disabled={busy}
+                      onClick={() => {
+                        toggleGrab(card, column.value);
+                      }}
+                      onKeyDown={(event) => {
+                        handleMoveButtonKeyDown(event, card);
+                      }}
+                    >
+                      Move
+                    </button>
                     {grabbed ? (
                       <small className="kanban-card-target-hint">
                         Drop target: {columnLabel(board, grab.target)}
