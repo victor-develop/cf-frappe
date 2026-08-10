@@ -13,10 +13,8 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "noEmit": true
   },
-  "include": ["src/adapters/desk/client-src/**/*.ts", "src/adapters/desk/client-src/**/*.tsx"],
+  "include": ["src/adapters/desk/client-src/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }

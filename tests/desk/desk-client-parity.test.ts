@@ -206,4 +206,11 @@ describe("Desk client bundle parity with the legacy generated script", () => {
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect([...positions].sort((left, right) => left - right)).toEqual(positions);
   });
+
+  it("stays React-free: the enhancement layer every desk page downloads ships zero React bytes", () => {
+    // React belongs exclusively to lazily loaded island chunks
+    // (islands-bundle.generated.ts). If this fails, a client-src module
+    // pulled in react/react-dom and the framework boundary broke.
+    expect(DESK_CLIENT_BUNDLE).not.toMatch(/react/i);
+  });
 });
