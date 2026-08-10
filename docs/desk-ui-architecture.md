@@ -87,7 +87,12 @@ Rules:
   Never pass user-controlled content through it.
 - Do not use hono's `raw()`/`html` helpers or `dangerouslySetInnerHTML`
   directly in page code; route through `UnsafeRawHtml` so review and security
-  tests have one choke point.
+  tests have one choke point. The one audited exception: emitting bare
+  boolean attributes (` checked`, ` selected`, ` required`) that byte-level
+  tests assert and hono/jsx would serialize as `checked=""`. Those sites pass
+  ONLY constant string literals to `raw()` and are counted per module by
+  `tests/desk/unsafe-raw-html-audit.test.ts`; any new `raw(`/`html\`` use or
+  a non-literal `raw()` argument fails the audit.
 
 ## CSS asset
 
@@ -133,7 +138,7 @@ they follow this contract:
 | --- | --- |
 | `src/adapters/desk/islands-src/` | React island sources. Compiled by `tsconfig.islands.json` (`jsx: react-jsx`, `jsxImportSource: react`); every `.tsx` file also carries a `/** @jsxImportSource react */` pragma so vitest/esbuild transform it with the React runtime. The server tsconfigs exclude this directory — hono/jsx and React JSX never share a compilation context. |
 | `islands-src/loader.ts` + `loader-main.ts` | Framework-free loader. Scans `[data-cf-frappe-island]` mounts and dynamic-imports ONLY islands declared in the build-time manifest (injected via esbuild `define`), so markup can never make it fetch arbitrary modules. |
-| `islands-src/vendor.ts` | Vendor anchor entry. Forces react / react-dom / react-jsx-runtime into a shared, content-hashed vendor chunk that island entries import, so React downloads once and stays cached across island releases. |
+| `islands-src/vendor.ts` | Vendor anchor entry. Forces react / react-dom / react-jsx-runtime into a shared, content-hashed vendor chunk that island entries import, so React downloads once and stays cached across island releases. `react@19.2.8` / `react-dom@19.2.8` are registry-verified: `npm view react@19.2.8 dist.integrity` and `npm view react-dom@19.2.8 dist.integrity` match the `integrity` fields pinned in package-lock.json, and both stay covered by the CI `npm audit --audit-level=high` step. |
 | `islands-src/islands/<name>.tsx` | One entry per island exporting `default (element: HTMLElement) => void`, which parses the mount attributes and calls `createRoot` (client-only; no SSR/hydration). |
 | `islands-src/events.ts` | Typed CustomEvent map for island -> page communication (`islandEvent(...)` dispatched on the mount element). |
 | `src/adapters/desk/ui/islands.tsx` | Server-side primitives: `IslandMount` (declared boundary + bootstrap `data-island-*` attributes + `[data-island-fallback]` SSR fallback) and `IslandLoaderScript`. |

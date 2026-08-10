@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const VIEWS_DIR = join(__dirname, "..", "..", "src", "adapters", "desk", "views");
+const UI_DIR = join(__dirname, "..", "..", "src", "adapters", "desk", "ui");
 
 /** Expected `<UnsafeRawHtml` occurrences per view module. */
 const ALLOWLIST: Record<string, number> = {
@@ -111,6 +112,88 @@ describe("UnsafeRawHtml audit (desk views)", () => {
         source.includes("escapeHtml("),
         `${file}: JSX escapes by default; escapeHtml must not reappear in converted views`
       ).toBe(false);
+    }
+  });
+});
+
+/**
+ * hono's raw() and the escaping html tagged template are the two remaining
+ * non-UnsafeRawHtml raw sinks in desk page code. They exist ONLY to emit
+ * bare boolean attributes (` checked`, ` selected`, ` required`) that
+ * hono/jsx would serialize as `checked=""` while the Desk suite asserts the
+ * bare form byte-for-byte. Every use is counted per module, and every raw()
+ * argument must be a constant string literal, so `raw(userValue)` can never
+ * slip into a view unnoticed.
+ */
+
+/** Expected `raw(` call count per desk module (views/ and ui/). */
+const RAW_CALL_ALLOWLIST: Record<string, number> = {
+  // Bare ` checked` on the checkbox choice grid.
+  "views/admin-rules.tsx": 2,
+  // Bare ` checked`, ` selected`, and ` required` on report filter controls.
+  "views/reports.tsx": 6,
+  // SelectOptions bare ` selected` (x2) + the UnsafeRawHtml choke point itself.
+  "ui/primitives.tsx": 3
+};
+
+/** Expected escaping html-tagged-template count per desk module. */
+const HTML_TEMPLATE_ALLOWLIST: Record<string, number> = {
+  "views/admin-rules.tsx": 1,
+  "views/reports.tsx": 13,
+  "ui/primitives.tsx": 1
+};
+
+function deskModules(): readonly { key: string; source: string }[] {
+  const modules: { key: string; source: string }[] = [];
+  for (const [prefix, dir] of [
+    ["views", VIEWS_DIR],
+    ["ui", UI_DIR]
+  ] as const) {
+    for (const name of readdirSync(dir).filter((file) => file.endsWith(".ts") || file.endsWith(".tsx"))) {
+      modules.push({ key: `${prefix}/${name}`, source: readFileSync(join(dir, name), "utf8") });
+    }
+  }
+  return modules;
+}
+
+describe("raw()/html`` audit (desk views + ui)", () => {
+  it("matches the allowlisted raw() call count per module", () => {
+    const counts: Record<string, number> = {};
+    for (const { key, source } of deskModules()) {
+      const found = (source.match(/\braw\(/g) ?? []).length;
+      if (found > 0) {
+        counts[key] = found;
+      }
+    }
+    expect(counts).toEqual(RAW_CALL_ALLOWLIST);
+  });
+
+  it("matches the allowlisted html tagged-template count per module", () => {
+    const counts: Record<string, number> = {};
+    for (const { key, source } of deskModules()) {
+      // Negative lookbehind skips doc-comment mentions like `html`.
+      const found = (source.match(/(?<!`)\bhtml`/g) ?? []).length;
+      if (found > 0) {
+        counts[key] = found;
+      }
+    }
+    expect(counts).toEqual(HTML_TEMPLATE_ALLOWLIST);
+  });
+
+  it("only passes constant string literals to raw(), outside the UnsafeRawHtml choke point", () => {
+    for (const { key, source } of deskModules()) {
+      const nonLiteral = source.match(/\braw\((?!"[^"\\]*"\))/g) ?? [];
+      if (key === "ui/primitives.tsx") {
+        // The single sanctioned identifier argument: `return raw(html)` inside
+        // the UnsafeRawHtml component (the audited escape hatch itself).
+        expect(nonLiteral, `${key}: only UnsafeRawHtml may pass an identifier to raw()`).toHaveLength(1);
+        expect(source.includes("return raw(html);")).toBe(true);
+        continue;
+      }
+      expect(
+        nonLiteral,
+        `${key}: raw() arguments must be constant string literals (route dynamic HTML through UnsafeRawHtml)`
+      ).toHaveLength(0);
     }
   });
 });
