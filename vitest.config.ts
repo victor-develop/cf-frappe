@@ -53,6 +53,7 @@ export default defineConfig({
         "src/adapters/desk/islands-src/islands/kanban-island.tsx",
         "src/adapters/desk/islands-src/islands/kanban.tsx",
         "src/adapters/desk/views/**/*.tsx",
+        "src/adapters/desk/views/shared.ts",
         "src/adapters/desk/ui/**/*.tsx",
         "examples/returns/public-intake.ts"
       ],
