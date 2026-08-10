@@ -160,12 +160,12 @@ function assignedDoctypeOptions(
 const PRESENCE_PANEL_BODY = `
     <div class="presence-head">
       <h2 id="document-presence">Presence</h2>
-      <p data-cf-frappe-presence-count>Checking active collaborators.</p>
+      <p role="status" data-cf-frappe-presence-count>Checking active collaborators.</p>
     </div>
-    <p class="presence-list" data-cf-frappe-presence-list>Checking active collaborators.</p>
-    <p class="presence-list" data-cf-frappe-field-edits>No live field edits.</p>
-    <p class="presence-list" data-cf-frappe-shared-draft>No shared draft proposals.</p>
-    <p class="presence-list" data-cf-frappe-document-update>Viewing latest saved version.</p>
+    <p class="presence-list" role="status" data-cf-frappe-presence-list>Checking active collaborators.</p>
+    <p class="presence-list" role="status" data-cf-frappe-field-edits>No live field edits.</p>
+    <p class="presence-list" role="alert" data-cf-frappe-shared-draft>No shared draft proposals.</p>
+    <p class="presence-list" role="alert" data-cf-frappe-document-update>Viewing latest saved version.</p>
     <button type="button" data-cf-frappe-merge-save hidden>Merge saved changes</button>
     <button type="button" data-cf-frappe-apply-shared-draft hidden>Apply shared draft</button>
   `;
