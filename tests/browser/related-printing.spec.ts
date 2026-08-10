@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test("ReturnsOS exposes permission-aware Related resources and Printing journeys", async ({ page }) => {
   await page.goto("/demo");
@@ -64,14 +64,60 @@ test("ReturnsOS exposes permission-aware Related resources and Printing journeys
   await expect(page.getByRole("heading", { name: "Default Print Layout", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save Settings", exact: true })).toHaveCount(0);
 
+  // Mobile Printing journey (still as Returns Agent): the workspace, the
+  // format inspection, and the HTML preview all stay readable and operable
+  // at a phone-sized viewport.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/desk/printing");
+  await expect(page.getByRole("heading", { name: "Printing", exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Print Formats", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const mobileFormatLink = page.getByRole("link", {
+    name: "Return Authorization Return Request · Operational return authorization and refund summary. Print Format",
+    exact: true
+  });
+  await expectUsableTapTarget(mobileFormatLink);
+  await mobileFormatLink.click();
+
+  // Format inspection on mobile: key headings, metadata, and actions.
+  await expect(page).toHaveURL(/\/desk\/printing\/formats\/Return%20Authorization$/);
+  await expect(page.getByRole("heading", { name: "Return Authorization", exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sections", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Layout", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preview Documents", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to Printing", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  // The seeded return's HTML preview action is tap-sized and renders the
+  // print output on mobile.
+  const mobilePreviewAction = page.locator(`a[href="${printHref}"]`);
+  await mobilePreviewAction.scrollIntoViewIfNeeded();
+  await expectUsableTapTarget(mobilePreviewAction);
+  await mobilePreviewAction.click();
+  await expect(page.getByRole("heading", { name: returnName, exact: true })).toBeVisible();
+  await expect(page.getByText("Return Authorization", { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const widths = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,
     scroll: document.documentElement.scrollWidth
   }));
   expect(widths.scroll).toBeLessThanOrEqual(widths.client);
-});
+}
+
+/** WCAG 2.5.8: interactive targets should be at least 24x24 CSS pixels. */
+async function expectUsableTapTarget(target: Locator): Promise<void> {
+  await expect(target).toBeVisible();
+  const box = await target.boundingBox();
+  if (box === null) {
+    throw new Error("The tap target has no bounding box");
+  }
+  expect(box.width).toBeGreaterThanOrEqual(24);
+  expect(box.height).toBeGreaterThanOrEqual(24);
+}
 
 async function seededReturnNameForOrder(page: Page, order: string): Promise<string> {
   const response = await page.request.get(
