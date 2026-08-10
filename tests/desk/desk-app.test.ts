@@ -5953,7 +5953,7 @@ describe("Desk app", () => {
     const form = await app.request("/desk/Sales%20Invoice/new");
     expect(form.status).toBe(200);
     const html = await form.text();
-    expect(html).toContain("<th>Bonus Product</th>");
+    expect(html).toContain('<th scope="col">Bonus Product</th>');
     expect(html).toContain('name="items[0].bonus_product"');
     expect(html).toContain('<option value="SKU-2">Cable</option>');
 
@@ -5995,7 +5995,7 @@ describe("Desk app", () => {
     const form = await app.request("/desk/Sales%20Invoice/new");
     expect(form.status).toBe(200);
     const html = await form.text();
-    expect(html).toContain("<th>Bonus Products</th>");
+    expect(html).toContain('<th scope="col">Bonus Products</th>');
     expect(html).toContain("<legend>Bonus Products</legend>");
     expect(html).toContain('name="items[0].bonus_products[0].sku"');
     expect(html).toContain('name="items[0].bonus_products[0].title"');
@@ -8445,7 +8445,7 @@ describe("Desk app", () => {
     expect(html).toContain('name="items[0].product"');
     expect(html).toContain('<option value="SKU-1">Widget</option>');
     expect(html).toContain('name="items[0].quantity"');
-    expect(html).toContain('name="items[0].quantity" data-cf-frappe-field-type="integer"');
+    expect(html).toContain('name="items[0].quantity" aria-label="quantity, row 1" data-cf-frappe-field-type="integer"');
     expect(html).not.toContain("/desk/Sales%20Invoice%20Item");
 
     const created = await app.request("/desk/Sales%20Invoice", {

@@ -691,7 +691,7 @@ const TableField: FC<{
       <legend>{labelText}</legend>
       <div class="table-wrap">
         <table>
-          <thead><tr>{childFields.map((childField) => <th>{childField.label ?? childField.name}</th>)}</tr></thead>
+          <thead><tr>{childFields.map((childField) => <th scope="col">{childField.label ?? childField.name}</th>)}</tr></thead>
           <tbody>
             {renderRows.map((row, rowIndex) => (
               <TableRow
@@ -810,24 +810,28 @@ const TableCellInput: FC<{
   const id = `field-${slug(name)}`;
   const placeholder = fieldPlaceholder(field);
   const formatted = formatFormValue(value);
+  // Cell inputs render without a <label>, so each carries an explicit
+  // accessible name combining the column label with its 1-based row number.
+  const cellLabel = `${field.label ?? field.name}, row ${String(rowIndex + 1)}`;
   if (field.type === "link") {
     return (
-      <select id={id} name={name} data-cf-frappe-field-type={field.type}><SelectOptions options={linkOptionSpecs(linkOptions, formatted)} /></select>
+      <select id={id} name={name} aria-label={cellLabel} data-cf-frappe-field-type={field.type}><SelectOptions options={linkOptionSpecs(linkOptions, formatted)} /></select>
     );
   }
   if (field.type === "select") {
     return (
-      <select id={id} name={name} data-cf-frappe-field-type={field.type}><SelectOptions options={selectOptionSpecs(field, formatted)} /></select>
+      <select id={id} name={name} aria-label={cellLabel} data-cf-frappe-field-type={field.type}><SelectOptions options={selectOptionSpecs(field, formatted)} /></select>
     );
   }
   if (field.type === "longText" || field.type === "json") {
-    return <textarea id={id} name={name} data-cf-frappe-field-type={field.type} placeholder={placeholder}>{formatted}</textarea>;
+    return <textarea id={id} name={name} aria-label={cellLabel} data-cf-frappe-field-type={field.type} placeholder={placeholder}>{formatted}</textarea>;
   }
   return (
     <input
       type={inputType(field)}
       id={id}
       name={name}
+      aria-label={cellLabel}
       data-cf-frappe-field-type={field.type}
       value={formatted}
       checked={field.type === "boolean" && value === true ? true : undefined}
