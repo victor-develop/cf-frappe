@@ -245,9 +245,19 @@ export function foldNamedWorkflowDefinition(
   workflowName: string,
   events: readonly DomainEvent[]
 ): NamedWorkflowDefinitionState {
-  let workflow: NamedWorkflowDefinition | undefined;
-  let cleared = false;
-  let version = 0;
+  return foldNamedWorkflowDefinitionFrom(null, tenantId, doctypeName, workflowName, events);
+}
+
+export function foldNamedWorkflowDefinitionFrom(
+  initial: NamedWorkflowDefinitionState | null,
+  tenantId: TenantId,
+  doctypeName: string,
+  workflowName: string,
+  events: readonly DomainEvent[]
+): NamedWorkflowDefinitionState {
+  let workflow: NamedWorkflowDefinition | undefined = initial?.workflow;
+  let cleared = initial?.cleared ?? false;
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isNamedWorkflowStateEvent(event) ||

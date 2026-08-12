@@ -38,11 +38,17 @@ export interface PrintSettingsState {
 }
 
 export function foldPrintSettings(tenantId: TenantId, events: readonly DomainEvent[]): PrintSettingsState {
-  let state: PrintSettingsState = {
-    tenantId,
-    version: 0,
-    settings: {}
-  };
+  return foldPrintSettingsFrom(null, tenantId, events);
+}
+
+export function foldPrintSettingsFrom(
+  initial: PrintSettingsState | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): PrintSettingsState {
+  let state: PrintSettingsState = initial === null
+    ? { tenantId, version: 0, settings: {} }
+    : { ...initial, tenantId };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isPrintSettingsStateEvent(event)) {
       continue;

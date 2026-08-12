@@ -87,8 +87,17 @@ export function foldSavedReports(
   doctype: DocTypeDefinition,
   events: readonly DomainEvent[]
 ): SavedReportState {
-  const reports = new Map<string, SavedReport>();
-  let version = 0;
+  return foldSavedReportsFrom(null, tenantId, doctype, events);
+}
+
+export function foldSavedReportsFrom(
+  initial: SavedReportState | null,
+  tenantId: TenantId,
+  doctype: DocTypeDefinition,
+  events: readonly DomainEvent[]
+): SavedReportState {
+  const reports = new Map<string, SavedReport>(initial?.reports ?? []);
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isSavedReportEvent(event)) {

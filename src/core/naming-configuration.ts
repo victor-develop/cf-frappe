@@ -44,9 +44,18 @@ export function foldNamingConfiguration(
   doctype: DocTypeDefinition,
   events: readonly DomainEvent[]
 ): NamingConfigurationState {
-  let runtimeStrategy: NamingStrategy | undefined;
-  let version = 0;
-  let updatedAt: string | undefined;
+  return foldNamingConfigurationFrom(null, tenantId, doctype, events);
+}
+
+export function foldNamingConfigurationFrom(
+  initial: NamingConfigurationState | null,
+  tenantId: TenantId,
+  doctype: DocTypeDefinition,
+  events: readonly DomainEvent[]
+): NamingConfigurationState {
+  let runtimeStrategy: NamingStrategy | undefined = initial?.runtimeStrategy;
+  let version = initial?.version ?? 0;
+  let updatedAt: string | undefined = initial?.updatedAt;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isNamingConfigurationEvent(event) || event.payload.doctypeName !== doctype.name) {
       continue;

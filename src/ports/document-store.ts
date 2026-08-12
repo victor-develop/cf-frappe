@@ -1,6 +1,12 @@
 import type { DocumentEventPayload, DocumentSnapshot, DomainEvent, NewDomainEvent, StreamName } from "../core/types.js";
 
 export interface ReadStreamOptions {
+  /**
+   * Lowest sequence to return, inclusive. Used to read only the tail of a
+   * stream after a snapshot, so folds do not replay history they already
+   * folded.
+   */
+  readonly minSequence?: number;
   readonly maxSequence?: number;
   readonly limit?: number;
   readonly payloadKinds?: readonly DocumentEventPayload["kind"][];

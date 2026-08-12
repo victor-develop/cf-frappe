@@ -55,8 +55,19 @@ export function foldFieldPropertyOverrides(
   doctype: string,
   events: readonly DomainEvent[]
 ): FieldPropertyOverrideState {
-  const fields = new Map<string, FieldPropertyOverrideEntry>();
-  let version = 0;
+  return foldFieldPropertyOverridesFrom(null, tenantId, doctype, events);
+}
+
+export function foldFieldPropertyOverridesFrom(
+  initial: FieldPropertyOverrideState | null,
+  tenantId: TenantId,
+  doctype: string,
+  events: readonly DomainEvent[]
+): FieldPropertyOverrideState {
+  const fields = new Map<string, FieldPropertyOverrideEntry>(
+    (initial?.fields ?? []).map((entry) => [entry.fieldName, entry] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isFieldPropertyOverrideStateEvent(event)) {
       continue;

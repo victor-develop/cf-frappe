@@ -159,7 +159,15 @@ export function foldAutomationRun(
   tenantId: TenantId,
   events: readonly DomainEvent[]
 ): AutomationRunRecord | null {
-  let record: AutomationRunRecord | null = null;
+  return foldAutomationRunFrom(null, tenantId, events);
+}
+
+export function foldAutomationRunFrom(
+  initial: AutomationRunRecord | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): AutomationRunRecord | null {
+  let record: AutomationRunRecord | null = initial;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isAutomationRunEvent(event)) {
       continue;

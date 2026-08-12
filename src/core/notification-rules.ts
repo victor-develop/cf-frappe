@@ -106,8 +106,19 @@ export function foldNotificationRules(
   doctypeName: string,
   events: readonly DomainEvent[]
 ): NotificationRuleState {
-  const rules = new Map<string, NotificationRuleEntry>();
-  let version = 0;
+  return foldNotificationRulesFrom(null, tenantId, doctypeName, events);
+}
+
+export function foldNotificationRulesFrom(
+  initial: NotificationRuleState | null,
+  tenantId: TenantId,
+  doctypeName: string,
+  events: readonly DomainEvent[]
+): NotificationRuleState {
+  const rules = new Map<string, NotificationRuleEntry>(
+    (initial?.rules ?? []).map((entry) => [entry.rule.name, entry] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isNotificationRuleStateEvent(event)) {
       continue;

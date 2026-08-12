@@ -57,12 +57,18 @@ export function foldUserProfile(
   userId: string,
   events: readonly DomainEvent[]
 ): UserProfileState {
-  let state: UserProfileState = {
-    tenantId,
-    userId,
-    version: 0,
-    profile: {}
-  };
+  return foldUserProfileFrom(null, tenantId, userId, events);
+}
+
+export function foldUserProfileFrom(
+  initial: UserProfileState | null,
+  tenantId: TenantId,
+  userId: string,
+  events: readonly DomainEvent[]
+): UserProfileState {
+  let state: UserProfileState = initial === null
+    ? { tenantId, userId, version: 0, profile: {} }
+    : { ...initial, tenantId, userId };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     state = { ...state, version: Math.max(state.version, event.sequence) };
     if (!isUserProfileStateEvent(event) || event.payload.userId !== userId) {

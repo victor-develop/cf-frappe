@@ -61,8 +61,17 @@ export function foldSavedListFilters(
   doctype: DocTypeDefinition,
   events: readonly DomainEvent[]
 ): SavedListFilterState {
-  const filters = new Map<string, SavedListFilter>();
-  let version = 0;
+  return foldSavedListFiltersFrom(null, tenantId, doctype, events);
+}
+
+export function foldSavedListFiltersFrom(
+  initial: SavedListFilterState | null,
+  tenantId: TenantId,
+  doctype: DocTypeDefinition,
+  events: readonly DomainEvent[]
+): SavedListFilterState {
+  const filters = new Map<string, SavedListFilter>(initial?.filters ?? []);
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isSavedListFilterEvent(event)) {
