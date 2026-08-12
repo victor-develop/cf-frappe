@@ -68,7 +68,16 @@ export function foldUserNotifications(
   userId: string,
   events: readonly DomainEvent[]
 ): UserNotificationState {
-  const notifications = new Map<string, UserNotificationRecord>();
+  return foldUserNotificationsFrom(null, tenantId, userId, events);
+}
+
+export function foldUserNotificationsFrom(
+  initial: UserNotificationState | null,
+  tenantId: TenantId,
+  userId: string,
+  events: readonly DomainEvent[]
+): UserNotificationState {
+  const notifications = new Map<string, UserNotificationRecord>(initial?.notifications ?? []);
   const orderedEvents = [...events].sort((left, right) => left.sequence - right.sequence);
   for (const event of orderedEvents) {
     if (!isUserNotificationEvent(event)) {
@@ -107,7 +116,7 @@ export function foldUserNotifications(
   return {
     tenantId,
     userId,
-    version: orderedEvents.at(-1)?.sequence ?? 0,
+    version: orderedEvents.at(-1)?.sequence ?? initial?.version ?? 0,
     notifications
   };
 }

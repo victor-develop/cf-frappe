@@ -99,8 +99,16 @@ export function foldDocumentDeliveryOutbox(
   tenantId: TenantId,
   events: readonly DomainEvent[]
 ): DocumentDeliveryOutboxState {
-  const records = new Map<string, DocumentDeliveryOutboxRecord>();
-  let version = 0;
+  return foldDocumentDeliveryOutboxFrom(null, tenantId, events);
+}
+
+export function foldDocumentDeliveryOutboxFrom(
+  initial: DocumentDeliveryOutboxState | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): DocumentDeliveryOutboxState {
+  const records = new Map<string, DocumentDeliveryOutboxRecord>(initial?.records ?? []);
+  let version = initial?.version ?? 0;
   for (const event of events) {
     version = Math.max(version, event.sequence);
     if (!isDocumentDeliveryOutboxEvent(event)) {

@@ -9,6 +9,10 @@ export interface EventStreamQuery {
 export function eventStreamQuery(options: ReadStreamOptions): EventStreamQuery {
   const clauses = ["stream = ?"];
   const params: (number | string)[] = [];
+  if (options.minSequence !== undefined) {
+    clauses.push("sequence >= ?");
+    params.push(options.minSequence);
+  }
   if (options.maxSequence !== undefined) {
     clauses.push("sequence <= ?");
     params.push(options.maxSequence);

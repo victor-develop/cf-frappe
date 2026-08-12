@@ -54,8 +54,19 @@ export function foldCustomFields(
   doctype: string,
   events: readonly DomainEvent[]
 ): CustomFieldState {
-  const fields = new Map<string, CustomFieldEntry>();
-  let version = 0;
+  return foldCustomFieldsFrom(null, tenantId, doctype, events);
+}
+
+export function foldCustomFieldsFrom(
+  initial: CustomFieldState | null,
+  tenantId: TenantId,
+  doctype: string,
+  events: readonly DomainEvent[]
+): CustomFieldState {
+  const fields = new Map<string, CustomFieldEntry>(
+    (initial?.fields ?? []).map((entry) => [entry.field.name, entry] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isCustomFieldStateEvent(event)) {
       continue;

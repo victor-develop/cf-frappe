@@ -77,8 +77,19 @@ export function foldAssignmentRules(
   doctypeName: string,
   events: readonly DomainEvent[]
 ): AssignmentRuleState {
-  const rules = new Map<string, AssignmentRuleEntry>();
-  let version = 0;
+  return foldAssignmentRulesFrom(null, tenantId, doctypeName, events);
+}
+
+export function foldAssignmentRulesFrom(
+  initial: AssignmentRuleState | null,
+  tenantId: TenantId,
+  doctypeName: string,
+  events: readonly DomainEvent[]
+): AssignmentRuleState {
+  const rules = new Map<string, AssignmentRuleEntry>(
+    (initial?.rules ?? []).map((entry) => [entry.rule.name, entry] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     if (!isAssignmentRuleStateEvent(event)) {
       continue;

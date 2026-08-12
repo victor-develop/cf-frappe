@@ -121,8 +121,16 @@ export function isEmailNotificationEvent(event: DomainEvent): event is DomainEve
 }
 
 export function foldEmailOutbox(tenantId: TenantId, events: readonly DomainEvent[]): EmailOutboxState {
-  const messages = new Map<string, EmailOutboxRecordEntry>();
-  let version = 0;
+  return foldEmailOutboxFrom(null, tenantId, events);
+}
+
+export function foldEmailOutboxFrom(
+  initial: EmailOutboxState | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): EmailOutboxState {
+  const messages = new Map<string, EmailOutboxRecordEntry>(initial?.messages ?? []);
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isEmailNotificationEvent(event)) {

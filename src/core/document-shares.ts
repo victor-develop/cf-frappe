@@ -61,8 +61,20 @@ export function foldDocumentShares(
   name: DocumentName,
   events: readonly DomainEvent[]
 ): DocumentShareState {
-  const grants = new Map<string, DocumentShareGrant>();
-  let version = 0;
+  return foldDocumentSharesFrom(null, tenantId, doctype, name, events);
+}
+
+export function foldDocumentSharesFrom(
+  initial: DocumentShareState | null,
+  tenantId: TenantId,
+  doctype: DocTypeName,
+  name: DocumentName,
+  events: readonly DomainEvent[]
+): DocumentShareState {
+  const grants = new Map<string, DocumentShareGrant>(
+    (initial?.grants ?? []).map((grant) => [grant.userId, grant] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isDocumentShareStateEvent(event)) {

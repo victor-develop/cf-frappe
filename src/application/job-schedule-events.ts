@@ -303,7 +303,15 @@ export function foldJobScheduleOverrides(
   tenantId: TenantId,
   events: readonly DomainEvent[]
 ): JobScheduleOverrideState {
-  const overrides = new Map<string, JobScheduleOverrideRecord>();
+  return foldJobScheduleOverridesFrom(null, tenantId, events);
+}
+
+export function foldJobScheduleOverridesFrom(
+  initial: JobScheduleOverrideState | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): JobScheduleOverrideState {
+  const overrides = new Map<string, JobScheduleOverrideRecord>(initial?.overrides ?? []);
   for (const event of events) {
     if (isJobScheduleEventPayloadKind(event, "JobScheduleOverrideSet")) {
       const current = overrides.get(event.payload.scheduleId);
@@ -333,13 +341,20 @@ export function foldJobScheduleOverrides(
   }
   return {
     tenantId,
-    version: events.at(-1)?.sequence ?? 0,
+    version: events.at(-1)?.sequence ?? initial?.version ?? 0,
     overrides
   };
 }
 
 export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobScheduleDefinitionState {
-  const schedules = new Map<string, RuntimeJobScheduleRecord>();
+  return foldJobScheduleDefinitionsFrom(null, events);
+}
+
+export function foldJobScheduleDefinitionsFrom(
+  initial: JobScheduleDefinitionState | null,
+  events: readonly DomainEvent[]
+): JobScheduleDefinitionState {
+  const schedules = new Map<string, RuntimeJobScheduleRecord>(initial?.schedules ?? []);
   for (const event of events) {
     if (isJobScheduleEventPayloadKind(event, "JobScheduleSaved")) {
       schedules.set(jobScheduleDefinitionKey(event.payload.tenantId, event.payload.scheduleId), {
@@ -362,7 +377,7 @@ export function foldJobScheduleDefinitions(events: readonly DomainEvent[]): JobS
     }
   }
   return {
-    version: events.at(-1)?.sequence ?? 0,
+    version: events.at(-1)?.sequence ?? initial?.version ?? 0,
     schedules
   };
 }

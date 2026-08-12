@@ -170,7 +170,14 @@ export function foldDocumentFrom(
 }
 
 export function foldDocumentAssignments(events: readonly DomainEvent[]): readonly string[] {
-  const assignees = new Set<string>();
+  return foldDocumentAssignmentsFrom(null, events);
+}
+
+export function foldDocumentAssignmentsFrom(
+  initial: readonly string[] | null,
+  events: readonly DomainEvent[]
+): readonly string[] {
+  const assignees = new Set<string>(initial ?? []);
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     switch (event.payload.kind) {
       case "DocumentAssigned":
@@ -185,7 +192,14 @@ export function foldDocumentAssignments(events: readonly DomainEvent[]): readonl
 }
 
 export function foldDocumentTags(events: readonly DomainEvent[]): readonly string[] {
-  const tags = new Set<string>();
+  return foldDocumentTagsFrom(null, events);
+}
+
+export function foldDocumentTagsFrom(
+  initial: readonly string[] | null,
+  events: readonly DomainEvent[]
+): readonly string[] {
+  const tags = new Set<string>(initial ?? []);
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     switch (event.payload.kind) {
       case "DocumentTagged":
@@ -200,7 +214,14 @@ export function foldDocumentTags(events: readonly DomainEvent[]): readonly strin
 }
 
 export function foldDocumentFollowers(events: readonly DomainEvent[]): readonly string[] {
-  const followers = new Set<string>();
+  return foldDocumentFollowersFrom(null, events);
+}
+
+export function foldDocumentFollowersFrom(
+  initial: readonly string[] | null,
+  events: readonly DomainEvent[]
+): readonly string[] {
+  const followers = new Set<string>(initial ?? []);
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     switch (event.payload.kind) {
       case "DocumentFollowed":

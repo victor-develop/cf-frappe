@@ -53,8 +53,18 @@ export interface RoleCatalogState {
 }
 
 export function foldRoleCatalog(tenantId: TenantId, events: readonly DomainEvent[]): RoleCatalogState {
-  let version = 0;
-  const roles = new Map<string, RoleRecord>();
+  return foldRoleCatalogFrom(null, tenantId, events);
+}
+
+export function foldRoleCatalogFrom(
+  initial: RoleCatalogState | null,
+  tenantId: TenantId,
+  events: readonly DomainEvent[]
+): RoleCatalogState {
+  let version = initial?.version ?? 0;
+  const roles = new Map<string, RoleRecord>(
+    (initial?.roles ?? []).map((role) => [role.name, role] as const)
+  );
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isRoleCatalogStateEvent(event)) {

@@ -96,6 +96,7 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBa
   async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
     const payloadKinds = options.payloadKinds === undefined ? undefined : new Set(options.payloadKinds);
     const events = [...(this.streams.get(stream) ?? [])]
+      .filter((event) => options.minSequence === undefined || event.sequence >= options.minSequence)
       .filter((event) => options.maxSequence === undefined || event.sequence <= options.maxSequence)
       .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
       .sort((left, right) => left.sequence - right.sequence);

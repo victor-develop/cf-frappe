@@ -159,15 +159,18 @@ export function foldUserAccount(
   userId: string,
   events: readonly DomainEvent[]
 ): UserAccountState {
-  let state: UserAccountState = {
-    tenantId,
-    userId,
-    version: 0,
-    exists: false,
-    roles: [],
-    providers: [],
-    enabled: false
-  };
+  return foldUserAccountFrom(null, tenantId, userId, events);
+}
+
+export function foldUserAccountFrom(
+  initial: UserAccountState | null,
+  tenantId: TenantId,
+  userId: string,
+  events: readonly DomainEvent[]
+): UserAccountState {
+  let state: UserAccountState = initial === null
+    ? { tenantId, userId, version: 0, exists: false, roles: [], providers: [], enabled: false }
+    : { ...initial, tenantId, userId };
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     state = { ...state, version: Math.max(state.version, event.sequence) };
     if (!isUserAccountStateEvent(event)) {

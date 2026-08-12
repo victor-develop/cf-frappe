@@ -59,8 +59,19 @@ export function foldUserPermissions(
   userId: string,
   events: readonly DomainEvent[]
 ): UserPermissionState {
-  const grants = new Map<string, UserPermissionGrant>();
-  let version = 0;
+  return foldUserPermissionsFrom(null, tenantId, userId, events);
+}
+
+export function foldUserPermissionsFrom(
+  initial: UserPermissionState | null,
+  tenantId: TenantId,
+  userId: string,
+  events: readonly DomainEvent[]
+): UserPermissionState {
+  const grants = new Map<string, UserPermissionGrant>(
+    (initial?.grants ?? []).map((grant) => [userPermissionGrantKey(grant), grant] as const)
+  );
+  let version = initial?.version ?? 0;
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     version = Math.max(version, event.sequence);
     if (!isUserPermissionStateEvent(event)) {

@@ -175,8 +175,18 @@ export function foldNamedWorkflowFieldOwnership(
   stateField: string,
   events: readonly DomainEvent[]
 ): NamedWorkflowFieldOwnershipState {
-  let workflowName: string | undefined;
-  let version = 0;
+  return foldNamedWorkflowFieldOwnershipFrom(null, tenantId, doctypeName, stateField, events);
+}
+
+export function foldNamedWorkflowFieldOwnershipFrom(
+  initial: NamedWorkflowFieldOwnershipState | null,
+  tenantId: TenantId,
+  doctypeName: DocTypeName,
+  stateField: string,
+  events: readonly DomainEvent[]
+): NamedWorkflowFieldOwnershipState {
+  let workflowName: string | undefined = initial?.workflowName;
+  let version = initial?.version ?? 0;
   for (const event of events) {
     if (event.payload.kind !== "NamedWorkflowFieldClaimed" &&
       event.payload.kind !== "NamedWorkflowFieldReleased") {
