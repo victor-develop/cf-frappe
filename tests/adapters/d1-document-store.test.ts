@@ -228,6 +228,25 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 3, 2]);
   });
 
+  it("reads the first forward stream page after a lower bound", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two"),
+      updateEvent("evt3", "Three"),
+      updateEvent("evt4", "Four")
+    ]);
+
+    const page = await store.readStream(stream, { minSequence: 2, limit: 2 });
+
+    expect(page.map((item) => item.sequence)).toEqual([2, 3]);
+    const read = db.statements.at(-1);
+    expect(read?.sql).toContain("sequence >= ?");
+    expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
+    expect(read?.params).toEqual([stream, 2, 2]);
+  });
+
   it("appends independent event streams in one D1 batch", async () => {
     const db = new FakeD1Database();
     const store = new D1EventStore(db as unknown as D1Database);
@@ -753,17 +772,19 @@ class FakeD1PreparedStatement {
         return { results: [] };
       }
       const stream = String(this.params[0]);
-      const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
+      let index = 1;
+      const minSequence = this.sql.includes("sequence >= ?") ? Number(this.params[index++]) : undefined;
+      const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[index++]) : undefined;
       const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
-      const kindOffset = 1 + (maxSequence === undefined ? 0 : 1);
       const kindParams = this.sql.includes("json_extract(payload_json, '$.kind')")
         ? this.params
-            .slice(kindOffset, limit === undefined ? undefined : -1)
+            .slice(index, limit === undefined ? undefined : -1)
             .map(String)
         : undefined;
       const sortDescending = this.sql.includes("ORDER BY sequence DESC");
       const filtered = this.db.events
         .filter((event) => event.stream === stream)
+        .filter((event) => minSequence === undefined || event.sequence >= minSequence)
         .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
         .filter((event) => kindParams === undefined || kindParams.includes(JSON.parse(String(event.payload_json)).kind))
         .sort((left, right) => sortDescending ? right.sequence - left.sequence : left.sequence - right.sequence);
