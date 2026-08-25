@@ -8,3 +8,4 @@ export * from "./migrator.js";
 export * from "./projection-store.js";
 export * from "./schema-planner.js";
 export * from "./serde.js";
+export * from "./statistics.js";
