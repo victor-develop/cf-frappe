@@ -108,6 +108,25 @@ describe("read stream minSequence", () => {
         expect(events.map((event) => event.sequence)).toEqual([2, 3]);
       });
 
+      it("supports continuation pages and the full forward filter combination", async () => {
+        const store = await seed();
+        const firstPage = await store.readStream(stream, {
+          minSequence: 2,
+          maxSequence: 4,
+          payloadKinds: ["DocumentUpdated"],
+          limit: 2
+        });
+        const nextPage = await store.readStream(stream, {
+          minSequence: 4,
+          maxSequence: 4,
+          payloadKinds: ["DocumentUpdated"],
+          limit: 2
+        });
+
+        expect(firstPage.map((event) => event.sequence)).toEqual([2, 3]);
+        expect(nextPage.map((event) => event.sequence)).toEqual([4]);
+      });
+
       it("reads the whole stream when minSequence is absent", async () => {
         const store = await seed();
         const events = await store.readStream(stream);

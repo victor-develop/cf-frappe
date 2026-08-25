@@ -247,6 +247,31 @@ describe("D1DocumentStore", () => {
     expect(read?.params).toEqual([stream, 2, 2]);
   });
 
+  it("reads a continuation forward page with all stream filters", async () => {
+    const db = new FakeD1Database();
+    const store = new D1EventStore(db as unknown as D1Database);
+    await store.append(stream, 0, [
+      event,
+      updateEvent("evt2", "Two"),
+      updateEvent("evt3", "Three"),
+      updateEvent("evt4", "Four")
+    ]);
+
+    const page = await store.readStream(stream, {
+      minSequence: 4,
+      maxSequence: 4,
+      payloadKinds: ["DocumentUpdated"],
+      limit: 2
+    });
+
+    expect(page.map((item) => item.sequence)).toEqual([4]);
+    const read = db.statements.at(-1);
+    expect(read?.sql).toContain("sequence >= ? AND sequence <= ?");
+    expect(read?.sql).toContain("json_extract(payload_json, '$.kind') IN (?)");
+    expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
+    expect(read?.params).toEqual([stream, 4, 4, "DocumentUpdated", 2]);
+  });
+
   it("appends independent event streams in one D1 batch", async () => {
     const db = new FakeD1Database();
     const store = new D1EventStore(db as unknown as D1Database);
