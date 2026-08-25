@@ -8,6 +8,11 @@ export interface ReadStreamOptions {
    */
   readonly minSequence?: number;
   readonly maxSequence?: number;
+  /**
+   * Maximum number of events to return. With minSequence, returns the first
+   * events at or after the lower bound for forward replay. Without
+   * minSequence, preserves the existing recent-page behavior.
+   */
   readonly limit?: number;
   readonly payloadKinds?: readonly DocumentEventPayload["kind"][];
 }

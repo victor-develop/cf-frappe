@@ -25,7 +25,7 @@ export function eventStreamQuery(options: ReadStreamOptions): EventStreamQuery {
       params.push(...options.payloadKinds);
     }
   }
-  const reverseResults = options.limit !== undefined;
+  const reverseResults = options.limit !== undefined && options.minSequence === undefined;
   if (options.limit !== undefined) {
     params.push(options.limit);
   }

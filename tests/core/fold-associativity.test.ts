@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { DomainEvent } from "../../src";
+import type { DomainEvent, NamedWorkflowDefinition } from "../../src";
 import {
+  foldAssignmentRules,
+  foldAssignmentRulesFrom,
+  foldAutomationRun,
+  foldAutomationRunFrom,
   foldCustomFields,
   foldCustomFieldsFrom,
+  foldDocumentDeliveryOutbox,
+  foldDocumentDeliveryOutboxFrom,
   foldDocument,
   foldDocumentAssignments,
   foldDocumentAssignmentsFrom,
@@ -13,17 +19,40 @@ import {
   foldDocumentSharesFrom,
   foldDocumentTags,
   foldDocumentTagsFrom,
+  foldEmailOutbox,
+  foldEmailOutboxFrom,
+  foldFieldPropertyOverrides,
+  foldFieldPropertyOverridesFrom,
   foldJobScheduleDefinitions,
   foldJobScheduleDefinitionsFrom,
   foldJobScheduleOverrides,
   foldJobScheduleOverridesFrom,
+  foldNamedWorkflowDefinition,
+  foldNamedWorkflowDefinitionFrom,
+  foldNamedWorkflowFieldOwnership,
+  foldNamedWorkflowFieldOwnershipFrom,
+  foldNamingConfiguration,
+  foldNamingConfigurationFrom,
+  foldNotificationRules,
+  foldNotificationRulesFrom,
   foldPrintSettings,
   foldPrintSettingsFrom,
   foldRoleCatalog,
   foldRoleCatalogFrom,
+  foldSavedListFilters,
+  foldSavedListFiltersFrom,
+  foldSavedReports,
+  foldSavedReportsFrom,
+  foldUserAccount,
+  foldUserAccountFrom,
+  foldUserNotifications,
+  foldUserNotificationsFrom,
+  foldUserPermissions,
+  foldUserPermissionsFrom,
   foldUserProfile,
   foldUserProfileFrom
 } from "../../src";
+import { noteDocType } from "../helpers";
 
 /**
  * Folds must be resumable: replaying a whole stream and replaying a prefix
@@ -71,6 +100,13 @@ function foldCase<TState>(input: FoldCase<TState>): FoldCase<unknown> {
 
 const TENANT = "acme";
 const USER = "user-1";
+const REVIEW_WORKFLOW: NamedWorkflowDefinition = {
+  name: "review",
+  stateField: "review_state",
+  initialState: "Pending",
+  states: ["Pending", "Approved"],
+  transitions: [{ action: "approve", from: "Pending", to: "Approved" }]
+};
 
 const cases: readonly FoldCase<unknown>[] = [
   foldCase({
@@ -143,6 +179,369 @@ const cases: readonly FoldCase<unknown>[] = [
     ),
     foldAll: (stream) => foldCustomFields(TENANT, "Note", stream),
     foldFrom: (initial, stream) => foldCustomFieldsFrom(initial, TENANT, "Note", stream)
+  }),
+  foldCase({
+    name: "foldAssignmentRules",
+    events: events(
+      {
+        kind: "AssignmentRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Triage",
+          events: ["DocumentCreated"],
+          assignees: [{ kind: "user", userId: "manager@example.com" }]
+        }
+      },
+      {
+        kind: "AssignmentRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Escalation",
+          events: ["DocumentUpdated"],
+          assignees: [{ kind: "user", userId: "lead@example.com" }]
+        }
+      },
+      {
+        kind: "AssignmentRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Triage",
+          events: ["DocumentCreated"],
+          assignees: [{ kind: "user", userId: "manager@example.com" }],
+          enabled: false
+        }
+      },
+      { kind: "AssignmentRuleCleared", doctypeName: "Note", ruleName: "Escalation" }
+    ),
+    foldAll: (stream) => foldAssignmentRules(TENANT, "Note", stream),
+    foldFrom: (initial, stream) => foldAssignmentRulesFrom(initial, TENANT, "Note", stream)
+  }),
+  foldCase({
+    name: "foldAutomationRun",
+    events: events(
+      {
+        kind: "AutomationRunEnqueued",
+        runId: "run-1",
+        sourceEventId: "source-1",
+        sourceEventType: "NoteUpdated",
+        sourcePayloadKind: "DocumentUpdated",
+        sourceDoctype: "Note",
+        sourceDocumentName: "One",
+        sourceActorId: USER,
+        ruleId: "mirror",
+        ruleName: "Mirror note",
+        actionId: "update",
+        action: {
+          kind: "updateDocument",
+          target: { doctype: "Note", name: "Two" },
+          patch: { body: "mirrored" }
+        },
+        retry: { maxAttempts: 3, baseDelaySeconds: 10, maxDelaySeconds: 60 },
+        causationId: "source-1",
+        correlationId: "source-1",
+        automationDepth: 1,
+        automationPath: ["mirror:update"]
+      },
+      {
+        kind: "AutomationRunClaimed",
+        runId: "run-1",
+        claimId: "claim-1",
+        claimExpiresAt: "2026-01-01T00:05:00.000Z"
+      },
+      {
+        kind: "AutomationRunFailed",
+        runId: "run-1",
+        claimId: "claim-1",
+        error: "temporary",
+        retryAt: "2026-01-01T00:10:00.000Z"
+      },
+      {
+        kind: "AutomationRunClaimed",
+        runId: "run-1",
+        claimId: "claim-2",
+        claimExpiresAt: "2026-01-01T00:15:00.000Z"
+      },
+      { kind: "AutomationRunDelivered", runId: "run-1", claimId: "claim-2" }
+    ),
+    foldAll: (stream) => foldAutomationRun(TENANT, stream),
+    foldFrom: (initial, stream) => foldAutomationRunFrom(initial, TENANT, stream)
+  }),
+  foldCase({
+    name: "foldDocumentDeliveryOutbox",
+    events: events(
+      {
+        kind: "DocumentDeliveryOutboxEnqueued",
+        outboxId: "source-1:email",
+        target: "email",
+        sourceEventId: "source-1",
+        sourceEventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        doctype: "Note",
+        documentName: "One",
+        actorId: USER,
+        payload: { body: "updated" }
+      },
+      { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-1" },
+      {
+        kind: "DocumentDeliveryOutboxFailed",
+        outboxId: "source-1:email",
+        claimId: "claim-1",
+        error: "temporary",
+        retryAt: "2026-01-01T00:10:00.000Z"
+      },
+      { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-2" },
+      { kind: "DocumentDeliveryOutboxDelivered", outboxId: "source-1:email", claimId: "claim-2" }
+    ),
+    foldAll: (stream) => foldDocumentDeliveryOutbox(TENANT, stream),
+    foldFrom: (initial, stream) => foldDocumentDeliveryOutboxFrom(initial, TENANT, stream)
+  }),
+  foldCase({
+    name: "foldEmailOutbox",
+    events: events(
+      {
+        kind: "EmailNotificationQueued",
+        messageId: "message-1",
+        sourceEventId: "source-1",
+        sourceEventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        ruleName: "Email owner",
+        recipientId: USER,
+        from: { email: "noreply@example.com" },
+        to: { email: "user@example.com" },
+        subject: "Note updated",
+        text: "The note changed."
+      },
+      { kind: "EmailNotificationDeliveryClaimed", messageId: "message-1", claimId: "claim-1" },
+      { kind: "EmailNotificationFailed", messageId: "message-1", claimId: "claim-1", error: "temporary" },
+      { kind: "EmailNotificationDeliveryClaimed", messageId: "message-1", claimId: "claim-2" },
+      { kind: "EmailNotificationSent", messageId: "message-1", claimId: "claim-2", providerMessageId: "provider-1" }
+    ),
+    foldAll: (stream) => foldEmailOutbox(TENANT, stream),
+    foldFrom: (initial, stream) => foldEmailOutboxFrom(initial, TENANT, stream)
+  }),
+  foldCase({
+    name: "foldFieldPropertyOverrides",
+    events: events(
+      {
+        kind: "FieldPropertyOverrideSaved",
+        doctypeName: "Note",
+        fieldName: "priority",
+        overrides: { label: "Urgency", options: ["Low", "High"] }
+      },
+      {
+        kind: "FieldPropertyOverrideSaved",
+        doctypeName: "Note",
+        fieldName: "body",
+        overrides: { label: "Details", required: true }
+      },
+      {
+        kind: "FieldPropertyOverrideSaved",
+        doctypeName: "Note",
+        fieldName: "priority",
+        overrides: { label: "Priority", options: ["Low", "Medium", "High"] }
+      },
+      { kind: "FieldPropertyOverrideCleared", doctypeName: "Note", fieldName: "body" }
+    ),
+    foldAll: (stream) => foldFieldPropertyOverrides(TENANT, "Note", stream),
+    foldFrom: (initial, stream) => foldFieldPropertyOverridesFrom(initial, TENANT, "Note", stream)
+  }),
+  foldCase({
+    name: "foldNamingConfiguration",
+    events: events(
+      { kind: "NamingStrategySaved", doctypeName: "Note", strategy: { kind: "uuid" } },
+      { kind: "NamingStrategyCleared", doctypeName: "Note" },
+      { kind: "NamingStrategySaved", doctypeName: "Note", strategy: { kind: "provided" } }
+    ),
+    foldAll: (stream) => foldNamingConfiguration(TENANT, noteDocType, stream),
+    foldFrom: (initial, stream) => foldNamingConfigurationFrom(initial, TENANT, noteDocType, stream)
+  }),
+  foldCase({
+    name: "foldNamedWorkflowDefinition",
+    events: events(
+      {
+        kind: "NamedWorkflowSaved",
+        doctypeName: "Note",
+        workflowName: REVIEW_WORKFLOW.name,
+        workflow: REVIEW_WORKFLOW
+      },
+      { kind: "NamedWorkflowCleared", doctypeName: "Note", workflowName: REVIEW_WORKFLOW.name },
+      {
+        kind: "NamedWorkflowSaved",
+        doctypeName: "Note",
+        workflowName: REVIEW_WORKFLOW.name,
+        workflow: { ...REVIEW_WORKFLOW, label: "Review lifecycle" }
+      }
+    ),
+    foldAll: (stream) => foldNamedWorkflowDefinition(TENANT, "Note", REVIEW_WORKFLOW.name, stream),
+    foldFrom: (initial, stream) =>
+      foldNamedWorkflowDefinitionFrom(initial, TENANT, "Note", REVIEW_WORKFLOW.name, stream)
+  }),
+  foldCase({
+    name: "foldNamedWorkflowFieldOwnership",
+    events: events(
+      {
+        kind: "NamedWorkflowFieldClaimed",
+        doctypeName: "Note",
+        stateField: "review_state",
+        workflowName: "review"
+      },
+      {
+        kind: "NamedWorkflowFieldReleased",
+        doctypeName: "Note",
+        stateField: "review_state",
+        workflowName: "review"
+      },
+      {
+        kind: "NamedWorkflowFieldClaimed",
+        doctypeName: "Note",
+        stateField: "review_state",
+        workflowName: "audit"
+      }
+    ),
+    foldAll: (stream) => foldNamedWorkflowFieldOwnership(TENANT, "Note", "review_state", stream),
+    foldFrom: (initial, stream) =>
+      foldNamedWorkflowFieldOwnershipFrom(initial, TENANT, "Note", "review_state", stream)
+  }),
+  foldCase({
+    name: "foldNotificationRules",
+    events: events(
+      {
+        kind: "NotificationRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Notify owner",
+          events: ["DocumentUpdated"],
+          recipients: [{ kind: "user", userId: "owner@example.com" }]
+        }
+      },
+      {
+        kind: "NotificationRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Notify manager",
+          events: ["DocumentSubmitted"],
+          recipients: [{ kind: "user", userId: "manager@example.com" }]
+        }
+      },
+      {
+        kind: "NotificationRuleSaved",
+        doctypeName: "Note",
+        rule: {
+          name: "Notify owner",
+          events: ["DocumentUpdated"],
+          recipients: [{ kind: "user", userId: "owner@example.com" }],
+          enabled: false
+        }
+      },
+      { kind: "NotificationRuleCleared", doctypeName: "Note", ruleName: "Notify manager" }
+    ),
+    foldAll: (stream) => foldNotificationRules(TENANT, "Note", stream),
+    foldFrom: (initial, stream) => foldNotificationRulesFrom(initial, TENANT, "Note", stream)
+  }),
+  foldCase({
+    name: "foldSavedListFilters",
+    events: events(
+      { kind: "SavedListFilterSaved", filterId: "mine", label: "My notes", ownerId: USER },
+      { kind: "SavedListFilterSaved", filterId: "team", label: "Team notes", ownerId: "manager" },
+      { kind: "SavedListFilterSaved", filterId: "mine", label: "My active notes", ownerId: USER },
+      { kind: "SavedListFilterDeleted", filterId: "team", ownerId: "manager" }
+    ),
+    foldAll: (stream) => foldSavedListFilters(TENANT, noteDocType, stream),
+    foldFrom: (initial, stream) => foldSavedListFiltersFrom(initial, TENANT, noteDocType, stream)
+  }),
+  foldCase({
+    name: "foldSavedReports",
+    events: events(
+      {
+        kind: "SavedReportSaved",
+        reportId: "mine",
+        label: "My notes",
+        ownerId: USER,
+        definition: { columns: [{ name: "title" }] }
+      },
+      {
+        kind: "SavedReportSaved",
+        reportId: "team",
+        label: "Team notes",
+        ownerId: "manager",
+        definition: { columns: [{ name: "priority" }] }
+      },
+      {
+        kind: "SavedReportSaved",
+        reportId: "mine",
+        label: "My priority notes",
+        ownerId: USER,
+        definition: { columns: [{ name: "title" }, { name: "priority" }] }
+      },
+      { kind: "SavedReportDeleted", reportId: "team", ownerId: "manager" }
+    ),
+    foldAll: (stream) => foldSavedReports(TENANT, noteDocType, stream),
+    foldFrom: (initial, stream) => foldSavedReportsFrom(initial, TENANT, noteDocType, stream)
+  }),
+  foldCase({
+    name: "foldUserAccount",
+    events: events(
+      {
+        kind: "UserAccountCreated",
+        userId: USER,
+        email: "user@example.com",
+        roles: ["User"],
+        enabled: true
+      },
+      { kind: "UserRolesChanged", userId: USER, roles: ["User", "Reviewer"] },
+      { kind: "UserAccountDisabled", userId: USER },
+      { kind: "UserAccountEnabled", userId: USER }
+    ),
+    foldAll: (stream) => foldUserAccount(TENANT, USER, stream),
+    foldFrom: (initial, stream) => foldUserAccountFrom(initial, TENANT, USER, stream)
+  }),
+  foldCase({
+    name: "foldUserNotifications",
+    events: events(
+      {
+        kind: "UserNotificationRecorded",
+        notificationId: "notification-1",
+        sourceEventId: "source-1",
+        eventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        recipientId: USER,
+        doctype: "Note",
+        documentName: "One",
+        actorId: "owner"
+      },
+      { kind: "UserNotificationRead", notificationId: "notification-1" },
+      { kind: "UserNotificationDismissed", notificationId: "notification-1" }
+    ),
+    foldAll: (stream) => foldUserNotifications(TENANT, USER, stream),
+    foldFrom: (initial, stream) => foldUserNotificationsFrom(initial, TENANT, USER, stream)
+  }),
+  foldCase({
+    name: "foldUserPermissions",
+    events: events(
+      {
+        kind: "UserPermissionAllowed",
+        userId: USER,
+        targetDoctype: "Project",
+        targetName: "Apollo",
+        applicableDoctypes: ["Note"]
+      },
+      {
+        kind: "UserPermissionAllowed",
+        userId: USER,
+        targetDoctype: "Project",
+        targetName: "Gemini",
+        applicableDoctypes: ["Note"]
+      },
+      {
+        kind: "UserPermissionRevoked",
+        userId: USER,
+        targetDoctype: "Project",
+        targetName: "Apollo",
+        applicableDoctypes: ["Note"]
+      }
+    ),
+    foldAll: (stream) => foldUserPermissions(TENANT, USER, stream),
+    foldFrom: (initial, stream) => foldUserPermissionsFrom(initial, TENANT, USER, stream)
   }),
   foldCase({
     name: "foldPrintSettings",
@@ -219,6 +618,10 @@ const cases: readonly FoldCase<unknown>[] = [
 ];
 
 describe("fold associativity", () => {
+  it("covers all resumable folds", () => {
+    expect(cases).toHaveLength(25);
+  });
+
   for (const testCase of cases) {
     describe(testCase.name, () => {
       const all = testCase.events;

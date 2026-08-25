@@ -48,7 +48,11 @@ export class InMemoryEventStore implements EventStore, EventBatchStore, AuditEve
       .filter((event) => options.maxSequence === undefined || event.sequence <= options.maxSequence)
       .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
       .sort((left, right) => left.sequence - right.sequence);
-    const page = options.limit === undefined ? events : events.slice(Math.max(0, events.length - options.limit));
+    const page = options.limit === undefined
+      ? events
+      : options.minSequence === undefined
+        ? events.slice(Math.max(0, events.length - options.limit))
+        : events.slice(0, options.limit);
     return page.map(cloneDomainEvent);
   }
 

@@ -57,6 +57,14 @@ describe("read stream minSequence", () => {
         limit: 5
       });
       expect(query.params).toEqual([2, 8, "DocumentUpdated", 5]);
+      expect(query.sql).toContain("ORDER BY sequence ASC LIMIT ?");
+      expect(query.reverseResults).toBe(false);
+    });
+
+    it("preserves recent-page ordering when a lower bound is absent", () => {
+      const query = eventStreamQuery({ maxSequence: 8, limit: 5 });
+      expect(query.sql).toContain("ORDER BY sequence DESC LIMIT ?");
+      expect(query.reverseResults).toBe(true);
     });
   });
 
@@ -92,6 +100,31 @@ describe("read stream minSequence", () => {
         const store = await seed();
         const events = await store.readStream(stream, { minSequence: 2, maxSequence: 3 });
         expect(events.map((event) => event.sequence)).toEqual([2, 3]);
+      });
+
+      it("returns the first forward page when combined with limit", async () => {
+        const store = await seed();
+        const events = await store.readStream(stream, { minSequence: 2, limit: 2 });
+        expect(events.map((event) => event.sequence)).toEqual([2, 3]);
+      });
+
+      it("supports continuation pages and the full forward filter combination", async () => {
+        const store = await seed();
+        const firstPage = await store.readStream(stream, {
+          minSequence: 2,
+          maxSequence: 4,
+          payloadKinds: ["DocumentUpdated"],
+          limit: 2
+        });
+        const nextPage = await store.readStream(stream, {
+          minSequence: 4,
+          maxSequence: 4,
+          payloadKinds: ["DocumentUpdated"],
+          limit: 2
+        });
+
+        expect(firstPage.map((event) => event.sequence)).toEqual([2, 3]);
+        expect(nextPage.map((event) => event.sequence)).toEqual([4]);
       });
 
       it("reads the whole stream when minSequence is absent", async () => {
