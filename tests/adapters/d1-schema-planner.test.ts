@@ -11,6 +11,7 @@ import {
   D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
   D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS,
   D1_JOB_EXECUTION_SCHEMA_STATEMENTS,
+  D1_PROJECTION_SORT_COLUMN,
   defineDocType,
   planD1Migrations,
   planD1ProjectionIndexes,
@@ -37,15 +38,43 @@ describe("D1 schema planner", () => {
     expect(statements[0]!.name).toMatch(/^idx_cf_frappe_documents_task_status_[a-f0-9]{8}$/);
     expect(statements[0]!.sql).toBe(
       `CREATE INDEX IF NOT EXISTS ${statements[0]!.name} ` +
-        "ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.status')) " +
+        "ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.status'), updated_at) " +
         "WHERE doctype = 'Task';"
     );
     expect(statements[1]!.name).toMatch(/^idx_cf_frappe_documents_task_owner_status_[a-f0-9]{8}$/);
     expect(statements[1]!.sql).toBe(
       `CREATE INDEX IF NOT EXISTS ${statements[1]!.name} ` +
-        "ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.owner'), json_extract(data_json, '$.status')) " +
+        "ON cf_frappe_documents (tenant_id, doctype, json_extract(data_json, '$.owner'), json_extract(data_json, '$.status'), updated_at) " +
         "WHERE doctype = 'Task';"
     );
+  });
+
+  it("ends every projection index with the default list sort column", () => {
+    // Without the trailing sort column a filtered list ordered by the default
+    // `updatedAt` falls back to `USE TEMP B-TREE FOR ORDER BY`, which sorts every
+    // matching row before LIMIT applies. See docs/projection-indexes.md.
+    const Task = defineDocType({
+      name: "Task",
+      fields: [
+        { name: "status", type: "select", options: ["Open", "Done"] },
+        { name: "priority", type: "text" }
+      ],
+      indexes: [["status"], ["status", "priority"]]
+    });
+
+    for (const statement of planD1ProjectionIndexes([Task])) {
+      expect(statement.sql).toContain(`, ${D1_PROJECTION_SORT_COLUMN}) WHERE doctype = 'Task';`);
+    }
+  });
+
+  it("rejects the same projection index declared twice on one DocType", () => {
+    const Task = defineDocType({
+      name: "Task",
+      fields: [{ name: "status", type: "text" }],
+      indexes: [["status"], ["status"]]
+    });
+
+    expect(() => planD1ProjectionIndexes([Task])).toThrow("is planned more than once");
   });
 
   it("renders migration text for multiple statements", () => {

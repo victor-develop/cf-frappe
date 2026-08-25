@@ -30,6 +30,13 @@ export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
 export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_rollbacks";
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 
+/**
+ * Trailing projection-index column that lets the default list ordering
+ * (`orderBy: "updatedAt"`) be served straight from a filtered projection index
+ * instead of a temporary B-tree sort.
+ */
+export const D1_PROJECTION_SORT_COLUMN = "updated_at";
+
 export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
     name: "create_cf_frappe_events",
@@ -229,6 +236,13 @@ export const D1_AUTOMATION_RUN_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[]
   }
 ];
 
+/**
+ * Plans one partial index per declared field list. Each index key is
+ * `(tenant_id, doctype, ...declared fields, updated_at)`: the declared fields
+ * serve the filter, and the trailing {@link D1_PROJECTION_SORT_COLUMN} lets the
+ * default list ordering be read straight off the index instead of falling back
+ * to a temporary B-tree sort.
+ */
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -250,7 +264,7 @@ export function planD1ProjectionIndexes(
         name,
         sql:
           `CREATE INDEX IF NOT EXISTS ${name} ` +
-          `ON cf_frappe_documents (tenant_id, doctype, ${jsonColumns.join(", ")}) ` +
+          `ON cf_frappe_documents (tenant_id, doctype, ${jsonColumns.join(", ")}, ${D1_PROJECTION_SORT_COLUMN}) ` +
           `WHERE doctype = '${escapeSqlString(doctype.name)}';`
       };
     })
