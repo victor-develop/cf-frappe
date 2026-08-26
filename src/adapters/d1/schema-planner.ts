@@ -30,7 +30,29 @@ export interface D1MigrationInput {
 
 export interface D1MigrationPlanOptions {
   readonly includeCore?: boolean;
+  /**
+   * Ceiling on declared projection indexes across all DocTypes, defaulting to
+   * {@link D1_PROJECTION_INDEX_BUDGET}. Raise it deliberately after reading the
+   * write-cost curve in docs/projection-indexes.md.
+   */
+  readonly maxProjectionIndexes?: number;
 }
+
+/**
+ * Default ceiling on how many declared projection indexes may live on
+ * `cf_frappe_documents` at once.
+ *
+ * Every insert pays for every index on the table, including the ones its own
+ * DocType can never match, and that cost grows faster than the index count.
+ * Measured on a real local D1 (600 rows per point, inserting into a DocType that
+ * matches no partial index): 28 us/row at 0 indexes, 48 at 150, 147 at 300, and
+ * 1422 at 600. `scripts/bench-projection-index-writes.mjs` reproduces the curve.
+ *
+ * 300 is where the cost becomes a visible fraction of a D1 write rather than
+ * noise. This is a speed bump, not a wall: pass `maxProjectionIndexes` to raise
+ * it, and prefer purpose-built read models over more indexes.
+ */
+export const D1_PROJECTION_INDEX_BUDGET = 300;
 
 export const D1_CORE_MIGRATION_ID = "0001_cf_frappe_core";
 export const D1_JOB_EXECUTION_MIGRATION_ID = "0002_cf_frappe_job_executions";
@@ -354,6 +376,7 @@ export function planD1Migrations(
     );
   }
 
+  assertProjectionIndexBudget(doctypes, options.maxProjectionIndexes ?? D1_PROJECTION_INDEX_BUDGET);
   assertUniqueMigrationIds(migrations);
   return migrations;
 }
@@ -401,6 +424,23 @@ export function renderD1Migrations(migrations: readonly D1Migration[]): string {
   return migrations
     .map((migration) => `-- ${migration.id}: ${migration.label ?? migration.id}\n${renderD1Migration(migration)}`)
     .join("\n\n");
+}
+
+function assertProjectionIndexBudget(
+  doctypes: readonly DocTypeDefinition[],
+  budget: number
+): void {
+  const declared = doctypes.reduce((total, doctype) => total + (doctype.indexes ?? []).length, 0);
+  if (declared <= budget) {
+    return;
+  }
+  throw new FrameworkError(
+    "MIGRATION_INDEX_BUDGET_EXCEEDED",
+    `${declared} declared projection indexes exceed the budget of ${budget} on ${D1_DOCUMENTS_TABLE}; ` +
+      "every insert pays for every index on the table and the cost grows faster than the count. " +
+      "Drop indexes, move the query to a purpose-built read model, or raise maxProjectionIndexes deliberately.",
+    { status: 409 }
+  );
 }
 
 function indexName(doctype: string, fields: readonly string[]): string {
