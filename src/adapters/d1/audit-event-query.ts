@@ -1,6 +1,7 @@
 import type { AuditEventQuery } from "../../ports/audit-event-store.js";
 import type { AuditDocumentEventQuery } from "../../ports/audit-event-store.js";
 import { documentStream } from "../../core/streams.js";
+import { D1_EVENTS_TABLE } from "./tables.js";
 
 export interface AuditEventD1Query {
   readonly sql: string;
@@ -43,7 +44,7 @@ export function auditEventQuery(query: AuditEventQuery): AuditEventD1Query {
   }
   return {
     sql: `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
-         FROM cf_frappe_events
+         FROM ${D1_EVENTS_TABLE}
          WHERE ${clauses.join(" AND ")}
          ORDER BY occurred_at DESC, stream ASC, sequence DESC${query.limit !== undefined ? " LIMIT ?" : ""}`,
     params
@@ -57,7 +58,7 @@ export function auditDocumentEventQuery(query: AuditDocumentEventQuery): AuditEv
   }
   return {
     sql: `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
-         FROM cf_frappe_events
+         FROM ${D1_EVENTS_TABLE}
          WHERE stream = ?
          ORDER BY sequence ASC${query.limit !== undefined ? " LIMIT ?" : ""}`,
     params

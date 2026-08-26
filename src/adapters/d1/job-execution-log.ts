@@ -10,6 +10,7 @@ import type {
 import type { JobMessage } from "../../ports/job-queue.js";
 import { d1JobExecutionListQuery } from "./job-execution-query.js";
 import { jobExecutionFromRow, type JobExecutionRow } from "./serde.js";
+import { D1_JOB_EXECUTIONS_TABLE } from "./tables.js";
 
 export class D1JobExecutionLog implements JobExecutionLog {
   constructor(private readonly db: D1Database) {}
@@ -75,7 +76,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
     const row = await this.db
       .prepare(
         `SELECT tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error
-         FROM cf_frappe_job_executions
+         FROM ${D1_JOB_EXECUTIONS_TABLE}
          WHERE ${where}
          LIMIT 1`
       )
@@ -97,7 +98,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
     const normalized = cloneRecord(record);
     await this.db
       .prepare(
-        `INSERT INTO cf_frappe_job_executions
+        `INSERT INTO ${D1_JOB_EXECUTIONS_TABLE}
          (tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id, idempotency_key)
@@ -139,7 +140,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
     const metadata = cloneJson(message.metadata);
     const row = await this.db
       .prepare(
-        `INSERT INTO cf_frappe_job_executions
+        `INSERT INTO ${D1_JOB_EXECUTIONS_TABLE}
          (tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, NULL, NULL, NULL)
          ON CONFLICT(tenant_id, idempotency_key)
@@ -154,7 +155,7 @@ export class D1JobExecutionLog implements JobExecutionLog {
            finished_at = NULL,
            result_json = NULL,
            error = NULL
-         WHERE cf_frappe_job_executions.status = 'failed'
+         WHERE ${D1_JOB_EXECUTIONS_TABLE}.status = 'failed'
          RETURNING tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error`
       )
       .bind(

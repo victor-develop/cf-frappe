@@ -1,4 +1,5 @@
 import {
+  D1_QUERIED_TABLES,
   D1_STATISTICS_TARGETS,
   analyzeD1Statistics,
   clearD1Statistics,
@@ -10,10 +11,10 @@ describe("D1 statistics", () => {
     const db = new FakeD1Database();
 
     await expect(analyzeD1Statistics(db as unknown as D1Database)).resolves.toEqual({
-      analyzed: ["cf_frappe_documents", "cf_frappe_events"]
+      analyzed: [...D1_QUERIED_TABLES]
     });
 
-    expect(db.executedSql).toEqual(["ANALYZE cf_frappe_documents;", "ANALYZE cf_frappe_events;"]);
+    expect(db.executedSql).toEqual(D1_QUERIED_TABLES.map((table) => `ANALYZE ${table};`));
   });
 
   it("analyzes named indexes so a large table can be split under the query timeout", async () => {
@@ -159,8 +160,11 @@ describe("D1 statistics", () => {
     expect(never.executedSql.some((sql) => sql.includes("DELETE FROM sqlite_stat1"))).toBe(false);
   });
 
-  it("exposes the framework tables as the default target set", () => {
-    expect(D1_STATISTICS_TARGETS).toEqual(["cf_frappe_documents", "cf_frappe_events"]);
+  it("exposes the queried framework tables as the default target set", () => {
+    expect(D1_STATISTICS_TARGETS).toEqual(D1_QUERIED_TABLES);
+    expect(D1_STATISTICS_TARGETS).toContain("cf_frappe_documents");
+    expect(D1_STATISTICS_TARGETS).toContain("cf_frappe_events");
+    expect(D1_STATISTICS_TARGETS).not.toContain("cf_frappe_migrations");
   });
 });
 

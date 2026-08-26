@@ -1,5 +1,6 @@
 import { cloneDomainEvent } from "../../core/domain-events.js";
 import type { DomainEvent } from "../../core/types.js";
+import { D1_EVENTS_TABLE } from "./tables.js";
 
 export { sequenceEvents } from "../../core/domain-events.js";
 
@@ -7,7 +8,7 @@ export function insertEventStatement(db: D1Database, event: DomainEvent): D1Prep
   const normalized = cloneDomainEvent(event);
   return db
     .prepare(
-      `INSERT INTO cf_frappe_events
+      `INSERT INTO ${D1_EVENTS_TABLE}
        (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )

@@ -1,6 +1,7 @@
 import { FrameworkError } from "./errors.js";
 import type { Actor, DocTypeDefinition, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
+import { isMetadataName } from "./identifiers.js";
 
 export interface PrintFieldDefinition {
   readonly field: string;
@@ -465,7 +466,7 @@ function isInsideRawTextElement(template: string, offset: number, tagName: "scri
 }
 
 function assertIdentifier(value: string, label: string): void {
-  if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
+  if (!isMetadataName(value)) {
     throw new FrameworkError("PRINT_FORMAT_INVALID", `Invalid ${label}: '${value}'`, {
       status: 400
     });

@@ -1,5 +1,14 @@
 import type { DocTypeDefinition, RetiredIndexDefinition } from "../../core/types.js";
 import { FrameworkError } from "../../core/errors.js";
+import {
+  D1_AUTOMATION_RUNS_TABLE,
+  D1_DATA_PATCHES_TABLE,
+  D1_DOCUMENTS_TABLE,
+  D1_EVENTS_TABLE,
+  D1_JOB_EXECUTIONS_TABLE,
+  D1_MIGRATIONS_TABLE
+} from "./tables.js";
+import { isMetadataName } from "../../core/identifiers.js";
 
 export interface PlannedSqlStatement {
   readonly name: string;
@@ -41,7 +50,7 @@ export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
     name: "create_cf_frappe_events",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_events (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_EVENTS_TABLE} (` +
       "id TEXT PRIMARY KEY, " +
       "tenant_id TEXT NOT NULL, " +
       "stream TEXT NOT NULL, " +
@@ -60,24 +69,24 @@ export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
     name: "index_cf_frappe_events_stream_sequence",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_stream_sequence " +
-      "ON cf_frappe_events(stream, sequence);"
+      `ON ${D1_EVENTS_TABLE}(stream, sequence);`
   },
   {
     name: "index_cf_frappe_events_doctype_time",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_doctype_time " +
-      "ON cf_frappe_events(tenant_id, doctype, occurred_at);"
+      `ON ${D1_EVENTS_TABLE}(tenant_id, doctype, occurred_at);`
   },
   {
     name: "index_cf_frappe_events_tenant_time",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_tenant_time " +
-      "ON cf_frappe_events(tenant_id, occurred_at, stream, sequence);"
+      `ON ${D1_EVENTS_TABLE}(tenant_id, occurred_at, stream, sequence);`
   },
   {
     name: "create_cf_frappe_documents",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_documents (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_DOCUMENTS_TABLE} (` +
       "tenant_id TEXT NOT NULL, " +
       "doctype TEXT NOT NULL, " +
       "name TEXT NOT NULL, " +
@@ -93,12 +102,12 @@ export const D1_CORE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
     name: "index_cf_frappe_documents_list",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_documents_list " +
-      "ON cf_frappe_documents(tenant_id, doctype, updated_at);"
+      `ON ${D1_DOCUMENTS_TABLE}(tenant_id, doctype, updated_at);`
   },
   {
     name: "create_cf_frappe_migrations",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_migrations (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_MIGRATIONS_TABLE} (` +
       "id TEXT PRIMARY KEY, " +
       "checksum TEXT NOT NULL, " +
       "statement_count INTEGER NOT NULL, " +
@@ -111,7 +120,7 @@ export const D1_JOB_EXECUTION_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
   {
     name: "create_cf_frappe_job_executions",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_job_executions (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_JOB_EXECUTIONS_TABLE} (` +
       "tenant_id TEXT NOT NULL, " +
       "idempotency_key TEXT NOT NULL, " +
       "job_name TEXT NOT NULL, " +
@@ -128,28 +137,28 @@ export const D1_JOB_EXECUTION_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
     name: "index_cf_frappe_job_executions_history",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_history " +
-      "ON cf_frappe_job_executions(tenant_id, job_name, status, started_at);"
+      `ON ${D1_JOB_EXECUTIONS_TABLE}(tenant_id, job_name, status, started_at);`
   },
   {
     name: "index_cf_frappe_job_executions_started_at",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_job_executions_started_at " +
-      "ON cf_frappe_job_executions(tenant_id, started_at);"
+      `ON ${D1_JOB_EXECUTIONS_TABLE}(tenant_id, started_at);`
   }
 ];
 
 export const D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
     name: "add_payload_json_to_cf_frappe_job_executions",
-    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN payload_json TEXT;"
+    sql: `ALTER TABLE ${D1_JOB_EXECUTIONS_TABLE} ADD COLUMN payload_json TEXT;`
   },
   {
     name: "add_metadata_json_to_cf_frappe_job_executions",
-    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN metadata_json TEXT;"
+    sql: `ALTER TABLE ${D1_JOB_EXECUTIONS_TABLE} ADD COLUMN metadata_json TEXT;`
   },
   {
     name: "add_enqueued_at_to_cf_frappe_job_executions",
-    sql: "ALTER TABLE cf_frappe_job_executions ADD COLUMN enqueued_at TEXT;"
+    sql: `ALTER TABLE ${D1_JOB_EXECUTIONS_TABLE} ADD COLUMN enqueued_at TEXT;`
   }
 ];
 
@@ -157,7 +166,7 @@ export const D1_DATA_PATCH_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
     name: "create_cf_frappe_data_patches",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_data_patches (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_DATA_PATCHES_TABLE} (` +
       "id TEXT PRIMARY KEY, " +
       "checksum TEXT NOT NULL, " +
       "status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'failed')), " +
@@ -175,12 +184,12 @@ export const D1_DATA_PATCH_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
 export const D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
     name: "rename_cf_frappe_data_patches_for_rollbacks",
-    sql: "ALTER TABLE cf_frappe_data_patches RENAME TO cf_frappe_data_patches_before_rollbacks;"
+    sql: `ALTER TABLE ${D1_DATA_PATCHES_TABLE} RENAME TO cf_frappe_data_patches_before_rollbacks;`
   },
   {
     name: "create_cf_frappe_data_patches_with_rollbacks",
     sql:
-      "CREATE TABLE cf_frappe_data_patches (" +
+      `CREATE TABLE ${D1_DATA_PATCHES_TABLE} (` +
       "id TEXT PRIMARY KEY, " +
       "checksum TEXT NOT NULL, " +
       "status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'failed', 'rollback_pending', 'rolled_back', 'rollback_failed')), " +
@@ -203,7 +212,7 @@ export const D1_DATA_PATCH_ROLLBACK_SCHEMA_STATEMENTS: readonly PlannedSqlStatem
   {
     name: "copy_cf_frappe_data_patch_rows_for_rollbacks",
     sql:
-      "INSERT INTO cf_frappe_data_patches (" +
+      `INSERT INTO ${D1_DATA_PATCHES_TABLE} (` +
       "id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present, rollback_result_present" +
       ") SELECT id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present, 0 " +
       "FROM cf_frappe_data_patches_before_rollbacks;"
@@ -218,7 +227,7 @@ export const D1_AUTOMATION_RUN_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[]
   {
     name: "create_cf_frappe_automation_runs",
     sql:
-      "CREATE TABLE IF NOT EXISTS cf_frappe_automation_runs (" +
+      `CREATE TABLE IF NOT EXISTS ${D1_AUTOMATION_RUNS_TABLE} (` +
       "tenant_id TEXT NOT NULL, " +
       "run_id TEXT NOT NULL, " +
       "status TEXT NOT NULL, " +
@@ -232,7 +241,7 @@ export const D1_AUTOMATION_RUN_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[]
     name: "index_cf_frappe_automation_runs_claim",
     sql:
       "CREATE INDEX IF NOT EXISTS idx_cf_frappe_automation_runs_claim " +
-      "ON cf_frappe_automation_runs(tenant_id, status, available_at, enqueued_at, run_id);"
+      `ON ${D1_AUTOMATION_RUNS_TABLE}(tenant_id, status, available_at, enqueued_at, run_id);`
   }
 ];
 
@@ -264,7 +273,7 @@ export function planD1ProjectionIndexes(
         name,
         sql:
           `CREATE INDEX IF NOT EXISTS ${name} ` +
-          `ON cf_frappe_documents (tenant_id, doctype, ${jsonColumns.join(", ")}, ${D1_PROJECTION_SORT_COLUMN}) ` +
+          `ON ${D1_DOCUMENTS_TABLE} (tenant_id, doctype, ${jsonColumns.join(", ")}, ${D1_PROJECTION_SORT_COLUMN}) ` +
           `WHERE doctype = '${escapeSqlString(doctype.name)}';`
       };
     })
@@ -536,7 +545,7 @@ function validateRetiredIndexedFields(
 }
 
 function assertMigrationIdentifier(value: string, label: string): void {
-  if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
+  if (!isMetadataName(value)) {
     throw new FrameworkError("MIGRATION_INDEX_INVALID", `Invalid ${label}: '${value}'`, {
       status: 400
     });

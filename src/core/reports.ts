@@ -1,6 +1,7 @@
 import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
 import type { Actor, DocTypeDefinition, FieldDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
+import { isMetadataName } from "./identifiers.js";
 
 export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte" | "between" | "not_between";
 export type ReportFilterValue = JsonPrimitive | readonly JsonPrimitive[];
@@ -1141,7 +1142,7 @@ function assertUnique(values: readonly string[], label: string, reportName: stri
 }
 
 function assertIdentifier(value: string, label: string): void {
-  if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
+  if (!isMetadataName(value)) {
     throw new FrameworkError("REPORT_INVALID", `Invalid ${label}: '${value}'`, {
       status: 400
     });

@@ -1,4 +1,5 @@
 import type { ReadStreamOptions } from "../../ports/document-store.js";
+import { D1_EVENTS_TABLE } from "./tables.js";
 
 export interface EventStreamQuery {
   readonly sql: string;
@@ -31,7 +32,7 @@ export function eventStreamQuery(options: ReadStreamOptions): EventStreamQuery {
   }
   return {
     sql: `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
-         FROM cf_frappe_events
+         FROM ${D1_EVENTS_TABLE}
          WHERE ${clauses.join(" AND ")}
          ORDER BY sequence ${reverseResults ? "DESC" : "ASC"}${options.limit !== undefined ? " LIMIT ?" : ""}`,
     params,

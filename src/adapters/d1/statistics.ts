@@ -1,10 +1,12 @@
 import { FrameworkError } from "../../core/errors.js";
+import { D1_QUERIED_TABLES } from "./tables.js";
+import { isPlainIdentifier } from "../../core/identifiers.js";
 
 /**
  * Tables whose indexes carry the framework's query load, and therefore the
  * default target set for the statistics helpers.
  */
-export const D1_STATISTICS_TARGETS: readonly string[] = ["cf_frappe_documents", "cf_frappe_events"];
+export const D1_STATISTICS_TARGETS: readonly string[] = D1_QUERIED_TABLES;
 
 export interface D1StatisticsTargetOptions {
   /**
@@ -148,7 +150,7 @@ function assertD1StatisticsTargets(targets: readonly string[] | undefined): read
   for (const target of resolved) {
     // ANALYZE takes no bound parameters, so the target is interpolated and must
     // be a plain SQL identifier of a sane length.
-    if (target.length > 128 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(target)) {
+    if (target.length > 128 || !isPlainIdentifier(target)) {
       throw new FrameworkError("D1_ANALYZE_TARGET_INVALID", `Invalid D1 statistics target: '${target}'`, {
         status: 400
       });
