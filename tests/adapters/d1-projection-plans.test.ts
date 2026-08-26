@@ -1,6 +1,5 @@
 import { defineDocType } from "../../src";
 import type { ListDocumentsQuery, PredicateExpression } from "../../src";
-import { matchesPredicateExpression } from "../../src/core/list-view.js";
 import { afterField, predicateGroup } from "../predicate-fixtures";
 import { createProjectionEngine, projectionRows, type ProjectionEngine } from "../sqlite-engine";
 
@@ -121,34 +120,16 @@ describe("D1 projection plans on a real SQLite engine", () => {
     expect(engine.plan(query)).not.toMatch(TASK_STATUS_INDEX);
   });
 
-  it("keeps the post-filter path consistent with the in-memory predicate", () => {
-    // A `not` node cannot be pushed down, so the store filters in memory. The
-    // rows the engine returns for the pushed-down part must still contain every
-    // row the in-memory predicate accepts.
+  it("pushes a negation into SQL instead of filtering in memory", () => {
+    // `not` used to force every candidate row through an in-memory pass. It now
+    // compiles to a null-safe `IS NOT 1`, so the engine answers the question.
+    // Parity with the in-memory adapter, including absent and JSON-null fields,
+    // is asserted in d1-projection-negation.test.ts.
     const predicate: PredicateExpression = { kind: "not", predicate: afterField("status", "S7") };
     const query = listQuery({ predicate, limit: 2000 });
 
-    const returned = engine.names(query);
-    const kept = returned.filter((name) =>
-      matchesPredicateExpression(
-        {
-          tenantId: "t1",
-          doctype: "Task",
-          name,
-          version: 1,
-          docstatus: "draft",
-          data: { status: `S${Number(name.slice("T-".length)) % 50}` },
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z"
-        },
-        predicate
-      )
-    );
-
-    // The pushed-down query cannot exclude anything, so it returns everything
-    // and the in-memory pass removes exactly the S7 rows.
-    expect(returned.length).toBe(2000);
-    expect(kept.length).toBe(1960);
+    expect(engine.names(query).length).toBe(1960);
+    expect(engine.total(query)).toBe(1960);
   });
 
   it("loses the list index for the plain list when statistics are gathered while empty", () => {

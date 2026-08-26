@@ -156,6 +156,38 @@ Retired indexes are dropped before the replacements are created, within the same
 
 For a local development database, resetting the D1 state and re-running the migrations is usually faster than staging a version bump.
 
+## What the predicate compiler pushes down
+
+`d1ProjectionListQuery` compiles a `PredicateExpression` into SQL. Everything it can push down, it does; what it cannot, it names.
+
+**Pushed down exactly**: `eq`, `ne`, `in`, `not_in`, `is`, `gt`, `gte`, `lt`, `lte`, `between`, `not_between`, and `all`/`any` groups of them.
+
+**Negation is pushed down too**, but not as `NOT (...)`. SQL comparisons against a missing JSON key yield NULL, `NOT NULL` is NULL, and the row drops out — while the in-memory evaluator treats a missing field as a failed match, so its negation *keeps* the row. The compiler emits the null-safe form instead:
+
+```sql
+(json_extract(data_json, '$.status') = ?) IS NOT 1
+```
+
+which means "the positive condition is false or unknown" — exactly the in-memory truth table. A negation only compiles when the inner SQL is equivalent to the inner predicate, never when it is a superset: negating a superset does not produce a superset of the negation.
+
+The wrapped form is not index-usable. That is inherent — a negation is rarely selective enough for an index to help — and paying a scan beats pulling every candidate row into the Worker.
+
+**Refined in memory**: `contains`, `like`, `not_like`, and any group containing them under `any`. These fold case over the full Unicode range (a JS regexp with the `i` flag) while SQLite's `LIKE` folds ASCII only, so pushing them down would change which rows match on non-ASCII data. The store fetches a bounded candidate set and applies `matchesPredicateExpression` to it.
+
+When that candidate set exceeds `D1_PROJECTION_MAX_POST_FILTER_ROWS` the query is **rejected**, not silently truncated, and the error names the operator:
+
+```
+D1_PROJECTION_REFINEMENT_TOO_BROAD: Filtering on contains cannot be pushed into SQL,
+and the remaining predicate matched more than 1000 candidate rows on 'Note'. Add a
+filter that does push down (an equality, range, or set membership) alongside it.
+```
+
+Pagination is not distorted: the refinement path fetches every candidate up to the bound, filters, then slices, so `total` is exact and offsets are stable.
+
+`D1ProjectionListQuery.refinement` carries the predicate and the operators that forced it, so a caller that wants to log or surface "this query was refined in memory" has the reason available rather than a bare flag.
+
+Parity between the D1 adapter and the in-memory adapter — including rows whose field is absent or JSON null, which is where a naive negation goes wrong — is asserted against a real SQLite engine in `tests/adapters/d1-projection-negation.test.ts`.
+
 ## Rules for contributors
 
 SQLite matches expression indexes **textually**. `data_json->>'$.status'` is semantically identical to `json_extract(data_json, '$.status')` but will not match an index built with the latter, and nothing fails loudly when they diverge — the index simply stops being used and the query gets slower.
