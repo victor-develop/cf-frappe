@@ -232,3 +232,27 @@ A target moves `building` → `caught-up` → `active`, and the one it replaces 
 **Followers are written outside the commit's atomic boundary, deliberately.** The active projection is written inside `commitBatch`'s batch together with the events; a projection that is still being built must not be able to fail a document write, and widening the transaction to cover it would do exactly that. So follower writes happen after the commit succeeds, each failure isolated and handed to `onFollowerFailure`. Without wiring that callback the router drifts silently, which is the one way to use it wrong.
 
 `withProjectionFollowers` also forwards the auxiliary snapshots that `commitBatch` produces — naming counters and unique-value reservations — because a follower missing those is not a usable projection.
+
+## Rebuilding a projection from the event stream
+
+A projection is a cache folded from events. Change the fold — add a derived field, fix a projection bug, reshape the physical layout — and every existing row is stale. This is not a problem a CRUD system has: its rows *are* the truth, so a logic change only affects the future. An event-sourced row is a derivation, so a logic change has to recompute history.
+
+`ProjectionRebuildService` (`src/application/projection-rebuild-service.ts`) does that recomputation:
+
+```ts
+const rebuild = new ProjectionRebuildService({ events, streams, router, targetStore, clock, ids });
+
+const run = await rebuild.start({ tenantId, doctype: "Task", target: "v2", batchSize: 50 });
+// driven from a Cron Trigger or a queue consumer:
+const { state, more } = await rebuild.advance(tenantId, run.runId);
+```
+
+Three properties make it safe to run against live traffic:
+
+- **It never writes the projection that is serving reads.** `start` and `advance` both refuse a target equal to the router's current read source, so live reads keep answering from the projection that was already correct. Rebuild into a `building` target, compare, then promote it with `router.readFrom(...)`.
+- **It is resumable and idempotent.** Progress is a cursor over the lexicographically ordered stream list, so a stream created mid-rebuild sorts into place instead of shifting everything after it, and `ProjectionStore.save` upserts — replaying a batch rewrites the same rows rather than duplicating them. Zero-pad document names if you want that order to match the numeric one.
+- **It is externally paced.** `advance` does one batch and returns. Batch size times call frequency is the rate limit, which matters because a rebuild competes with live writes for the same single-writer database.
+
+A stream that fails to rebuild is recorded and skipped rather than stalling the run, and a stream that folds to `null` (a deleted document) advances the cursor with nothing written.
+
+Run state lives in its own event stream, one per run, and folds to counts plus a bounded sample of recent errors. That shape is deliberate: a state folded from a stream must not grow with the length of that stream — see issue #28 for what the alternative costs.
