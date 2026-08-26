@@ -208,3 +208,27 @@ Index DDL (`planD1ProjectionIndexes`) and query predicates (`d1ProjectionListQue
 Both were checked by mutation: hand-writing `->>` in the query builder, and hand-writing a `json_extract` that differs by a single space, each turn a test red with the offending file and line.
 
 These two builders previously escaped quotes differently — `''` on the query side and a backslash on the index side, the latter not even valid SQLite. Metadata validation happens to forbid quotes in field names today, so it was unreachable; it was still one field-name rule away from an index that silently never matched.
+
+## Running two projections side by side
+
+`RoutedProjectionStore` (`src/application/projection-targets.ts`) mounts several `ProjectionStore` implementations at once so a projection can be reshaped without a stop-the-world switch.
+
+```ts
+const router = new RoutedProjectionStore({
+  targets: [
+    { name: "v1", state: "active", store: new D1ProjectionStore(env.DB) },
+    { name: "v2", state: "building", store: new D1ProjectionStore(env.PROJECTIONS_V2) }
+  ],
+  onFollowerFailure: (failure) => console.error("projection follower diverged", failure)
+});
+
+const documents = withProjectionFollowers(new D1DocumentStore(env.DB), router);
+```
+
+A target moves `building` → `caught-up` → `active`, and the one it replaces becomes `retired`. `building` and `caught-up` receive writes but are not read from; `retired` receives nothing. Reads switch at runtime with `router.readFrom("v2")`, which is how a candidate projection is compared against the live one before it is promoted.
+
+`core` and `application` never see any of this. The router satisfies `ProjectionStore`, and the read source is chosen here rather than threaded through queries — so a projection version is a deployment concern, not part of the query contract.
+
+**Followers are written outside the commit's atomic boundary, deliberately.** The active projection is written inside `commitBatch`'s batch together with the events; a projection that is still being built must not be able to fail a document write, and widening the transaction to cover it would do exactly that. So follower writes happen after the commit succeeds, each failure isolated and handed to `onFollowerFailure`. Without wiring that callback the router drifts silently, which is the one way to use it wrong.
+
+`withProjectionFollowers` also forwards the auxiliary snapshots that `commitBatch` produces — naming counters and unique-value reservations — because a follower missing those is not a usable projection.
