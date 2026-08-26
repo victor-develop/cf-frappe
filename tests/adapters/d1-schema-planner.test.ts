@@ -11,6 +11,7 @@ import {
   D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID,
   D1_JOB_EXECUTION_MESSAGE_SCHEMA_STATEMENTS,
   D1_JOB_EXECUTION_SCHEMA_STATEMENTS,
+  D1_PROJECTION_INDEX_BUDGET,
   D1_PROJECTION_SORT_COLUMN,
   defineDocType,
   planD1Migrations,
@@ -65,6 +66,49 @@ describe("D1 schema planner", () => {
     for (const statement of planD1ProjectionIndexes([Task])) {
       expect(statement.sql).toContain(`, ${D1_PROJECTION_SORT_COLUMN}) WHERE doctype = 'Task';`);
     }
+  });
+
+  it("rejects a plan that exceeds the projection index budget, and allows raising it", () => {
+    // Every insert pays for every index on cf_frappe_documents, including ones
+    // its own DocType can never match, and the cost grows faster than the count.
+    // Measured curve and the reproduction script are in docs/projection-indexes.md.
+    const doctypes = Array.from({ length: D1_PROJECTION_INDEX_BUDGET + 1 }, (_unused, index) =>
+      defineDocType({
+        name: `Budget ${index}`,
+        fields: [{ name: "status", type: "text" }],
+        indexes: [["status"]]
+      })
+    );
+
+    expect(() => planD1Migrations(doctypes, { includeCore: false })).toThrow(
+      `exceed the budget of ${D1_PROJECTION_INDEX_BUDGET}`
+    );
+    expect(() => planD1Migrations(doctypes, { includeCore: false })).toThrowError(
+      expect.objectContaining({ code: "MIGRATION_INDEX_BUDGET_EXCEEDED" })
+    );
+
+    expect(
+      planD1Migrations(doctypes.slice(0, D1_PROJECTION_INDEX_BUDGET), { includeCore: false })
+    ).toHaveLength(D1_PROJECTION_INDEX_BUDGET);
+    expect(
+      planD1Migrations(doctypes, { includeCore: false, maxProjectionIndexes: doctypes.length })
+    ).toHaveLength(doctypes.length);
+  });
+
+  it("counts every declared index on a DocType against the budget", () => {
+    const doctype = defineDocType({
+      name: "Wide",
+      fields: [
+        { name: "a", type: "text" },
+        { name: "b", type: "text" }
+      ],
+      indexes: [["a"], ["b"], ["a", "b"]]
+    });
+
+    expect(() => planD1Migrations([doctype], { includeCore: false, maxProjectionIndexes: 2 })).toThrow(
+      "3 declared projection indexes exceed the budget of 2"
+    );
+    expect(planD1Migrations([doctype], { includeCore: false, maxProjectionIndexes: 3 })).toHaveLength(1);
   });
 
   it("rejects the same projection index declared twice on one DocType", () => {

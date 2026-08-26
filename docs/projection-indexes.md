@@ -106,6 +106,36 @@ await analyzeD1Statistics(env.DB); // refresh instead, if you have a reason to k
 
 `updated_at` is a 25-character ISO timestamp carried in every index entry. Measured on a 100k-row fixture with two projection indexes, `page_count` rose from 6253 to 7493 (roughly +20%) versus the filter-only shape. `COUNT(*)` also moves to the wider covering index. D1 bills on storage, so budget for it when a DocType declares several indexes.
 
+## How many indexes the table can carry
+
+Every insert into `cf_frappe_documents` pays for every index on the table, including the ones its own DocType can never match — `WHERE doctype = '...'` scopes which index *entries* get written, not which indexes get considered. That cost grows faster than the index count.
+
+Measured on a real local D1, inserting into a DocType that matches no partial index:
+
+| Partial indexes on the table | us/row | vs baseline |
+| --- | --- | --- |
+| 0 | 28 | 1x |
+| 150 | 48 | 1.7x |
+| 300 | 147 | 5.3x |
+| 600 | 1422 | **51x** |
+
+The same curve reproduces on `node:sqlite` and on the system SQLite, under both single-transaction and per-row-transaction inserts, with narrow and wide index keys, and at every page-cache size tried. The marginal cost per index rises from about 0.07us at 50 indexes to about 2.5us at 600. Reproduce it with:
+
+```bash
+node scripts/bench-projection-index-writes.mjs
+node scripts/bench-projection-index-writes.mjs --indexes=0,100,200,300,400,500,600 --rows=5000
+```
+
+`planD1Migrations` therefore refuses a plan whose declared projection indexes exceed `D1_PROJECTION_INDEX_BUDGET` (300), raising `MIGRATION_INDEX_BUDGET_EXCEEDED`. 300 is where the cost stops being noise against a D1 write and starts being a visible fraction of it. It is a speed bump, not a wall:
+
+```ts
+planD1Migrations(doctypes, { maxProjectionIndexes: 500 });
+```
+
+Raise it deliberately. The cheaper answer is usually fewer indexes: one composite index that matches the query shape beats several single-field ones, and a query that needs a shape the projection table cannot serve wants its own read model rather than another index here.
+
+Note what this is *not* an argument for. Splitting the projection table per DocType would remove this cost, and it is still not worth it at these numbers — the budget exists so the curve cannot be climbed silently, which is the actual failure mode.
+
 ## Changing an index declaration
 
 `D1MigrationRunner` records a checksum per applied migration and throws `MIGRATION_CHECKSUM_MISMATCH` when a recorded migration's planned checksum changes. Editing a DocType's `indexes` changes the SQL of `doctype_<slug>_v<n>_indexes`, so it will not apply over a database that already ran that migration.
