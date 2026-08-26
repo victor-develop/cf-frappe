@@ -549,6 +549,14 @@ describe("cf-frappe CLI scaffold", () => {
     expect(readmeText).toContain("document delivery outbox drain job");
   });
 
+  // These two shell out to `wrangler types` and `tsc`, so their runtime tracks
+  // external tool startup rather than anything this repo controls. Measured at
+  // 15-16s locally. The outbox one carried a 30s ceiling, which is the suite
+  // default and therefore no headroom at all — it has since exceeded it on both
+  // CI and a developer machine. The generous ceiling is about the subprocess,
+  // not about these assertions being slow. See #44.
+  const EXTERNAL_TOOL_TIMEOUT = 120_000;
+
   it("generates Wrangler binding types for starter outbox deployment resources", async () => {
     const target = join(tempRoot, "Typed Outbox Starter App");
 
@@ -570,7 +578,7 @@ describe("cf-frappe CLI scaffold", () => {
     expect(generatedTypes).toContain("SESSION_SECRET: string;");
     expect(generatedTypes).toContain('AGGREGATES: DurableObjectNamespace<import("./src/worker").AggregateCoordinator>;');
     expect(generatedTypes).toContain('REALTIME: DurableObjectNamespace<import("./src/worker").RealtimeHub>;');
-  }, 30_000);
+  }, EXTERNAL_TOOL_TIMEOUT);
 
   it("creates a Cloudflare Access-backed starter app", async () => {
     const target = join(tempRoot, "Access App");
@@ -732,7 +740,7 @@ describe("cf-frappe CLI scaffold", () => {
     );
 
     await runTool(binPath("tsc"), ["--noEmit", "-p", "tsconfig.smoke.json"], target);
-  }, 60_000);
+  }, EXTERNAL_TOOL_TIMEOUT);
 
   it("generates a seed patch that preserves pre-existing same-title records during rollback", async () => {
     const target = join(tempRoot, "seed-rollback");
