@@ -385,6 +385,7 @@ describe("user account events", () => {
       "UserAuthProviderLinked",
       "UserAuthProviderSynced",
       "UserPasswordChanged",
+      "UserPasswordRehashed",
       "UserPasswordResetRequested",
       "UserPasswordResetCompleted",
       "UserPasswordResetDeliveryFailed",

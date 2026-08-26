@@ -6,7 +6,17 @@ export interface WebCryptoPbkdf2PasswordHasherOptions {
   readonly hashBytes?: number;
 }
 
-const DEFAULT_ITERATIONS = 210_000;
+/**
+ * OWASP's Password Storage Cheat Sheet recommends 600,000 iterations for
+ * PBKDF2-HMAC-SHA-256. The previous default of 210,000 is the figure from the
+ * SHA-512 row of the same table, applied to SHA-256 by mistake.
+ *
+ * Measured on workerd (Apple Silicon, `wrangler dev --local`), PBKDF2-SHA256
+ * costs about 66ms per million iterations, so this is roughly 68ms per login
+ * against 22ms before. Production Workers may be 2-3x slower; that is still
+ * within a login budget. See docs/passwords.md.
+ */
+const DEFAULT_ITERATIONS = 600_000;
 const DEFAULT_SALT_BYTES = 16;
 const DEFAULT_HASH_BYTES = 32;
 const FORMAT = "pbkdf2-sha256";
@@ -34,6 +44,15 @@ export function webCryptoPbkdf2PasswordHasher(
       }
       const derived = await derivePbkdf2(password, parsed.salt, parsed.iterations, parsed.hash.byteLength);
       return timingSafeEqual(derived, parsed.hash);
+    },
+    needsRehash(encodedHash) {
+      const parsed = parseHash(encodedHash);
+      // An unparseable hash is not upgradeable — verify already rejects it, and
+      // rehashing would need a password this method does not have.
+      if (!parsed) {
+        return false;
+      }
+      return parsed.iterations < iterations || parsed.hash.byteLength !== hashBytes;
     }
   };
 }

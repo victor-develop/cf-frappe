@@ -291,6 +291,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [ReturnsOS Example](examples/returns/README.md): full reference application for multi-workflow and durable Automation.
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
+- [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
 - [Todo Example](examples/todos): small metadata-only model example.
 
@@ -578,6 +579,7 @@ See [English TODO](#todo).
 - [ReturnsOS Example](examples/returns/README.md)：多工作流和持久化 Automation 的完整参考应用。
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
+- [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。
 - [Todo Example](examples/todos)：一个小型元数据示例。
 

@@ -21,6 +21,7 @@ import {
   userEmailVerificationRequestedPayload,
   userEmailVerifiedPayload,
   userPasswordChangedPayload,
+  userPasswordRehashedPayload,
   userPasswordResetDeliveryFailedPayload,
   userPasswordResetCompletedPayload,
   userPasswordResetRequestedPayload,
@@ -32,6 +33,7 @@ import {
 } from "./user-account-events.js";
 import {
   foldUserAccount,
+  foldUserAccountFrom,
   isUserAccountStatePayloadKind,
   publicUserAccount,
   userAccountActor,
@@ -453,7 +455,53 @@ export class UserAccountService {
     const passwordHash = userAccountPasswordHashForLogin(state);
     const verified = await this.passwords.verify(password, passwordHash);
     ensureUserAccountPasswordLoginAllowed(state, verified);
-    return { actor: userAccountActor(state), account: publicUserAccount(state) };
+    const upgraded = await this.rehashPasswordIfStale({ tenantId, userId, password, passwordHash, state });
+    return { actor: userAccountActor(upgraded), account: publicUserAccount(upgraded) };
+  }
+
+  /**
+   * Upgrades a stored password hash to the current hashing parameters after a
+   * successful login, so raising the cost factor reaches existing accounts
+   * instead of only new ones.
+   *
+   * Returns the state the caller must build its session from. That matters: the
+   * rehash appends an event, which advances `state.version`, and
+   * `ensureUserAccountSessionCurrent` compares a session's recorded version
+   * against the current one. Returning the pre-rehash state would hand out a
+   * session that is invalid on its very next request.
+   *
+   * A failed upgrade never fails the login. The old hash still verifies, so the
+   * worst case is that this account tries again next time.
+   */
+  private async rehashPasswordIfStale(input: {
+    readonly tenantId: TenantId;
+    readonly userId: string;
+    readonly password: string;
+    readonly passwordHash: string;
+    readonly state: UserAccountState;
+  }): Promise<UserAccountState> {
+    if (this.passwords.needsRehash?.(input.passwordHash) !== true) {
+      return input.state;
+    }
+    try {
+      const passwordHash = await this.passwords.hash(input.password);
+      const saved = await this.appendEvent({
+        tenantId: input.tenantId,
+        stream: userAccountsStream(input.tenantId, input.userId),
+        expectedVersion: input.state.version,
+        actorId: input.userId,
+        metadata: undefined,
+        payload: userPasswordRehashedPayload({
+          userId: input.userId,
+          passwordHash
+        })
+      });
+      return foldUserAccountFrom(input.state, input.tenantId, input.userId, saved);
+    } catch {
+      // Concurrent writes, storage failures, anything: the login already
+      // succeeded on the existing hash and must not be turned into an error.
+      return input.state;
+    }
   }
 
   async requestPasswordReset(command: RequestUserPasswordResetCommand): Promise<AccountRecoveryRequestResult> {
