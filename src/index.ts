@@ -7,6 +7,8 @@ export * from "./adapters/print/index.js";
 export * from "./application/audit-service.js";
 export * from "./application/audit-policy.js";
 export * from "./application/access-policy.js";
+export * from "./application/projection-rebuild-events.js";
+export * from "./application/projection-rebuild-service.js";
 export * from "./application/projection-targets.js";
 export * from "./application/automation-run-consumer.js";
 export * from "./application/automation-run-events.js";
