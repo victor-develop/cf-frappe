@@ -9,6 +9,7 @@ import {
   D1_MIGRATIONS_TABLE
 } from "./tables.js";
 import { isMetadataName } from "../../core/identifiers.js";
+import { d1JsonExtract } from "./json-path.js";
 
 export interface PlannedSqlStatement {
   readonly name: string;
@@ -290,7 +291,7 @@ export function planD1ProjectionIndexes(
         );
       }
       indexNames.add(name);
-      const jsonColumns = fields.map((field) => `json_extract(data_json, '$.${escapeJsonPath(field)}')`);
+      const jsonColumns = fields.map((field) => d1JsonExtract(field));
       return {
         name,
         sql:
@@ -456,10 +457,6 @@ function slug(value: string): string {
 
 function escapeSqlString(value: string): string {
   return value.replaceAll("'", "''");
-}
-
-function escapeJsonPath(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
 }
 
 function validateIndexedFields(doctype: DocTypeDefinition, fields: readonly string[]): void {
