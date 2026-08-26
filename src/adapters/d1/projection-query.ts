@@ -17,6 +17,33 @@ export interface D1ProjectionListQuery {
   readonly postFilter?: PredicateExpression;
 }
 
+const D1_PROJECTION_COLUMNS =
+  "tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at";
+
+/**
+ * SQL for a projection list page. The `LIMIT`/`OFFSET` placeholders are bound
+ * after {@link D1ProjectionListQuery.params}; pass `paged: false` for the
+ * post-filter path, which binds a single candidate cap instead.
+ */
+export function d1ProjectionListSql(
+  query: D1ProjectionListQuery,
+  options: { readonly paged?: boolean } = {}
+): string {
+  const paged = options.paged ?? true;
+  return (
+    `SELECT ${D1_PROJECTION_COLUMNS}\n` +
+    `         FROM cf_frappe_documents\n` +
+    `         WHERE ${query.where}\n` +
+    `         ORDER BY ${query.orderBy}\n` +
+    `         ${paged ? "LIMIT ? OFFSET ?" : "LIMIT ?"}`
+  );
+}
+
+/** SQL for the total that accompanies a projection list page. */
+export function d1ProjectionCountSql(query: D1ProjectionListQuery): string {
+  return `SELECT COUNT(*) AS total FROM cf_frappe_documents WHERE ${query.where}`;
+}
+
 export function d1ProjectionListQuery(query: ListDocumentsQuery): D1ProjectionListQuery {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;

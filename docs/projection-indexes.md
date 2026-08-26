@@ -57,7 +57,7 @@ The predicate shape matters too. The index serves the ordering only when the fil
 | --- | --- |
 | `eq` on the first indexed field | Served from the index |
 | `eq` on every indexed field | Served from the index |
-| `in` | **Not** served — falls back to a sort |
+| `in` | Not served by the declared index — streams from `idx_cf_frappe_documents_list` instead, which is still ordered, so there is no sort (but see the statistics section: gathering statistics changes this) |
 | `gt` / `lt` / range | Not served |
 | filter on a field that is not the index prefix | Falls back to `idx_cf_frappe_documents_list` |
 
@@ -96,7 +96,7 @@ await clearD1Statistics(env.DB);   // the remedy: drop them, back to built-in es
 await analyzeD1Statistics(env.DB); // refresh instead, if you have a reason to keep statistics
 ```
 
-**If a list query has an unexpected plan, check for statistics first.** Recorded estimates that begin `0 0` came from an `ANALYZE` against an empty table and should be cleared.
+**If a list query has an unexpected plan, check for statistics first.** Recorded estimates that begin `0 0` came from an `ANALYZE` against an empty table and should be cleared. SQLite reads `sqlite_stat1` when a connection opens, so clearing takes effect on the next request rather than on the connection that is already running.
 
 `analyzeD1Statistics` runs one statement per target so a very large table can be split by index name; if one target fails, the targets before it keep their refreshed statistics and the failure names them. Cost is not the problem — 0.22s for 500k rows across five indexes on a local SQLite, scaling linearly — the plans are.
 
@@ -129,3 +129,11 @@ For a local development database, resetting the D1 state and re-running the migr
 ## Rules for contributors
 
 All JSON field access in the D1 adapter must go through the shared expression helpers. SQLite matches expression indexes **textually**: `data_json->>'$.status'` is semantically identical to `json_extract(data_json, '$.status')` but will not match an index built with the latter, and nothing fails loudly when it happens — the index just stops being used. See issue #9.
+
+## How these claims are tested
+
+Everything above about which index serves which shape is asserted in `tests/adapters/d1-projection-plans.test.ts`, which loads `migrations/0001_cf_frappe_core.sql` plus the planned index DDL into a real SQLite engine (`node:sqlite`, built into Node 22, no dependency) and reads `EXPLAIN QUERY PLAN` for the query that `d1ProjectionListQuery` actually composes, with the same bound parameters the store uses. The helper is `tests/sqlite-engine.ts`.
+
+This layer exists because plan claims were previously settled by throwaway probes, and two probes reached opposite conclusions about whether a partial index is reachable with a bound `doctype` — the difference was the tool, not the engine. A driver that prepares before binding cannot see the bound value and so cannot satisfy the index's `WHERE doctype = '...'`; D1 sends SQL and parameters together and can. `node:sqlite` binds before stepping, so it reproduces D1's behaviour here, which is why the assertions are meaningful.
+
+`node:sqlite` is not D1's SQLite build. Assert index *reachability* and result *correctness* in this layer. Do not assert cost estimates or choices between close candidates — those can differ between builds and data volumes, and belong in a measurement recorded in a PR, not in a test.

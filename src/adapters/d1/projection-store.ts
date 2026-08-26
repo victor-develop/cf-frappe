@@ -11,7 +11,12 @@ import { matchesPredicateExpression } from "../../core/list-view.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
 import { listD1AutomationRunClaimCandidateSnapshots } from "./automation-run-index.js";
-import { d1ProjectionListQuery, type D1ProjectionListQuery } from "./projection-query.js";
+import {
+  d1ProjectionCountSql,
+  d1ProjectionListQuery,
+  d1ProjectionListSql,
+  type D1ProjectionListQuery
+} from "./projection-query.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
 
 export const D1_PROJECTION_MAX_POST_FILTER_ROWS = 1_000;
@@ -69,17 +74,9 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
     }
     const [rows, count] = await this.db.batch([
       this.db
-        .prepare(
-          `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
-           FROM cf_frappe_documents
-           WHERE ${listQuery.where}
-           ORDER BY ${listQuery.orderBy}
-           LIMIT ? OFFSET ?`
-        )
+        .prepare(d1ProjectionListSql(listQuery))
         .bind(...listQuery.params, listQuery.limit, listQuery.offset),
-      this.db
-        .prepare(`SELECT COUNT(*) AS total FROM cf_frappe_documents WHERE ${listQuery.where}`)
-        .bind(...listQuery.params)
+      this.db.prepare(d1ProjectionCountSql(listQuery)).bind(...listQuery.params)
     ]);
     if (!rows || !count) {
       return { data: [], limit: listQuery.limit, offset: listQuery.offset, total: 0 };
@@ -107,13 +104,7 @@ async function listWithPostFilter(
   postFilter: NonNullable<D1ProjectionListQuery["postFilter"]>
 ): Promise<ListDocumentsResult> {
   const result = await db
-    .prepare(
-      `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
-       FROM cf_frappe_documents
-       WHERE ${query.where}
-       ORDER BY ${query.orderBy}
-       LIMIT ?`
-    )
+    .prepare(d1ProjectionListSql(query, { paged: false }))
     .bind(...query.params, D1_PROJECTION_MAX_POST_FILTER_ROWS + 1)
     .all<DocumentRow>();
   const rows = (result.results ?? []) as DocumentRow[];
