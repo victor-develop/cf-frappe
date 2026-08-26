@@ -73,9 +73,22 @@ export function projectionRebuildStream(tenantId: TenantId, runId: string): Stre
 export const PROJECTION_REBUILD_DOCTYPE = "__ProjectionRebuild";
 
 export function foldProjectionRebuild(events: readonly DomainEvent[]): ProjectionRebuildState | null {
-  let state: ProjectionRebuildState | null = null;
+  return foldProjectionRebuildFrom(null, events);
+}
+
+/**
+ * Resumable form: folds `events` on top of an already-folded state. Every fold in
+ * the framework has one so a snapshot can stand in for the head of a stream (see
+ * issue #17), and `tests/core/fold-associativity.test.ts` holds every one of them
+ * to `foldFrom(foldAll(head), tail) === foldAll(head ++ tail)`.
+ */
+export function foldProjectionRebuildFrom(
+  initial: ProjectionRebuildState | null,
+  events: readonly DomainEvent[]
+): ProjectionRebuildState | null {
+  let state: ProjectionRebuildState | null = initial;
   for (const event of events) {
-    const payload = event.payload as unknown as ProjectionRebuildEventPayload;
+    const payload = event.payload;
     if (payload.kind === "ProjectionRebuildStarted") {
       state = {
         runId: payload.runId,
@@ -108,17 +121,44 @@ export function foldProjectionRebuild(events: readonly DomainEvent[]): Projectio
       };
       continue;
     }
-    state = {
-      ...state,
-      status:
-        payload.kind === "ProjectionRebuildCompleted"
-          ? "completed"
-          : payload.kind === "ProjectionRebuildAborted"
-            ? "aborted"
-            : "failed",
-      ...(payload.kind === "ProjectionRebuildCompleted" ? {} : { reason: payload.reason }),
-      version: event.sequence
-    };
+    if (payload.kind === "ProjectionRebuildCompleted") {
+      state = { ...state, status: "completed", version: event.sequence };
+      continue;
+    }
+    if (payload.kind === "ProjectionRebuildAborted" || payload.kind === "ProjectionRebuildFailed") {
+      state = {
+        ...state,
+        status: payload.kind === "ProjectionRebuildAborted" ? "aborted" : "failed",
+        reason: payload.reason,
+        version: event.sequence
+      };
+    }
+    // Anything else on this stream is not part of the run and is ignored.
   }
   return state;
+}
+
+declare module "../core/types.js" {
+  interface DomainEventPayloadMap {
+    readonly ProjectionRebuildStarted: Extract<
+      ProjectionRebuildEventPayload,
+      { readonly kind: "ProjectionRebuildStarted" }
+    >;
+    readonly ProjectionRebuildAdvanced: Extract<
+      ProjectionRebuildEventPayload,
+      { readonly kind: "ProjectionRebuildAdvanced" }
+    >;
+    readonly ProjectionRebuildCompleted: Extract<
+      ProjectionRebuildEventPayload,
+      { readonly kind: "ProjectionRebuildCompleted" }
+    >;
+    readonly ProjectionRebuildAborted: Extract<
+      ProjectionRebuildEventPayload,
+      { readonly kind: "ProjectionRebuildAborted" }
+    >;
+    readonly ProjectionRebuildFailed: Extract<
+      ProjectionRebuildEventPayload,
+      { readonly kind: "ProjectionRebuildFailed" }
+    >;
+  }
 }
