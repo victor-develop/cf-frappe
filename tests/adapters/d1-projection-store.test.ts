@@ -485,10 +485,6 @@ describe("D1ProjectionStore", () => {
       [filterPredicate([{ field: "title", operator: "like", value: "value 100\\%%" }]), ["D1 Literal"]],
       [filterPredicate([{ field: "title", operator: "not_like", value: "%ä%" }]), ["D1 Literal", "D1 Routine"]],
       [{
-        kind: "not",
-        predicate: filterPredicate([{ field: "title", value: "Routine" }])
-      }, ["D1 Umlaut", "D1 Literal", "D1 Null", "D1 Missing"]],
-      [{
         kind: "group",
         match: "any",
         predicates: [
@@ -507,9 +503,12 @@ describe("D1ProjectionStore", () => {
 
     expect(db.statements.every((statement) => !statement.sql.includes("LOWER("))).toBe(true);
     expect(db.statements.every((statement) => !statement.sql.includes("NOT ("))).toBe(true);
+    // Negation is no longer refined in memory, so it is asserted against a real
+    // SQLite engine in d1-projection-negation.test.ts: this fake interprets a
+    // subset of SQL by hand and cannot evaluate `(...) IS NOT 1`.
   });
 
-  it("bounds shared-evaluator post-filter scans", async () => {
+  it("rejects a refinement that would scan too many candidates, naming the operator", async () => {
     const db = new FakeD1Database(Array.from(
       { length: D1_PROJECTION_MAX_POST_FILTER_ROWS + 1 },
       (_, index) => documentRow({ name: `D1 ${index}`, data: { title: "Ärger" } })
@@ -520,7 +519,12 @@ describe("D1ProjectionStore", () => {
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "title", operator: "contains", value: "ä" }])
-    })).rejects.toThrow(`exceeded ${D1_PROJECTION_MAX_POST_FILTER_ROWS} candidate rows`);
+    })).rejects.toMatchObject({
+      code: "D1_PROJECTION_REFINEMENT_TOO_BROAD",
+      // The message names the operator that could not be pushed down, so a slow
+      // or rejected query is diagnosable without reading the compiler.
+      message: expect.stringContaining("Filtering on contains cannot be pushed into SQL")
+    });
     expect(db.statements[0]?.params).toEqual([
       "acme",
       "Note",

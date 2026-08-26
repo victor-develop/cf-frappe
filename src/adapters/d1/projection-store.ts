@@ -11,11 +11,13 @@ import { matchesPredicateExpression } from "../../core/list-view.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
 import { listD1AutomationRunClaimCandidateSnapshots } from "./automation-run-index.js";
+import { FrameworkError } from "../../core/errors.js";
 import {
   d1ProjectionCountSql,
   d1ProjectionListQuery,
   d1ProjectionListSql,
-  type D1ProjectionListQuery
+  type D1ProjectionListQuery,
+  type D1ProjectionRefinement
 } from "./projection-query.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
@@ -70,8 +72,8 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
 
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const listQuery = d1ProjectionListQuery(query);
-    if (listQuery.postFilter !== undefined) {
-      return listWithPostFilter(this.db, listQuery, listQuery.postFilter);
+    if (listQuery.refinement !== undefined) {
+      return listWithRefinement(this.db, query.doctype, listQuery, listQuery.refinement);
     }
     const [rows, count] = await this.db.batch([
       this.db
@@ -99,10 +101,11 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
   }
 }
 
-async function listWithPostFilter(
+async function listWithRefinement(
   db: D1Database,
+  doctype: DocTypeName,
   query: D1ProjectionListQuery,
-  postFilter: NonNullable<D1ProjectionListQuery["postFilter"]>
+  refinement: D1ProjectionRefinement
 ): Promise<ListDocumentsResult> {
   const result = await db
     .prepare(d1ProjectionListSql(query, { paged: false }))
@@ -110,13 +113,18 @@ async function listWithPostFilter(
     .all<DocumentRow>();
   const rows = (result.results ?? []) as DocumentRow[];
   if (rows.length > D1_PROJECTION_MAX_POST_FILTER_ROWS) {
-    throw new Error(
-      `D1 projection Predicate post-filter exceeded ${D1_PROJECTION_MAX_POST_FILTER_ROWS} candidate rows; add a selective exact filter`
+    throw new FrameworkError(
+      "D1_PROJECTION_REFINEMENT_TOO_BROAD",
+      `Filtering on ${refinement.operators.join(", ")} cannot be pushed into SQL, and the remaining ` +
+        `predicate matched more than ${D1_PROJECTION_MAX_POST_FILTER_ROWS} candidate rows on ` +
+        `'${doctype}'. Add a filter that does push down (an equality, range, or set membership) ` +
+        "alongside it.",
+      { status: 400 }
     );
   }
   const matching = rows
     .map(documentFromRow)
-    .filter((document) => matchesPredicateExpression(document, postFilter));
+    .filter((document) => matchesPredicateExpression(document, refinement.predicate));
   return {
     data: matching.slice(query.offset, query.offset + query.limit),
     limit: query.limit,

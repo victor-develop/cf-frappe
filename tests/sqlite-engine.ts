@@ -29,6 +29,12 @@ export interface ProjectionEngine {
   clearStatistics(): void;
   /** Rows currently recorded in `sqlite_stat1`, empty when never analyzed. */
   statistics(): readonly { readonly index: string; readonly stat: string }[];
+  /**
+   * A `D1Database`-shaped handle backed by this engine, so a real
+   * `D1ProjectionStore` can be exercised against real SQL instead of a
+   * hand-written interpreter of a SQL subset.
+   */
+  asD1Database(): D1Database;
   close(): void;
 }
 
@@ -118,6 +124,9 @@ export function createProjectionEngine(doctypes: readonly DocTypeDefinition[]): 
         .all()
         .map((row) => ({ index: String(row.idx), stat: String(row.stat) }));
     },
+    asD1Database() {
+      return createD1Facade(db);
+    },
     close() {
       db.close();
     }
@@ -146,4 +155,38 @@ export function projectionRows(input: {
     });
   }
   return rows;
+}
+
+type SqlParam = string | number | bigint | null;
+
+function toSqlParams(params: readonly unknown[]): readonly SqlParam[] {
+  return params.map((param) => {
+    if (param === null || param === undefined) {
+      return null;
+    }
+    if (typeof param === "boolean") {
+      return param ? 1 : 0;
+    }
+    if (typeof param === "number" || typeof param === "bigint" || typeof param === "string") {
+      return param;
+    }
+    return JSON.stringify(param);
+  });
+}
+
+function createD1Facade(db: DatabaseSync): D1Database {
+  const statement = (sql: string, params: readonly SqlParam[]) => ({
+    bind: (...next: readonly unknown[]) => statement(sql, toSqlParams(next)),
+    all: async () => ({ results: db.prepare(sql).all(...params) }),
+    first: async () => db.prepare(sql).all(...params)[0] ?? null,
+    run: async () => {
+      db.prepare(sql).run(...params);
+      return { success: true };
+    }
+  });
+  return {
+    prepare: (sql: string) => statement(sql, []),
+    batch: async (statements: readonly { all(): Promise<unknown> }[]) =>
+      Promise.all(statements.map((entry) => entry.all()))
+  } as unknown as D1Database;
 }
