@@ -87,6 +87,11 @@ export async function analyzeD1Statistics(
  * Drops recorded statistics so the planner falls back to its built-in estimates.
  * This is the remedy when a database carries statistics gathered against an
  * empty or wildly different data volume.
+ *
+ * SQLite reads `sqlite_stat1` when a connection opens, so a connection that
+ * already loaded the old statistics keeps planning with them until it is
+ * replaced. On Workers that is the next request, so this takes effect
+ * immediately in practice — but a long-lived connection would not see it.
  */
 export async function clearD1Statistics(db: D1Database): Promise<void> {
   const report = await readD1Statistics(db);
