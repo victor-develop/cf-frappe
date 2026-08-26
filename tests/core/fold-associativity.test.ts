@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as framework from "../../src";
 import type { DomainEvent, NamedWorkflowDefinition } from "../../src";
 import {
   foldAssignmentRules,
@@ -49,6 +50,8 @@ import {
   foldUserNotificationsFrom,
   foldUserPermissions,
   foldUserPermissionsFrom,
+  foldProjectionRebuild,
+  foldProjectionRebuildFrom,
   foldUserProfile,
   foldUserProfileFrom
 } from "../../src";
@@ -606,6 +609,31 @@ const cases: readonly FoldCase<unknown>[] = [
     foldFrom: (initial, stream) => foldJobScheduleDefinitionsFrom(initial, stream)
   }),
   foldCase({
+    name: "foldProjectionRebuild",
+    events: events(
+      {
+        kind: "ProjectionRebuildStarted",
+        runId: "rebuild-1",
+        doctype: "Note",
+        target: "v2",
+        batchSize: 2,
+        totalStreams: 4
+      },
+      { kind: "ProjectionRebuildAdvanced", runId: "rebuild-1", cursor: "t/Note/A", rebuilt: 1, errors: [] },
+      {
+        kind: "ProjectionRebuildAdvanced",
+        runId: "rebuild-1",
+        cursor: "t/Note/B",
+        rebuilt: 0,
+        errors: [{ stream: "t/Note/B", reason: "write rejected" }]
+      },
+      { kind: "ProjectionRebuildAdvanced", runId: "rebuild-1", cursor: "t/Note/C", rebuilt: 1, errors: [] },
+      { kind: "ProjectionRebuildCompleted", runId: "rebuild-1" }
+    ),
+    foldAll: (stream) => foldProjectionRebuild(stream),
+    foldFrom: (initial, stream) => foldProjectionRebuildFrom(initial, stream)
+  }),
+  foldCase({
     name: "foldUserProfile",
     events: events(
       { kind: "UserProfileChanged", userId: USER, profile: { fullName: "Ada" } },
@@ -618,8 +646,16 @@ const cases: readonly FoldCase<unknown>[] = [
 ];
 
 describe("fold associativity", () => {
-  it("covers all resumable folds", () => {
-    expect(cases).toHaveLength(25);
+  it("covers every fold the framework exports", () => {
+    // A hardcoded count only notices a missing *case*; it cannot notice a missing
+    // *fold*. Discovering the folds from the exports means a new one cannot slip
+    // past this file — which is exactly how foldProjectionRebuild did.
+    const exported = Object.keys(framework).filter((name) => /^fold[A-Z]/.test(name));
+    const resumable = exported.filter((name) => name.endsWith("From"));
+    const folds = exported.filter((name) => !name.endsWith("From"));
+
+    expect(folds.filter((name) => !resumable.includes(`${name}From`))).toEqual([]);
+    expect([...folds].sort()).toEqual([...cases.map((testCase) => testCase.name)].sort());
   });
 
   for (const testCase of cases) {

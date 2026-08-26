@@ -217,7 +217,7 @@ export class ProjectionRebuildService {
       documentName: runId,
       actorId: "__projection_rebuild__",
       occurredAt: this.options.clock.now(),
-      payload: payload as unknown as NewDomainEvent["payload"],
+      payload,
       metadata: {}
     };
     await this.options.events.append(stream, expectedVersion, [event]);
