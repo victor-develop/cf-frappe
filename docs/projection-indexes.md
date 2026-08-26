@@ -63,9 +63,44 @@ The predicate shape matters too. The index serves the ordering only when the fil
 
 `in` is worth calling out: a multi-select status filter in the Desk list view generates `in`, and it is outside this shape.
 
-## The planner needs statistics
+## Planner statistics (do not gather them as a performance measure)
 
-Without `sqlite_stat1` the planner will not choose a partial index at all — it falls back to `idx_cf_frappe_documents_list (tenant_id, doctype, updated_at)` and scans the doctype partition. Nothing in the framework runs `ANALYZE` today (see issue #7), so on a fresh D1 these indexes only start paying off once statistics exist.
+`ANALYZE` records per-index selectivity in `sqlite_stat1`. The framework never runs it, and on the query shapes it emits, gathering statistics was measured to help nothing and hurt something.
+
+Measured on a real local D1 with bound parameters — the table from `migrations/0001_cf_frappe_core.sql`, the indexes `planD1ProjectionIndexes` generates, 120k rows across two DocTypes, 500 distinct `status` values — comparing never analyzed, analyzed while empty (what a migration would do), and analyzed with the data loaded:
+
+| Query | Never | Analyzed empty | Analyzed with data |
+| --- | --- | --- | --- |
+| plain list | `idx_cf_frappe_documents_list`, no sort | narrower index + **temp B-tree** | `idx_cf_frappe_documents_list`, no sort |
+| `eq` on `status` | the `status` partial index | same | same |
+| `eq` on `status` + `priority` | the two-field partial index | same | same |
+| `in` on `status` | `idx_cf_frappe_documents_list`, **no sort** | partial index + **temp B-tree** | partial index + **temp B-tree** |
+| `eq` on a different DocType | `idx_cf_frappe_documents_list` | same | same |
+
+Three things follow:
+
+- **The partial indexes are chosen without any statistics.** D1 sends SQL and parameters together, so the planner knows the bound `doctype` value and can satisfy the index's `WHERE doctype = '...'` predicate. Binding a different DocType correctly stops it using that DocType's index.
+- **Statistics gathered with data present improve nothing here, and make `in` worse** — they push it onto a partial index and add a sort that the unanalyzed plan did not need.
+- **Statistics gathered while the table is empty are actively harmful.** The zero-row estimate persists until the next `ANALYZE`, and a planner that believes the table is empty costs the plain unfiltered list its index — the most frequently served query in the system.
+
+So this is diagnostic tooling, not a tuning knob:
+
+```ts
+import { analyzeD1Statistics, clearD1Statistics, readD1Statistics } from "cf-frappe";
+
+const report = await readD1Statistics(env.DB);
+// report.analyzed === false  -> never analyzed, the intended state
+// stat strings beginning "0 0" -> analyzed while empty, the harmful state
+
+await clearD1Statistics(env.DB);   // the remedy: drop them, back to built-in estimates
+await analyzeD1Statistics(env.DB); // refresh instead, if you have a reason to keep statistics
+```
+
+**If a list query has an unexpected plan, check for statistics first.** Recorded estimates that begin `0 0` came from an `ANALYZE` against an empty table and should be cleared.
+
+`analyzeD1Statistics` runs one statement per target so a very large table can be split by index name; if one target fails, the targets before it keep their refreshed statistics and the failure names them. Cost is not the problem — 0.22s for 500k rows across five indexes on a local SQLite, scaling linearly — the plans are.
+
+`PRAGMA optimize` is not a better option. It does run on D1 and it does refresh stale statistics from a fresh connection, but it samples: on the fixture above it recorded a selectivity of 2001 where a full `ANALYZE` recorded 60000, a 30x error in exactly the column the planner uses to choose an index.
 
 ## Storage and write cost
 
