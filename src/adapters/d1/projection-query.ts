@@ -8,6 +8,7 @@ import type {
   PredicateOperator
 } from "../../core/types.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
+import { d1JsonExtract, d1JsonType } from "./json-path.js";
 
 export interface D1ProjectionListQuery {
   readonly limit: number;
@@ -215,12 +216,12 @@ function listFilterExpression(field: string): string {
   if (systemExpression) {
     return systemExpression;
   }
-  return `json_extract(data_json, '${escapeSqlString(jsonPath(field))}')`;
+  return d1JsonExtract(field);
 }
 
 function nullEqualityExpression(field: string, expression: string): string {
   return systemFilterExpression(field) === undefined
-    ? `json_type(data_json, '${escapeSqlString(jsonPath(field))}') = 'null'`
+    ? `${d1JsonType(field)} = 'null'`
     : `${expression} IS NULL`;
 }
 
@@ -307,7 +308,7 @@ function listOrderExpression(orderBy: string, order: ListOrderDirection): string
         : "updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC";
     return `${systemExpression} COLLATE BINARY ${direction}, ${fallbacks}`;
   }
-  const expression = `json_extract(data_json, '${escapeSqlString(jsonPath(orderBy))}')`;
+  const expression = d1JsonExtract(orderBy);
   return `${expression} IS NULL ASC, ${expression} COLLATE BINARY ${direction}, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC`;
 }
 
@@ -326,10 +327,3 @@ function systemOrderExpression(orderBy: string): string | undefined {
   }
 }
 
-function jsonPath(field: string): string {
-  return `$.${field}`;
-}
-
-function escapeSqlString(value: string): string {
-  return value.replaceAll("'", "''");
-}

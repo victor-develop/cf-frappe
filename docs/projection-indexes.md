@@ -158,12 +158,21 @@ For a local development database, resetting the D1 state and re-running the migr
 
 ## Rules for contributors
 
-All JSON field access in the D1 adapter must go through the shared expression helpers. SQLite matches expression indexes **textually**: `data_json->>'$.status'` is semantically identical to `json_extract(data_json, '$.status')` but will not match an index built with the latter, and nothing fails loudly when it happens — the index just stops being used. See issue #9.
+SQLite matches expression indexes **textually**. `data_json->>'$.status'` is semantically identical to `json_extract(data_json, '$.status')` but will not match an index built with the latter, and nothing fails loudly when they diverge — the index simply stops being used and the query gets slower.
 
-## How these claims are tested
+So every read of a field out of `data_json` in the D1 adapter goes through `src/adapters/d1/json-path.ts`:
 
-Everything above about which index serves which shape is asserted in `tests/adapters/d1-projection-plans.test.ts`, which loads `migrations/0001_cf_frappe_core.sql` plus the planned index DDL into a real SQLite engine (`node:sqlite`, built into Node 22, no dependency) and reads `EXPLAIN QUERY PLAN` for the query that `d1ProjectionListQuery` actually composes, with the same bound parameters the store uses. The helper is `tests/sqlite-engine.ts`.
+```ts
+d1JsonExtract("status")     // json_extract(data_json, '$.status')
+d1JsonType("status")        // json_type(data_json, '$.status')
+d1JsonPathLiteral("status") // '$.status'
+```
 
-This layer exists because plan claims were previously settled by throwaway probes, and two probes reached opposite conclusions about whether a partial index is reachable with a bound `doctype` — the difference was the tool, not the engine. A driver that prepares before binding cannot see the bound value and so cannot satisfy the index's `WHERE doctype = '...'`; D1 sends SQL and parameters together and can. `node:sqlite` binds before stepping, so it reproduces D1's behaviour here, which is why the assertions are meaningful.
+Index DDL (`planD1ProjectionIndexes`) and query predicates (`d1ProjectionListQuery`) both call it, so they cannot drift. Two tests in `tests/adapters/d1-json-path.test.ts` hold that:
 
-`node:sqlite` is not D1's SQLite build. Assert index *reachability* and result *correctness* in this layer. Do not assert cost estimates or choices between close candidates — those can differ between builds and data volumes, and belong in a measurement recorded in a PR, not in a test.
+- the expression appearing in the generated index DDL is byte-identical to the one in the generated `WHERE`, for plain and space-containing field names
+- no file under `src/adapters/d1/` contains a `->` or `->>` operator in code (comments may name them)
+
+Both were checked by mutation: hand-writing `->>` in the query builder, and hand-writing a `json_extract` that differs by a single space, each turn a test red with the offending file and line.
+
+These two builders previously escaped quotes differently — `''` on the query side and a backslash on the index side, the latter not even valid SQLite. Metadata validation happens to forbid quotes in field names today, so it was unreachable; it was still one field-name rule away from an index that silently never matched.
