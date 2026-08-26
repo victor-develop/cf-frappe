@@ -18,6 +18,7 @@ import {
   type D1ProjectionListQuery
 } from "./projection-query.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
+import { D1_DOCUMENTS_TABLE } from "./tables.js";
 
 export const D1_PROJECTION_MAX_POST_FILTER_ROWS = 1_000;
 
@@ -32,7 +33,7 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
     const row = await this.db
       .prepare(
         `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
-         FROM cf_frappe_documents
+         FROM ${D1_DOCUMENTS_TABLE}
          WHERE tenant_id = ? AND doctype = ? AND name = ?`
       )
       .bind(tenantId, doctype, name)
@@ -44,7 +45,7 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
     const normalized = cloneDocumentSnapshot(snapshot);
     await this.db
       .prepare(
-        `INSERT INTO cf_frappe_documents
+        `INSERT INTO ${D1_DOCUMENTS_TABLE}
          (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id, doctype, name)

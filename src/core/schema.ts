@@ -26,6 +26,7 @@ import {
   freezeListFilter,
   normalizeListFilters
 } from "./list-view.js";
+import { isMetadataName } from "./identifiers.js";
 
 export interface ValidationOptions {
   readonly partial?: boolean;
@@ -295,7 +296,7 @@ function validateTableField(
 }
 
 function assertIdentifier(value: string, label: string): void {
-  if (!/^[A-Za-z][A-Za-z0-9_ ]*$/.test(value)) {
+  if (!isMetadataName(value)) {
     throw new Error(`Invalid ${label}: '${value}'`);
   }
 }

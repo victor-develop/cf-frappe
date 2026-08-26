@@ -30,6 +30,7 @@ import {
   serializedPatchResult,
   type DataPatchRow
 } from "./data-patch-serde.js";
+import { D1_DATA_PATCHES_TABLE } from "./tables.js";
 
 export class D1DataPatchLog implements DataPatchLog {
   constructor(private readonly db: D1Database) {}
@@ -41,7 +42,7 @@ export class D1DataPatchLog implements DataPatchLog {
         `SELECT id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present
                 , rollback_claim_id, rollback_claimed_at, rolled_back_at, rollback_failed_at, rollback_error,
                   rollback_result_json, rollback_result_present
-         FROM cf_frappe_data_patches
+         FROM ${D1_DATA_PATCHES_TABLE}
          ORDER BY id ASC`
       )
       .all<DataPatchRow>();
@@ -55,7 +56,7 @@ export class D1DataPatchLog implements DataPatchLog {
         `SELECT id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present
                 , rollback_claim_id, rollback_claimed_at, rolled_back_at, rollback_failed_at, rollback_error,
                   rollback_result_json, rollback_result_present
-         FROM cf_frappe_data_patches
+         FROM ${D1_DATA_PATCHES_TABLE}
          WHERE status = 'applied'
          ORDER BY id ASC`
       )
@@ -67,7 +68,7 @@ export class D1DataPatchLog implements DataPatchLog {
     await this.ensureDataPatchTable();
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO cf_frappe_data_patches
+        `INSERT OR IGNORE INTO ${D1_DATA_PATCHES_TABLE}
          (id, checksum, status, claim_id, claimed_at, result_present)
          VALUES (?, ?, 'pending', ?, ?, 0)`
       )
@@ -87,7 +88,7 @@ export class D1DataPatchLog implements DataPatchLog {
     await this.ensureDataPatchTable();
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'applied',
              applied_at = ?,
              result_json = ?,
@@ -115,7 +116,7 @@ export class D1DataPatchLog implements DataPatchLog {
     await this.ensureDataPatchTable();
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'failed',
              failed_at = ?,
              error = ?
@@ -135,7 +136,7 @@ export class D1DataPatchLog implements DataPatchLog {
     assertRetryableFailedJournal(row, patch.id, patch.checksum);
     const result = await this.db
       .prepare(
-        `DELETE FROM cf_frappe_data_patches
+        `DELETE FROM ${D1_DATA_PATCHES_TABLE}
          WHERE id = ?
            AND checksum = ?
            AND status = 'failed'
@@ -154,7 +155,7 @@ export class D1DataPatchLog implements DataPatchLog {
     assertRetryableRollbackFailedJournal(row, patch.id, patch.checksum);
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'rollback_pending',
              rollback_claim_id = ?,
              rollback_claimed_at = ?,
@@ -195,7 +196,7 @@ export class D1DataPatchLog implements DataPatchLog {
     }
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'rollback_pending',
              rollback_claim_id = ?,
              rollback_claimed_at = ?,
@@ -222,7 +223,7 @@ export class D1DataPatchLog implements DataPatchLog {
     await this.ensureDataPatchTable();
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'rolled_back',
              rolled_back_at = ?,
              rollback_result_json = ?,
@@ -250,7 +251,7 @@ export class D1DataPatchLog implements DataPatchLog {
     await this.ensureDataPatchTable();
     const result = await this.db
       .prepare(
-        `UPDATE cf_frappe_data_patches
+        `UPDATE ${D1_DATA_PATCHES_TABLE}
          SET status = 'rollback_failed',
              rollback_failed_at = ?,
              rollback_error = ?
@@ -267,7 +268,7 @@ export class D1DataPatchLog implements DataPatchLog {
   private async ensureDataPatchTable(): Promise<void> {
     await this.db
       .prepare(
-        `CREATE TABLE IF NOT EXISTS cf_frappe_data_patches (
+        `CREATE TABLE IF NOT EXISTS ${D1_DATA_PATCHES_TABLE} (
            id TEXT PRIMARY KEY,
            checksum TEXT NOT NULL,
            status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'failed', 'rollback_pending', 'rolled_back', 'rollback_failed')),
@@ -296,7 +297,7 @@ export class D1DataPatchLog implements DataPatchLog {
         `SELECT id, checksum, status, claim_id, claimed_at, applied_at, failed_at, error, result_json, result_present
                 , rollback_claim_id, rollback_claimed_at, rolled_back_at, rollback_failed_at, rollback_error,
                   rollback_result_json, rollback_result_present
-         FROM cf_frappe_data_patches
+         FROM ${D1_DATA_PATCHES_TABLE}
          WHERE id = ?`
       )
       .bind(id)

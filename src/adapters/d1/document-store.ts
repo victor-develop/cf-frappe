@@ -18,6 +18,7 @@ import { isD1ConstraintError } from "./constraint-error.js";
 import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { automationRunIndexUpsertStatement } from "./automation-run-index.js";
+import { D1_DOCUMENTS_TABLE, D1_EVENTS_TABLE } from "./tables.js";
 
 export class D1DocumentStore implements DocumentStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}
@@ -66,7 +67,7 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
 
   async currentVersion(stream: StreamName): Promise<number> {
     const row = await this.db
-      .prepare("SELECT COALESCE(MAX(sequence), 0) AS version FROM cf_frappe_events WHERE stream = ?")
+      .prepare(`SELECT COALESCE(MAX(sequence), 0) AS version FROM ${D1_EVENTS_TABLE} WHERE stream = ?`)
       .bind(stream)
       .first<{ version: number }>();
     return Number(row?.version ?? 0);
@@ -92,7 +93,7 @@ function documentUpsertStatement(db: D1Database, snapshot: DocumentSnapshot): D1
   const normalized = cloneDocumentSnapshot(snapshot);
   return db
     .prepare(
-      `INSERT INTO cf_frappe_documents
+      `INSERT INTO ${D1_DOCUMENTS_TABLE}
        (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(tenant_id, doctype, name)

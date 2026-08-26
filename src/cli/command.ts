@@ -249,6 +249,7 @@ import {
 } from "./workspaces.js";
 import { scaffoldProject, ScaffoldError } from "./scaffold.js";
 import type { StarterAuthMode } from "./templates.js";
+import { isPlainIdentifier } from "../core/identifiers.js";
 
 export interface CliIo {
   readonly cwd: () => string;
@@ -1079,7 +1080,7 @@ function parseAccessArgs(argv: readonly string[]): ParsedCommand {
       if (typeof value !== "string") {
         return value;
       }
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+      if (!isPlainIdentifier(value)) {
         return { kind: "invalid", message: `Cloudflare API token env var '${value}' is invalid` };
       }
       apiTokenEnv = value;
@@ -1899,7 +1900,7 @@ function parseUsersArgs(argv: readonly string[]): ParsedCommand {
       if (typeof value !== "string") {
         return value;
       }
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+      if (!isPlainIdentifier(value)) {
         return { kind: "invalid", message: `User password env var '${value}' is invalid` };
       }
       passwordEnv = value;
@@ -6883,7 +6884,7 @@ function parseEnvHeader(
   if (!isHttpHeaderName(name)) {
     return `${label} header name '${name}' is invalid`;
   }
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
+  if (!isPlainIdentifier(envName)) {
     return `${label} header env var '${envName}' is invalid`;
   }
   return { kind: "env", name, envName };

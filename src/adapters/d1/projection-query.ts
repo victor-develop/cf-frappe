@@ -7,6 +7,7 @@ import type {
   PredicateOperand,
   PredicateOperator
 } from "../../core/types.js";
+import { D1_DOCUMENTS_TABLE } from "./tables.js";
 
 export interface D1ProjectionListQuery {
   readonly limit: number;
@@ -32,7 +33,7 @@ export function d1ProjectionListSql(
   const paged = options.paged ?? true;
   return (
     `SELECT ${D1_PROJECTION_COLUMNS}\n` +
-    `         FROM cf_frappe_documents\n` +
+    `         FROM ${D1_DOCUMENTS_TABLE}\n` +
     `         WHERE ${query.where}\n` +
     `         ORDER BY ${query.orderBy}\n` +
     `         ${paged ? "LIMIT ? OFFSET ?" : "LIMIT ?"}`
@@ -41,7 +42,7 @@ export function d1ProjectionListSql(
 
 /** SQL for the total that accompanies a projection list page. */
 export function d1ProjectionCountSql(query: D1ProjectionListQuery): string {
-  return `SELECT COUNT(*) AS total FROM cf_frappe_documents WHERE ${query.where}`;
+  return `SELECT COUNT(*) AS total FROM ${D1_DOCUMENTS_TABLE} WHERE ${query.where}`;
 }
 
 export function d1ProjectionListQuery(query: ListDocumentsQuery): D1ProjectionListQuery {

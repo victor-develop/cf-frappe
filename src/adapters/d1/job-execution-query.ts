@@ -1,4 +1,5 @@
 import type { ListJobExecutionsOptions } from "../../ports/job-execution-log.js";
+import { D1_JOB_EXECUTIONS_TABLE } from "./tables.js";
 
 export interface PreparedJobExecutionQuery {
   readonly sql: string;
@@ -29,7 +30,7 @@ export function d1JobExecutionListQuery(options: ListJobExecutionsOptions): Prep
   return {
     sql:
       `SELECT tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json, enqueued_at, status, started_at, finished_at, result_json, error ` +
-      `FROM cf_frappe_job_executions ${where} ` +
+      `FROM ${D1_JOB_EXECUTIONS_TABLE} ${where} ` +
       "ORDER BY started_at DESC, idempotency_key ASC LIMIT ?",
     params
   };

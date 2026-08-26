@@ -1,5 +1,6 @@
 import type { DocumentSnapshot, TenantId } from "../../core/types.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
+import { D1_AUTOMATION_RUNS_TABLE, D1_DOCUMENTS_TABLE } from "./tables.js";
 
 export function automationRunIndexUpsertStatement(
   db: D1Database,
@@ -16,7 +17,7 @@ export function automationRunIndexUpsertStatement(
   const availableAt = automationRunAvailableAt(status, enqueuedAt, retryAt, claimExpiresAt);
   return db
     .prepare(
-      `INSERT INTO cf_frappe_automation_runs
+      `INSERT INTO ${D1_AUTOMATION_RUNS_TABLE}
        (tenant_id, run_id, status, available_at, enqueued_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(tenant_id, run_id)
@@ -36,8 +37,8 @@ export async function listD1AutomationRunClaimCandidateSnapshots(
   const rows = await db
     .prepare(
       `SELECT d.tenant_id, d.doctype, d.name, d.version, d.docstatus, d.data_json, d.created_at, d.updated_at
-       FROM cf_frappe_automation_runs r
-       JOIN cf_frappe_documents d
+       FROM ${D1_AUTOMATION_RUNS_TABLE} r
+       JOIN ${D1_DOCUMENTS_TABLE} d
          ON d.tenant_id = r.tenant_id
         AND d.doctype = '__AutomationRuns'
         AND d.name = r.run_id

@@ -6,6 +6,7 @@ import type { ReadStreamOptions } from "../../ports/document-store.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
+import { D1_EVENTS_TABLE } from "./tables.js";
 
 export class D1EventStore implements EventStore, EventBatchStore, AuditEventStore {
   constructor(private readonly db: D1Database) {}
@@ -57,7 +58,7 @@ export class D1EventStore implements EventStore, EventBatchStore, AuditEventStor
 
   async currentVersion(stream: StreamName): Promise<number> {
     const row = await this.db
-      .prepare("SELECT COALESCE(MAX(sequence), 0) AS version FROM cf_frappe_events WHERE stream = ?")
+      .prepare(`SELECT COALESCE(MAX(sequence), 0) AS version FROM ${D1_EVENTS_TABLE} WHERE stream = ?`)
       .bind(stream)
       .first<{ version: number }>();
     return Number(row?.version ?? 0);
@@ -66,7 +67,7 @@ export class D1EventStore implements EventStore, EventBatchStore, AuditEventStor
   async listStreams(query: { readonly tenantId: string; readonly doctype: string }): Promise<readonly StreamName[]> {
     const result = await this.db
       .prepare(
-        "SELECT DISTINCT stream FROM cf_frappe_events " +
+        `SELECT DISTINCT stream FROM ${D1_EVENTS_TABLE} ` +
         "WHERE tenant_id = ? AND doctype = ? ORDER BY stream ASC"
       )
       .bind(query.tenantId, query.doctype)

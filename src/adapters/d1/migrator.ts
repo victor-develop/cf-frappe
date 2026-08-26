@@ -2,6 +2,7 @@ import { FrameworkError } from "../../core/errors.js";
 import type { Clock } from "../../ports/clock.js";
 import { systemClock } from "../../ports/clock.js";
 import type { D1Migration } from "./schema-planner.js";
+import { D1_MIGRATIONS_TABLE } from "./tables.js";
 
 export interface AppliedD1Migration {
   readonly id: string;
@@ -36,7 +37,7 @@ export class D1MigrationRunner {
     const result = await this.db
       .prepare(
         `SELECT id, checksum, statement_count, applied_at
-         FROM cf_frappe_migrations
+         FROM ${D1_MIGRATIONS_TABLE}
          ORDER BY id ASC`
       )
       .all<AppliedD1MigrationRow>();
@@ -76,7 +77,7 @@ export class D1MigrationRunner {
         ...migration.statements.map((statement) => this.db.prepare(statement.sql)),
         this.db
           .prepare(
-            `INSERT INTO cf_frappe_migrations
+            `INSERT INTO ${D1_MIGRATIONS_TABLE}
              (id, checksum, statement_count, applied_at)
              VALUES (?, ?, ?, ?)`
           )
@@ -98,7 +99,7 @@ export class D1MigrationRunner {
   private async ensureMigrationTable(): Promise<void> {
     await this.db
       .prepare(
-        `CREATE TABLE IF NOT EXISTS cf_frappe_migrations (
+        `CREATE TABLE IF NOT EXISTS ${D1_MIGRATIONS_TABLE} (
            id TEXT PRIMARY KEY,
            checksum TEXT NOT NULL,
            statement_count INTEGER NOT NULL,
