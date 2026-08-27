@@ -1,9 +1,36 @@
+import { isPlainIdentifier } from "../../core/identifiers.js";
 import type { PasswordHasher } from "../../ports/password-hasher.js";
+
+/**
+ * A secret that is HMAC'd over the KDF output and is **not** stored in the
+ * database, so a database-only leak leaves offline cracking useless.
+ *
+ * `id` is recorded in the encoded hash so rotation can tell which secret
+ * produced a given record. It never reveals the secret itself.
+ */
+export interface PasswordPepper {
+  readonly id: string;
+  readonly secret: string;
+}
 
 export interface WebCryptoPbkdf2PasswordHasherOptions {
   readonly iterations?: number;
   readonly saltBytes?: number;
   readonly hashBytes?: number;
+  /**
+   * Applied after the KDF, so rewrapping a stored hash under a new pepper is one
+   * HMAC rather than another full KDF run. Omit for the previous behaviour.
+   */
+  readonly pepper?: PasswordPepper;
+  /**
+   * Retired peppers kept for verification during a rotation. A hash produced by
+   * one of these still verifies, and is rewrapped under the current pepper on
+   * the next successful login.
+   *
+   * There is no offline batch rotation: `HMAC(oldPepper, x)` cannot be reversed
+   * to recover `x`, so rotation only happens as accounts log in.
+   */
+  readonly previousPeppers?: readonly PasswordPepper[];
 }
 
 /**
@@ -30,20 +57,49 @@ export function webCryptoPbkdf2PasswordHasher(
   ensurePositiveInteger(iterations, "PBKDF2 iterations");
   ensurePositiveInteger(saltBytes, "PBKDF2 salt bytes");
   ensurePositiveInteger(hashBytes, "PBKDF2 hash bytes");
+  const pepper = options.pepper;
+  const previousPeppers = options.previousPeppers ?? [];
+  for (const candidate of pepper === undefined ? previousPeppers : [pepper, ...previousPeppers]) {
+    ensurePepperId(candidate.id);
+  }
+  // Verification tries the current pepper, then each retired one, then no pepper
+  // at all — the last covers records written before a pepper was configured.
+  const verifyCandidates: readonly (PasswordPepper | undefined)[] = [
+    ...(pepper === undefined ? [] : [pepper]),
+    ...previousPeppers,
+    undefined
+  ];
+
   return {
     async hash(password) {
       const salt = new Uint8Array(saltBytes);
       crypto.getRandomValues(salt);
-      const derived = await derivePbkdf2(password, salt, iterations, hashBytes);
-      return `${FORMAT}$${iterations}$${base64UrlEncode(salt)}$${base64UrlEncode(derived)}`;
+      const derived = await derivePbkdf2(password, salt, iterations, kdfBytesFor(pepper, hashBytes));
+      const wrapped = await applyPepper(derived, pepper);
+      const suffix = pepper === undefined ? "" : `$${pepper.id}`;
+      return `${FORMAT}$${iterations}$${base64UrlEncode(salt)}$${base64UrlEncode(wrapped)}${suffix}`;
     },
     async verify(password, encodedHash) {
       const parsed = parseHash(encodedHash);
       if (!parsed) {
         return false;
       }
-      const derived = await derivePbkdf2(password, parsed.salt, parsed.iterations, parsed.hash.byteLength);
-      return timingSafeEqual(derived, parsed.hash);
+      const candidate = verifyCandidates.find((entry) => entry?.id === parsed.pepperId);
+      if (parsed.pepperId !== undefined && candidate === undefined) {
+        // Written under a pepper this deployment does not hold. Failing here is
+        // the point of a pepper; see docs/passwords.md on secret loss.
+        return false;
+      }
+      // A peppered record stores an HMAC-SHA256 output, so its own length says
+      // nothing about the KDF length — which is why that length is pinned.
+      const derived = await derivePbkdf2(
+        password,
+        parsed.salt,
+        parsed.iterations,
+        parsed.pepperId === undefined ? parsed.hash.byteLength : PEPPERED_KDF_BYTES
+      );
+      const wrapped = await applyPepper(derived, candidate);
+      return timingSafeEqual(wrapped, parsed.hash);
     },
     needsRehash(encodedHash) {
       const parsed = parseHash(encodedHash);
@@ -52,9 +108,58 @@ export function webCryptoPbkdf2PasswordHasher(
       if (!parsed) {
         return false;
       }
-      return parsed.iterations < iterations || parsed.hash.byteLength !== hashBytes;
+      if (parsed.pepperId !== pepper?.id) {
+        // Covers no-pepper -> pepper, an old pepper -> the current one, and a
+        // deployment that removed its pepper.
+        return true;
+      }
+      if (parsed.iterations < iterations) {
+        return true;
+      }
+      // A peppered record's stored length is always the HMAC width, so comparing
+      // it against `hashBytes` would flag every record forever.
+      return parsed.pepperId === undefined && parsed.hash.byteLength !== hashBytes;
     }
   };
+}
+
+/**
+ * KDF output length when a pepper is configured.
+ *
+ * A peppered record stores `HMAC-SHA256(pepper, kdfOutput)`, so its encoded
+ * length is always 32 bytes and the KDF length it wrapped is unrecoverable.
+ * Pinning it keeps verification independent of the `hashBytes` a deployment
+ * happens to be configured with today — otherwise changing that option would
+ * lock every existing account out.
+ */
+const PEPPERED_KDF_BYTES = 32;
+
+function kdfBytesFor(pepper: PasswordPepper | undefined, hashBytes: number): number {
+  return pepper === undefined ? hashBytes : PEPPERED_KDF_BYTES;
+}
+
+async function applyPepper(
+  derived: Uint8Array,
+  pepper: PasswordPepper | undefined
+): Promise<Uint8Array> {
+  if (pepper === undefined) {
+    return derived;
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(pepper.secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, arrayBufferFromBytes(derived)));
+}
+
+function ensurePepperId(id: string): void {
+  // Recorded as the last `$`-delimited segment of the encoded hash.
+  if (!isPlainIdentifier(id)) {
+    throw new Error(`Password pepper id must be a plain identifier: '${id}'`);
+  }
 }
 
 async function derivePbkdf2(
@@ -87,9 +192,15 @@ function parseHash(value: string): {
   readonly iterations: number;
   readonly salt: Uint8Array;
   readonly hash: Uint8Array;
+  readonly pepperId: string | undefined;
 } | null {
-  const [format, iterationsValue, saltValue, hashValue] = value.split("$");
-  if (format !== FORMAT || !iterationsValue || !saltValue || !hashValue || value.split("$").length !== 4) {
+  const segments = value.split("$");
+  const [format, iterationsValue, saltValue, hashValue, pepperId] = segments;
+  if (format !== FORMAT || !iterationsValue || !saltValue || !hashValue) {
+    return null;
+  }
+  // Four segments is the pre-pepper format; five records which pepper wrapped it.
+  if (segments.length === 5 ? pepperId === undefined || !isPlainIdentifier(pepperId) : segments.length !== 4) {
     return null;
   }
   const iterations = Number(iterationsValue);
@@ -100,7 +211,8 @@ function parseHash(value: string): {
     return {
       iterations,
       salt: base64UrlDecode(saltValue),
-      hash: base64UrlDecode(hashValue)
+      hash: base64UrlDecode(hashValue),
+      pepperId: segments.length === 5 ? pepperId : undefined
     };
   } catch {
     return null;
