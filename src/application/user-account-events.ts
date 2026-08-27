@@ -93,6 +93,16 @@ export function userPasswordChangedPayload(
   };
 }
 
+export function userPasswordRehashedPayload(
+  input: UserPasswordChangedPayloadInput
+): Extract<UserAccountEventPayload, { readonly kind: "UserPasswordRehashed" }> {
+  return {
+    kind: "UserPasswordRehashed",
+    userId: input.userId,
+    passwordHash: input.passwordHash
+  };
+}
+
 export function userAccountCreatedPayload(
   input: UserAccountCreatedPayloadInput
 ): Extract<UserAccountEventPayload, { readonly kind: "UserAccountCreated" }> {
@@ -377,6 +387,10 @@ declare module "../core/types.js" {
     readonly UserPasswordChanged: Extract<
       UserAccountEventPayload,
       { readonly kind: "UserPasswordChanged" }
+    >;
+    readonly UserPasswordRehashed: Extract<
+      UserAccountEventPayload,
+      { readonly kind: "UserPasswordRehashed" }
     >;
     readonly UserPasswordResetRequested: Extract<
       UserAccountEventPayload,

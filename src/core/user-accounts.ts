@@ -84,6 +84,11 @@ export type UserAccountStateEventPayload =
       readonly emailVerifiedAt?: string | null;
     }
   | {
+      readonly kind: "UserPasswordRehashed";
+      readonly userId: string;
+      readonly passwordHash: string;
+    }
+  | {
       readonly kind: "UserPasswordChanged";
       readonly userId: string;
       readonly passwordHash: string;
@@ -141,6 +146,7 @@ export const USER_ACCOUNT_STATE_PAYLOAD_KINDS = Object.freeze([
   "UserAuthProviderLinked",
   "UserAuthProviderSynced",
   "UserPasswordChanged",
+  "UserPasswordRehashed",
   "UserPasswordResetRequested",
   "UserPasswordResetCompleted",
   "UserPasswordResetDeliveryFailed",
@@ -215,6 +221,19 @@ export function foldUserAccountFrom(
           ...applyProviderAccountPatch(state, event.payload, event.occurredAt),
           version: event.sequence,
           providers: upsertProviderLink(state.providers, event.payload, undefined, event.occurredAt),
+          updatedAt: event.occurredAt
+        };
+        break;
+      case "UserPasswordRehashed":
+        if (event.payload.userId !== userId || !state.exists) {
+          break;
+        }
+        // Same hash semantics as a password change, but it is not one: an
+        // in-flight password reset must survive an upgrade-on-login.
+        state = {
+          ...state,
+          version: event.sequence,
+          passwordHash: event.payload.passwordHash,
           updatedAt: event.occurredAt
         };
         break;

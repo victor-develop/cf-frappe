@@ -852,7 +852,113 @@ describe("UserAccountService", () => {
       { payload: { kind: "UserPasswordResetDeliveryFailed" } }
     ]);
   });
+  it("upgrades a stale password hash on login without invalidating the new session", async () => {
+    const events = new InMemoryEventStore();
+    const legacy = new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["create-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await legacy.create({
+      actor: admin,
+      userId: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+
+    // Same account, now served by a hasher with stronger parameters.
+    let hashes = 0;
+    const upgraded = new UserAccountService({
+      events,
+      passwords: upgradingPasswords({ onHash: () => { hashes += 1; } }),
+      ids: deterministicIds(["rehash-1"]),
+      clock: fixedClock("2026-01-03T00:00:00.000Z")
+    });
+
+    const authenticated = await upgraded.authenticateAccount({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      password: "secret-123"
+    });
+
+    expect(hashes).toBe(1);
+    const stored = await events.readStream(userAccountsStream("acme", "owner@example.com"));
+    const rehashed = stored.filter((event) => event.payload.kind === "UserPasswordRehashed");
+    expect(rehashed).toHaveLength(1);
+
+    // The load-bearing assertion: the session built from this login must still be
+    // current. The rehash appended an event, so the version the caller records has
+    // to be the post-rehash one, or the user is logged out on their next request.
+    await expect(
+      upgraded.resolveSessionActor(authenticated.actor, authenticated.account.version)
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+  });
+
+  it("does not rehash a password that already uses current parameters", async () => {
+    const events = new InMemoryEventStore();
+    let hashes = 0;
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: upgradingPasswords({ onHash: () => { hashes += 1; } }),
+      ids: deterministicIds(["create-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    });
+    await userAccounts.create({
+      actor: admin,
+      userId: "owner@example.com",
+      password: "secret-123",
+      roles: ["User"]
+    });
+    const afterCreate = hashes;
+
+    await userAccounts.authenticateAccount({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      password: "secret-123"
+    });
+
+    expect(hashes).toBe(afterCreate);
+    const stored = await events.readStream(userAccountsStream("acme", "owner@example.com"));
+    expect(stored.filter((event) => event.payload.kind === "UserPasswordRehashed")).toEqual([]);
+  });
+
+  it("still logs in when the rehash cannot be stored", async () => {
+    const events = new InMemoryEventStore();
+    await new UserAccountService({
+      events,
+      passwords: deterministicPasswords(),
+      ids: deterministicIds(["create-1"]),
+      clock: fixedClock("2026-01-02T00:00:00.000Z")
+    }).create({ actor: admin, userId: "owner@example.com", password: "secret-123", roles: ["User"] });
+
+    const failingHash: PasswordHasher = {
+      ...upgradingPasswords(),
+      hash: async () => {
+        throw new Error("kdf unavailable");
+      }
+    };
+    const userAccounts = new UserAccountService({
+      events,
+      passwords: failingHash,
+      ids: deterministicIds(["rehash-1"]),
+      clock: fixedClock("2026-01-03T00:00:00.000Z")
+    });
+
+    // The old hash still verifies, so a failed upgrade must not become an error.
+    const authenticated = await userAccounts.authenticateAccount({
+      tenantId: "acme",
+      userId: "owner@example.com",
+      password: "secret-123"
+    });
+
+    expect(authenticated.actor.id).toBe("owner@example.com");
+    await expect(
+      userAccounts.resolveSessionActor(authenticated.actor, authenticated.account.version)
+    ).resolves.toMatchObject({ id: "owner@example.com" });
+  });
 });
+
 
 function userAccountPayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "UserAuthProviderSynced" }>
@@ -867,6 +973,25 @@ function deterministicPasswords(): PasswordHasher {
     },
     async verify(password, encodedHash) {
       return encodedHash === `hash:${password}`;
+    }
+  };
+}
+
+/**
+ * Verifies both the stale and the current encoding, but reports the stale one as
+ * needing an upgrade — the shape of a real hasher whose cost factor was raised.
+ */
+function upgradingPasswords(options: { readonly onHash?: () => void } = {}): PasswordHasher {
+  return {
+    async hash(password) {
+      options.onHash?.();
+      return `hash-v2:${password}`;
+    },
+    async verify(password, encodedHash) {
+      return encodedHash === `hash:${password}` || encodedHash === `hash-v2:${password}`;
+    },
+    needsRehash(encodedHash) {
+      return encodedHash.startsWith("hash:");
     }
   };
 }
