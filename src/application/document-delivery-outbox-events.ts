@@ -34,15 +34,76 @@ export type DocumentDeliveryOutboxEventPayload =
       readonly claimId: string;
       readonly error: string;
       readonly retryAt?: string;
+    }
+  | {
+      /**
+       * Everything in this stream at or below `upToSequence` is terminal except
+       * the records named in `carryOver`, so a fold can start here instead of at
+       * sequence 1. The one payload kind that is about the stream rather than
+       * about a record, hence no `outboxId`.
+       */
+      readonly kind: "DocumentDeliveryOutboxCheckpointed";
+      /**
+       * The stream version this checkpoint summarises — the head *before* the
+       * commit that carries it, so the checkpoint's own sequence is
+       * `upToSequence + 1` and a reader resuming at `upToSequence + 1` always
+       * finds it. Deliberately not the delivered event's sequence: that would
+       * put the checkpoint at `upToSequence + 2` and leave the delivery itself
+       * outside a window that starts at the checkpoint.
+       */
+      readonly upToSequence: number;
+      /**
+       * Outbox ids still in flight at `upToSequence`. A reader rehydrates each
+       * one from its own events, which is why a permanently failing target does
+       * not stop history compacting — it is carried, not waited for.
+       */
+      readonly carryOver: readonly string[];
     };
 
 export type DocumentDeliveryOutboxPayloadKind = DocumentDeliveryOutboxEventPayload["kind"];
+
+/** Payload kinds that name a single outbox record; every kind but the checkpoint. */
+export type DocumentDeliveryOutboxRecordEventPayload = Extract<
+  DocumentDeliveryOutboxEventPayload,
+  { readonly outboxId: string }
+>;
+
+export type DocumentDeliveryOutboxCheckpointPayload = Extract<
+  DocumentDeliveryOutboxEventPayload,
+  { readonly kind: "DocumentDeliveryOutboxCheckpointed" }
+>;
+
+export const DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_KIND = "DocumentDeliveryOutboxCheckpointed";
+
+/**
+ * `documentName` the compaction checkpoint is written under.
+ *
+ * Outbox records share one stream per tenant and are told apart by
+ * `documentName = outboxId`, so the checkpoint needs a name no record can take.
+ * Outbox ids are always `${eventId}:${target}` and therefore always contain a
+ * colon; this cannot collide. It is also what makes the checkpoint lookup cheap:
+ * `idx_cf_frappe_events_document_name` serves it in 2.0 µs on a 50k-event stream
+ * with checkpoints present and 0.6 µs with none (an empty index range), instead
+ * of the 6–14 ms backwards scan a `type` or `json_extract` filter costs when no
+ * checkpoint is there to stop the scan early.
+ */
+export const DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME = "__checkpoint";
 
 export const DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS = Object.freeze([
   "DocumentDeliveryOutboxEnqueued",
   "DocumentDeliveryOutboxClaimed",
   "DocumentDeliveryOutboxDelivered",
-  "DocumentDeliveryOutboxFailed"
+  "DocumentDeliveryOutboxFailed",
+  // The checkpoint has to be in this set even though it mutates no record.
+  // `state.version` is the optimistic-concurrency expectation and is folded from
+  // whatever this filter returns, so a checkpoint the filter hides is a version
+  // below the true stream head — and then every append for that tenant fails
+  // with a conflict no retry can clear. The service's own commits never leave a
+  // checkpoint at the head (it rides ahead of the delivery it summarises), so
+  // this is not reachable through them today; nothing enforces that, which is
+  // why "keeps working when a checkpoint is the newest event in the stream"
+  // writes one by hand.
+  "DocumentDeliveryOutboxCheckpointed"
 ] as const satisfies readonly DocumentDeliveryOutboxPayloadKind[]);
 
 const DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KIND_SET = new Set<string>(DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS);
@@ -93,6 +154,30 @@ export function isDocumentDeliveryOutboxEvent(
   event: DomainEvent
 ): event is DomainEvent<DocumentDeliveryOutboxEventPayload> {
   return isDocumentDeliveryOutboxPayloadKind(domainEventPayloadKind(event));
+}
+
+/**
+ * Narrows away the checkpoint, which is the only outbox payload with no
+ * `outboxId`.
+ *
+ * Every per-record fold has to go through this before touching `outboxId`.
+ * A `case` for the checkpoint inside the switch is not enough: the guard that
+ * skips other records' events reads `payload.outboxId` *before* the switch.
+ */
+export function isDocumentDeliveryOutboxRecordPayload(
+  payload: DocumentDeliveryOutboxEventPayload
+): payload is DocumentDeliveryOutboxRecordEventPayload {
+  return payload.kind !== DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_KIND;
+}
+
+/** The compaction checkpoint carried by `event`, or null when it is not one. */
+export function documentDeliveryOutboxCheckpoint(
+  event: DomainEvent
+): DocumentDeliveryOutboxCheckpointPayload | null {
+  if (!isDocumentDeliveryOutboxEvent(event) || event.payload.kind !== DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_KIND) {
+    return null;
+  }
+  return event.payload;
 }
 
 export function foldDocumentDeliveryOutbox(
@@ -167,6 +252,13 @@ export function foldDocumentDeliveryOutboxFrom(
         }
         break;
       }
+      case "DocumentDeliveryOutboxCheckpointed":
+        // A checkpoint changes no record: it only records where a *reader* may
+        // start. It still has to reach this fold, because the version it carries
+        // the stream to is the optimistic-concurrency expectation. Spelt out
+        // rather than left to the missing `default` — this switch silently skips
+        // kinds it does not name, so an omission here would not be a type error.
+        break;
     }
   }
   return { tenantId, version, records };
@@ -215,6 +307,7 @@ declare module "../core/types.js" {
       DocumentDeliveryOutboxEventPayload,
       { readonly kind: "DocumentDeliveryOutboxFailed" }
     >;
+    readonly DocumentDeliveryOutboxCheckpointed: DocumentDeliveryOutboxCheckpointPayload;
   }
 }
 
@@ -243,7 +336,14 @@ export function foldDocumentDeliveryOutboxRecordFrom(
 ): DocumentDeliveryOutboxRecord | null {
   let record: DocumentDeliveryOutboxRecord | null = initial;
   for (const event of events) {
-    if (!isDocumentDeliveryOutboxEvent(event) || event.payload.outboxId !== outboxId) {
+    if (
+      !isDocumentDeliveryOutboxEvent(event) ||
+      // Compaction checkpoints share the stream and belong to no record, so
+      // they are skipped before `outboxId` is even read — the union member has
+      // no such field.
+      !isDocumentDeliveryOutboxRecordPayload(event.payload) ||
+      event.payload.outboxId !== outboxId
+    ) {
       // The outbox id is a required input rather than something inferred from
       // the first event: outbox records share one stream per tenant, so a fold
       // that took whatever it was handed would apply one record's terminal

@@ -50,7 +50,11 @@ describe("document delivery outbox events", () => {
       "DocumentDeliveryOutboxEnqueued",
       "DocumentDeliveryOutboxClaimed",
       "DocumentDeliveryOutboxDelivered",
-      "DocumentDeliveryOutboxFailed"
+      "DocumentDeliveryOutboxFailed",
+      // The compaction checkpoint mutates no record, but it must still be read
+      // by the state fold: `state.version` is the concurrency expectation, and
+      // a stream whose head is a checkpoint folds to version 0 without this.
+      "DocumentDeliveryOutboxCheckpointed"
     ]);
   });
 

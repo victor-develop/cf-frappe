@@ -10,25 +10,81 @@ That is a slow leak with no ceiling, and a Worker isolate has 128 MB. Issue #28.
 
 ### What this bounds, and what it does not
 
-**Be precise about which cost moved**, because only one of the two did.
+**Be precise about which cost moved**, because the two halves moved in two separate changes.
+
+| | Originally | After #54 | After compaction checkpoints |
+| --- | --- | --- | --- |
+| Working-set size, and the heap its payloads hold | grows with delivery history | bounded by in-flight work | bounded by in-flight work |
+| Events read and folded per operation | grows with delivery history | **unchanged** | bounded |
+
+#54 dropped delivered records from the folded Map, which bounded the heap. It did not make the read shorter: `state()` still called `readStream` on the whole stream and folded all of it. Measured with a counting store, one enqueue + claim + deliver per round, nothing left in flight at the end of each:
+
+| Round | Events read that round, before | After compaction | With one permanently failing record pinned in flight |
+| --- | --- | --- | --- |
+| 10 | 87 | 24 | 33 |
+| 20 | 177 | 24 | 33 |
+| 30 | 267 | 24 | 33 |
+| 40 | 357 | 24 | 33 |
+
+Linear before, flat after. `tests/application/document-delivery-outbox-service.test.ts` asserts the equality between rounds *and* those absolute figures — a mutation that reintroduced the full read and happened to be flat for some other reason would still have to match a number.
+
+The trade is query count and stream length, and both got worse:
 
 | | Before | After |
 | --- | --- | --- |
-| Working-set size, and the heap its payloads hold | grows with delivery history | bounded by in-flight work |
-| Events read and folded per operation | grows with delivery history | **unchanged** |
+| Reads per enqueue + claim + deliver round | 5, returning 87…357 events | 11, returning 24 events |
+| Events appended per round | 3 | 4 (+33%) |
 
-`state()` still calls `readStream` on the whole outbox stream and folds all of it; dropping delivered records from the resulting Map does not make the read shorter. Measured with a counting store, one enqueue + claim + deliver per round, nothing left in flight at the end of each:
+Eleven round trips for four events is the right shape on D1, where a query returning 357 rows costs far more than an extra indexed lookup returning one — but it is more round trips, not fewer.
 
-| Round | Outbox events read that round |
-| --- | --- |
-| 10 | 84 |
-| 20 | 174 |
-| 30 | 264 |
-| 40 | 354 |
+## The checkpoint
 
-Linear, and identical to before this change. What did halve those figures was the earlier fold-forward commit, which stopped re-reading the stream after an append.
+After a delivery, the same commit carries a `DocumentDeliveryOutboxCheckpointed` event:
 
-So the per-operation read is still O(delivery history). Fixing that needs a starting point for an incremental read that survives an isolate — a `SnapshotStore` (issue #17), or a compaction checkpoint appended to the stream itself. Neither is here, and `ReadStreamOptions.minSequence` exists but is unused by the outbox. **Issue #28 is only half closed by this change.**
+```ts
+{ kind: "DocumentDeliveryOutboxCheckpointed", upToSequence: number, carryOver: readonly string[] }
+```
+
+It says: *everything in this stream at or below `upToSequence` is terminal, except the records named in `carryOver`.* `state()` finds the newest one, rehydrates each carried id through the existing per-record read, and folds the stream from `upToSequence + 1` using `ReadStreamOptions.minSequence`.
+
+Four things in that are load-bearing, and each was settled by breaking it and watching a test fail.
+
+**`upToSequence` is `state.version` — the head *before* the commit — and `carryOver` is every id the working set still holds at that version.** Both come straight out of the state the delivery was planned against, so the claim the checkpoint makes is true by construction rather than by arithmetic: `state.records` *is* the in-flight set at `state.version`, and a reader that rehydrates those ids and folds from `state.version + 1` reconstructs exactly that state. Nothing depends on guessing which sequence the delivered event will land on.
+
+**The checkpoint is committed *before* the delivered event, not after.** It therefore lands at `upToSequence + 1`, so a reader resuming at `upToSequence + 1` starts *on* the checkpoint and the delivery that follows it is inside the tail. Put it second and the delivery sits at `upToSequence + 1`, outside a read that begins at the checkpoint — and the record it terminates comes back out of `carryOver` as though it were still in flight. That mutation fails five tests.
+
+**The lower bound is `upToSequence + 1`, and the checkpoint kind is in `DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS`.** Both halves matter, and they fail differently. An exclusive bound loses the delivery. Omitting the kind hides the checkpoint from the fold that computes `state.version` — and `state.version` is the optimistic-concurrency expectation, so a version below the true head means every append for that tenant fails with `Expected stream '…' at version 0, found N`, on all five retries, permanently. The service's own commits never leave a checkpoint at the stream head, so that is not reachable through them today; nothing enforces that, so a test writes one by hand.
+
+**The checkpoint's id is derived — `evt_outbox_checkpoint_<tenant>_<upToSequence>` — not drawn from the id generator.** Every outbox test hands `deterministicIds` an exactly-sized list, so consuming an id here would exhaust roughly fifteen fixtures across three files, and the failure would be a thrown `No deterministic id left` somewhere unrelated-looking. Uniqueness comes from the CAS instead: at most one commit can succeed at a given `state.version`, so no two checkpoints in a stream can share an `upToSequence`. That is also why checkpoints make strict progress without tracking the previous one.
+
+### A checkpoint cannot fail a delivery
+
+It rides in the delivery's own `events` array, so there is one CAS. A conflict re-runs the plan callback against fresh state and recomputes the checkpoint; there is no second append to fail on its own, and no stale `upToSequence` to commit. On the *final* retry the checkpoint is dropped and the delivery commits alone, which covers the reasons bundling does not — such as a derived id colliding with a row already in the events table. A checkpoint is an optimisation; it must never be why a delivery fails.
+
+### Why the checkpoint carries ids
+
+Issue #28's own wording was a bare `upToSequence`, set to just below the oldest in-flight record. That is defeated by a single permanently failing target. `claimableDocumentDeliveryOutboxRecords` sorts by `enqueuedAt` ascending, so a poison record is re-claimed first on every drain and stays the oldest in-flight record indefinitely — and a checkpoint that had to wait for it never advances past its enqueue sequence. Measured that way, reads go straight back to linear: 96 / 186 / 276 / 366 events per round at rounds 10 / 20 / 30 / 40, the same slope as no fix at all. The pinned case is the likely case, not the corner.
+
+Carrying the ids costs one indexed read each (2.0 µs at 50k events) and holds the read flat at 33 events per round with a record stuck in `failed` on a far-future `retryAt`.
+
+### The lookup, and the case with no checkpoint
+
+Finding the newest checkpoint runs on every outbox operation, so it has to be cheap in the case where there is **no** checkpoint too — which is the state every already-deployed stream is in until its first successful delivery, and the state a tenant above the carry-over limit stays in.
+
+The checkpoint is written under `documentName = "__checkpoint"`, a sentinel no outbox id can take (ids are always `${eventId}:${target}` and so always contain a colon). That is what makes `idx_cf_frappe_events_document_name` — migration `0007`, already shipped — serve the lookup directly. Measured on 50,000 events in one outbox stream (`node:sqlite`, every migration applied, `EXPLAIN QUERY PLAN` with parameters bound, un-analyzed):
+
+| Lookup | Plan | Checkpoints present | No checkpoint at all |
+| --- | --- | --- | --- |
+| `document_name = '__checkpoint'`, newest first — as shipped | `document_name (tenant_id=? AND doctype=? AND document_name=?)` | 2.0 µs | 0.6 µs |
+| `type = 'DocumentDeliveryOutboxCheckpointed'`, newest first | `stream_sequence (stream=?)` | 2.7 µs | 6.0 ms |
+| `json_extract(payload_json,'$.kind')`, newest first | `stream_sequence (stream=?)` | 9.5 µs | 13.8 ms |
+| the full read `state()` used to do, for scale | `stream_sequence (stream=?)` | 66.8 ms | 64.8 ms |
+
+The two middle rows stop at the first row of a backwards scan when a checkpoint sits near the tail, and scan the entire stream when none is there — an extra full scan per operation, on top of the full fold that also still happens, i.e. **worse than before this change** for a stream that has never compacted. The sentinel row is an empty index range instead, which is why its worst case is the cheapest number in the table.
+
+**A fifth index was considered and rejected.** `(stream, type, sequence)` plans the `type` lookup as `SEARCH … USING INDEX (stream=? AND type=?)` at 3.2 µs whether or not a checkpoint exists — but it costs 17% on the append hot path (50k inserts in one transaction, median of 7: 157 ms baseline versus 183 ms, with non-overlapping run ranges), and it is unnecessary once the sentinel puts the lookup on an index that is already there.
+
+Newest-first is a new `order` option on `AuditDocumentEventQuery`, implemented once as SQL and once as a comparator. `ORDER BY sequence DESC` comes off `0007` without a temporary B-tree, so it costs the same 2.0 µs. Reading ascending instead is not a plan regression — it just returns the *oldest* checkpoint and compacts nothing, which is why `tests/adapters/document-delivery-outbox-compaction-sqlite.test.ts` asserts the direction differentially against the in-memory adapter rather than only asserting a plan.
 
 ## Two reads, not one
 
@@ -104,6 +160,16 @@ It does not displace the plan for the hot read `WHERE stream = ?`, which keeps u
 
 The stream stays a required input in both cases, so widening this query cannot widen the guard above it.
 
+## The stream-qualified query, and `order`
+
+`AuditEventStore.readDocumentEvents` also grew an `order` option, defaulting to `"asc"`. It exists for exactly one caller: the checkpoint lookup needs the *last* event under a `documentName` that accumulates one per delivery, and reading them all is the cost the lookup exists to avoid — 12,500 rows on a 50k-event outbox stream. It changes ordering only, never which rows match, so it cannot widen the `stream` guard above.
+
 ## Not done
 
-`list` is bounded by in-flight work, which is the right bound for a working set — but a tenant with a permanently failing target accumulates failed records in it, and those never leave. That backlog is visible (`status: "failed"`), so it is an operational signal rather than a silent leak, but nothing currently prunes or caps it.
+**A permanently failing target still pins the working set, and above a threshold it now also stops compaction.** Failed records never leave the working set. That backlog is visible (`status: "failed"`) so it is an operational signal rather than a silent leak, but nothing prunes or caps it. Compaction carries at most **25** in-flight ids (`DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_CARRY_OVER_LIMIT`, the default claim limit); above that no checkpoint is written and that tenant's reads go back to folding the whole stream — the pre-#28 cost. That is deliberate: the alternatives are a checkpoint payload that grows with the backlog, or one indexed read per carried id on every fold, and 25 is roughly the point where "bounded" stops being true either way, so the honest answer is to stop compacting rather than hide the cost in a wide event. It is not sticky — the next delivery planned against 25 or fewer in-flight records compacts again.
+
+**A permanently retried record's own history is not bounded either.** Every retry appends a `Claimed` and a `Failed` for the same outbox id, so `record(tenantId, outboxId)` — used by deduplication, by `markDelivered`'s idempotency path, and by carry-over rehydration — grows with retry count, roughly two events per attempt. With the 30 s → 30 min backoff in `document-delivery-outbox-consumer.ts` that is order 10³ events after a month. Indexed and small, but "constant" is the wrong word for it.
+
+**A wrong checkpoint is not self-healing, and nothing detects one.** Checkpoint correctness is inductive: each one is computed from a working set folded from the previous one. A single over-advanced checkpoint would drop records forever and the next would compound it — the events are all still in the stream, but nothing reads them again. The design makes that hard rather than detectable: `upToSequence` and `carryOver` are taken from the same folded state in the same expression, so there is no arithmetic to get wrong and no condition to mis-evaluate. But there is no operator escape hatch to force a full re-fold, and no runtime assertion that a checkpoint is consistent with the records the resumed state ends up holding. If one is ever suspected, the repair is manual.
+
+**Fresh `cf-frappe init` projects have no `idx_cf_frappe_events_document_name`.** Pre-existing, and this change leans on it harder. `src/cli/templates.ts` writes core migrations `0001`–`0006` plus two DocType index files; core `0007` only arrives when the user runs `cf-frappe migrate generate`. Meanwhile the scaffold hardcodes `documentDeliveryOutbox: true`. So a starter project runs the deduplication read, the idempotency read, the carry-over rehydration **and the checkpoint lookup** against a plan that falls back to `stream_sequence (stream=?)` — the 3349 µs column in the index table above rather than the 2.1 µs one. Any claim that per-operation reads are bounded is false in a fresh starter until `0007` is applied.

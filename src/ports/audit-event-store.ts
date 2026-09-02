@@ -40,6 +40,19 @@ export interface AuditDocumentEventQuery {
    * rather than being inferred, so widening this cannot widen the guard above.
    */
   readonly stream?: StreamName;
+  /**
+   * Sequence order the events come back in. Defaults to `"asc"`, which is the
+   * order a fold needs.
+   *
+   * `"desc"` exists so `limit` can take the *tail* of a document's history
+   * instead of its head. The delivery outbox needs the last compaction
+   * checkpoint out of a document name that accumulates one per delivery: taking
+   * the first would compact almost nothing, and reading them all is the cost
+   * that lookup exists to avoid (12.5k rows on a 50k-event outbox stream).
+   * `idx_cf_frappe_events_document_name` serves it in either direction, so
+   * newest-first costs the same 2.0 µs there.
+   */
+  readonly order?: "asc" | "desc";
 }
 
 export interface AuditEventStore {

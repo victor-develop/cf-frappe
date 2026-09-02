@@ -191,6 +191,7 @@ export function documentTimelineEventChanges(
     case "DocumentDeliveryOutboxClaimed":
     case "DocumentDeliveryOutboxDelivered":
     case "DocumentDeliveryOutboxFailed":
+    case "DocumentDeliveryOutboxCheckpointed":
     case "AutomationRunEnqueued":
     case "AutomationRunClaimed":
     case "AutomationRunDelivered":
@@ -338,6 +339,11 @@ export function documentTimelineSummary(payload: DocumentEventPayload): string {
       return `Delivered document delivery ${payload.outboxId}`;
     case "DocumentDeliveryOutboxFailed":
       return `Document delivery failed ${payload.outboxId}`;
+    case "DocumentDeliveryOutboxCheckpointed":
+      // Named on purpose. Both switches in this file fall through to a default,
+      // so an outbox-internal kind compiles without being handled and then
+      // surfaces on a timeline as an unexplained "Recorded document event".
+      return `Compacted delivery outbox history through sequence ${String(payload.upToSequence)}`;
     case "AutomationRunEnqueued":
       return `Queued automation run ${payload.runId}`;
     case "AutomationRunClaimed":
