@@ -52,14 +52,25 @@ export function auditEventQuery(query: AuditEventQuery): AuditEventD1Query {
 }
 
 export function auditDocumentEventQuery(query: AuditDocumentEventQuery): AuditEventD1Query {
-  const params: (number | string)[] = [documentStream(query.tenantId, query.doctype, query.documentName)];
+  // Without an explicit stream this reads the document's own stream and nothing
+  // else, so an event elsewhere cannot claim its history. With one, the match is
+  // by column *within that stream* — which is what the
+  // `(tenant_id, doctype, document_name)` index serves.
+  const params: (number | string)[] =
+    query.stream === undefined
+      ? [documentStream(query.tenantId, query.doctype, query.documentName)]
+      : [query.tenantId, query.doctype, query.documentName, query.stream];
+  const where =
+    query.stream === undefined
+      ? "stream = ?"
+      : "tenant_id = ? AND doctype = ? AND document_name = ? AND stream = ?";
   if (query.limit !== undefined) {
     params.push(query.limit);
   }
   return {
     sql: `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
          FROM ${D1_EVENTS_TABLE}
-         WHERE stream = ?
+         WHERE ${where}
          ORDER BY sequence ASC${query.limit !== undefined ? " LIMIT ?" : ""}`,
     params
   };

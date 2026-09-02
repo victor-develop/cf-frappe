@@ -10,6 +10,8 @@ import {
   foldCustomFieldsFrom,
   foldDocumentDeliveryOutbox,
   foldDocumentDeliveryOutboxFrom,
+  foldDocumentDeliveryOutboxRecord,
+  foldDocumentDeliveryOutboxRecordFrom,
   foldDocument,
   foldDocumentAssignments,
   foldDocumentAssignmentsFrom,
@@ -297,6 +299,35 @@ const cases: readonly FoldCase<unknown>[] = [
     ),
     foldAll: (stream) => foldDocumentDeliveryOutbox(TENANT, stream),
     foldFrom: (initial, stream) => foldDocumentDeliveryOutboxFrom(initial, TENANT, stream)
+  }),
+  foldCase({
+    name: "foldDocumentDeliveryOutboxRecord",
+    events: events(
+      {
+        kind: "DocumentDeliveryOutboxEnqueued",
+        outboxId: "source-1:email",
+        target: "email",
+        sourceEventId: "source-1",
+        sourceEventType: "NoteUpdated",
+        payloadKind: "DocumentUpdated",
+        doctype: "Note",
+        documentName: "One",
+        actorId: USER,
+        payload: { body: "updated" }
+      },
+      { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-1" },
+      {
+        kind: "DocumentDeliveryOutboxFailed",
+        outboxId: "source-1:email",
+        claimId: "claim-1",
+        error: "temporary",
+        retryAt: "2026-01-01T00:10:00.000Z"
+      },
+      { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-2" },
+      { kind: "DocumentDeliveryOutboxDelivered", outboxId: "source-1:email", claimId: "claim-2" }
+    ),
+    foldAll: (stream) => foldDocumentDeliveryOutboxRecord(TENANT, "source-1:email", stream),
+    foldFrom: (initial, stream) => foldDocumentDeliveryOutboxRecordFrom(initial, TENANT, "source-1:email", stream)
   }),
   foldCase({
     name: "foldEmailOutbox",

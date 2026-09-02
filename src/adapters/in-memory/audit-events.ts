@@ -24,9 +24,20 @@ export function readInMemoryAuditDocumentEvents(
   streams: ReadonlyMap<string, readonly DomainEvent[]>,
   query: AuditDocumentEventQuery
 ): readonly DomainEvent[] {
-  const stream = documentStream(query.tenantId, query.doctype, query.documentName);
-  const events = [...(streams.get(stream) ?? [])]
-    .sort((left, right) => left.sequence - right.sequence);
+  // Mirror the D1 adapter: the document's own stream by default, or a
+  // column match inside one explicitly named stream.
+  const stream = query.stream ?? documentStream(query.tenantId, query.doctype, query.documentName);
+  const candidates = [...(streams.get(stream) ?? [])];
+  const events = (
+    query.stream === undefined
+      ? candidates
+      : candidates.filter(
+          (event) =>
+            event.tenantId === query.tenantId &&
+            event.doctype === query.doctype &&
+            event.documentName === query.documentName
+        )
+  ).sort((left, right) => left.sequence - right.sequence);
   return query.limit === undefined ? events : events.slice(0, query.limit);
 }
 

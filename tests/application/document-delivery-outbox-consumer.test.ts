@@ -65,11 +65,16 @@ describe("DocumentDeliveryOutboxConsumer", () => {
       ]
     });
     expect(delivered).toEqual(["evt_source:email", "evt_source:notification", "evt_source:realtime"]);
-    await expect(outbox.list("acme")).resolves.toMatchObject([
-      { id: "evt_source:email", status: "delivered", claimId: "claim-1" },
-      { id: "evt_source:notification", status: "delivered", claimId: "claim-1" },
-      { id: "evt_source:realtime", status: "delivered", claimId: "claim-1" }
-    ]);
+    // Delivered records leave the working set; each is still readable from its
+    // own events.
+    await expect(outbox.list("acme")).resolves.toEqual([]);
+    for (const id of ["evt_source:email", "evt_source:notification", "evt_source:realtime"]) {
+      await expect(outbox.record("acme", id)).resolves.toMatchObject({
+        id,
+        status: "delivered",
+        claimId: "claim-1"
+      });
+    }
   });
 
   it("marks handler failures retryable and only retries when due", async () => {

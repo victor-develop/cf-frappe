@@ -237,9 +237,15 @@ describe("CloudFrappe Worker jobs", () => {
 
     expect(queueMessage.ack).toHaveBeenCalledOnce();
     expect(queueMessage.retry).not.toHaveBeenCalled();
-    await expect(outbox.list("acme")).resolves.toMatchObject([
-      { id: "evt_assign:notification", status: "delivered", claimId: "claim-notification" }
-    ]);
+    // Delivered records leave the working set, so the assertion is that the
+    // record finished — read back from its own events — and that nothing is
+    // left in flight.
+    await expect(outbox.record("acme", "evt_assign:notification")).resolves.toMatchObject({
+      id: "evt_assign:notification",
+      status: "delivered",
+      claimId: "claim-notification"
+    });
+    await expect(outbox.list("acme")).resolves.toEqual([]);
     await expect(
       new UserNotificationService({ events }).inbox(
         { id: "support@example.com", roles: ["User"], tenantId: "acme" },
@@ -318,9 +324,15 @@ describe("CloudFrappe Worker jobs", () => {
 
     expect(queueMessage.ack).toHaveBeenCalledOnce();
     expect(queueMessage.retry).not.toHaveBeenCalled();
-    await expect(outbox.list("acme")).resolves.toMatchObject([
-      { id: "evt_assign:realtime", status: "delivered", claimId: "claim-realtime" }
-    ]);
+    // Delivered records leave the working set, so the assertion is that the
+    // record finished — read back from its own events — and that nothing is
+    // left in flight.
+    await expect(outbox.record("acme", "evt_assign:realtime")).resolves.toMatchObject({
+      id: "evt_assign:realtime",
+      status: "delivered",
+      claimId: "claim-realtime"
+    });
+    await expect(outbox.list("acme")).resolves.toEqual([]);
     expect(env.REALTIME.published).toEqual([
       expect.objectContaining({
         topic: "tenant:acme",
@@ -429,9 +441,15 @@ describe("CloudFrappe Worker jobs", () => {
 
     expect(queueMessage.ack).toHaveBeenCalledOnce();
     expect(queueMessage.retry).not.toHaveBeenCalled();
-    await expect(outbox.list("acme")).resolves.toMatchObject([
-      { id: "evt_assign:email", status: "delivered", claimId: "claim-email" }
-    ]);
+    // Delivered records leave the working set, so the assertion is that the
+    // record finished — read back from its own events — and that nothing is
+    // left in flight.
+    await expect(outbox.record("acme", "evt_assign:email")).resolves.toMatchObject({
+      id: "evt_assign:email",
+      status: "delivered",
+      claimId: "claim-email"
+    });
+    await expect(outbox.list("acme")).resolves.toEqual([]);
     expect(queuedEmailMessages).toEqual([
       {
         tenantId: "acme",
@@ -639,9 +657,15 @@ describe("CloudFrappe Worker jobs", () => {
 
     expect(retryDrain.ack).toHaveBeenCalledOnce();
     expect(retryDrain.retry).not.toHaveBeenCalled();
-    await expect(outbox.list("acme")).resolves.toMatchObject([
-      { id: "evt_assign:email", status: "delivered", claimId: "claim-email-2", attempts: 2 }
-    ]);
+    // Delivered records leave the working set, so the assertion is that the
+    // record finished — read back from its own events — and that nothing is
+    // left in flight.
+    await expect(outbox.record("acme", "evt_assign:email")).resolves.toMatchObject({
+      id: "evt_assign:email",
+      status: "delivered",
+      claimId: "claim-email-2", attempts: 2
+    });
+    await expect(outbox.list("acme")).resolves.toEqual([]);
   });
 
   it("allows transient scheduled dispatch failures to retry", async () => {
@@ -1160,9 +1184,34 @@ function fakeD1(): D1Database {
             };
           }
           if (sql.includes("FROM cf_frappe_events")) {
+            const limit = sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
+            // Two WHERE shapes reach this table: by stream, and by document
+            // columns within one named stream (see AuditDocumentEventQuery).
+            // Anything else is a query this fake has never been taught, so fail
+            // loudly — returning [] made a real adapter change look like a
+            // behaviour change in the code under test.
+            // Match the whole clause, not just one column: `searchEvents` also
+            // emits `document_name = ?`, with different columns and a different
+            // parameter order, and destructuring its params positionally here
+            // returned [] for a query this branch was never meant to answer.
+            if (sql.includes("tenant_id = ? AND doctype = ? AND document_name = ? AND stream = ?")) {
+              const [tenantId, doctype, documentName, stream] = this.params.map((param) => String(param ?? ""));
+              const matched = events
+                .filter(
+                  (event) =>
+                    event.tenant_id === tenantId &&
+                    event.doctype === doctype &&
+                    event.document_name === documentName &&
+                    event.stream === stream
+                )
+                .sort((left, right) => left.sequence - right.sequence);
+              return { results: limit === undefined ? matched : matched.slice(0, limit) };
+            }
+            if (!sql.includes("stream = ?")) {
+              throw new Error(`fakeD1 cannot answer this cf_frappe_events query: ${sql}`);
+            }
             const stream = String(this.params[0] ?? "");
             const maxSequence = sql.includes("sequence <= ?") ? Number(this.params[1]) : undefined;
-            const limit = sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
             const ordered = events
               .filter((event) => event.stream === stream)
               .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
