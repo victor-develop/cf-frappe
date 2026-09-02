@@ -13,6 +13,7 @@ export default defineConfig({
         "src/core/automation-rules.ts",
         "src/core/document-change.ts",
         "src/core/domain-events.ts",
+        "src/core/like-glob.ts",
         "src/core/naming-configuration.ts",
         "src/core/naming.ts",
         "src/core/safe-regex.ts",

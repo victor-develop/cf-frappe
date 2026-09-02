@@ -592,19 +592,33 @@ function compareValues(left: JsonPrimitive, right: JsonValue | undefined): numbe
   return String(left).localeCompare(String(right ?? ""));
 }
 
-function likePatternMatches(actual: JsonValue, pattern: string): boolean {
+/**
+ * The authority on what a `like` pattern means, for every store.
+ *
+ * Exported because the D1 adapter no longer evaluates text filters in the
+ * Worker — it compiles them to SQLite `GLOB` (issue #41) — and the only way to
+ * know that translation is faithful is to differential-test it against this
+ * function. Note what the rule is *not*: the `i` flag canonicalizes per UTF-16
+ * code unit and never applies a mapping that changes length or reaches ASCII
+ * from outside it, so `ß`, `ı` and everything outside the BMP do not fold.
+ */
+export function likePatternMatches(actual: JsonValue, pattern: string): boolean {
   return compiledLikePattern(pattern).test(String(actual));
 }
 
 /**
  * Compiled `like` patterns, keyed by the pattern text.
  *
- * Text refinement calls this once per candidate row with the same pattern, and
+ * An in-memory list scan calls this once per row with the same pattern, and
  * compiling it each time cost about 6x the match itself: 20k rows went from
- * 2.3 ms to 14.1 ms. The cache is bounded and cleared wholesale rather than
- * evicted one entry at a time — a filter workload reuses a handful of patterns,
- * so the simple thing is enough, and the bound is what stops a stream of
- * distinct patterns from growing it without limit.
+ * 2.3 ms to 14.1 ms. The D1 store no longer takes that path — it compiles the
+ * pattern to `GLOB` once — but the in-memory store, automation rules and
+ * notification rules still do.
+ *
+ * The cache is bounded and cleared wholesale rather than evicted one entry at a
+ * time — a filter workload reuses a handful of patterns, so the simple thing is
+ * enough, and the bound is what stops a stream of distinct patterns from
+ * growing it without limit.
  *
  * Safe to share: these regexps carry no `g` or `y` flag, so they hold no
  * per-call state.
@@ -662,13 +676,27 @@ function likePatternRegex(pattern: string): string {
  * a copy that `tests/desk-client-src/forms.test.ts` holds to this one.
  */
 export function containsFoldedText(value: string, needle: string): boolean {
-  return likePatternMatches(value, `%${escapeLikePattern(needle)}%`);
+  return likePatternMatches(value, containsLikePattern(needle));
+}
+
+/**
+ * The `like` pattern that `contains <needle>` is defined as.
+ *
+ * Exported so the D1 adapter can compile `contains` by translating this one
+ * pattern shape instead of growing its own needle-escaping rule — having more
+ * than one rule for the same question is what issue #53 was about, and a second
+ * rule on the SQL side would recreate the split.
+ *
+ * The escaping is not incidental: without it a user's `50%` would silently
+ * become a prefix match.
+ */
+export function containsLikePattern(needle: string): string {
+  return `%${escapeLikePattern(needle)}%`;
 }
 
 /**
  * Keeps `%`, `_` and the escape character literal when a plain string becomes a
- * `like` pattern. Without this, `contains "50%"` would silently become a prefix
- * match.
+ * `like` pattern.
  */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");

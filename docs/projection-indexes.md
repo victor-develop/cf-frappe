@@ -158,9 +158,9 @@ For a local development database, resetting the D1 state and re-running the migr
 
 ## What the predicate compiler pushes down
 
-`d1ProjectionListQuery` compiles a `PredicateExpression` into SQL. Everything it can push down, it does; what it cannot, it names.
+`d1ProjectionListQuery` compiles a `PredicateExpression` into SQL. Every operator the validator accepts compiles to an exact condition; anything that could not would raise rather than return a superset.
 
-**Pushed down exactly**: `eq`, `ne`, `in`, `not_in`, `is`, `gt`, `gte`, `lt`, `lte`, `between`, `not_between`, and `all`/`any` groups of them.
+**Pushed down exactly**: every operator. `eq`, `ne`, `in`, `not_in`, `is`, `gt`, `gte`, `lt`, `lte`, `between`, `not_between`, `contains`, `like`, `not_like`, `not`, and `all`/`any` groups of them. Nothing is evaluated in the Worker any more, and the 1000-candidate-row cap that used to reject text filters outright is gone along with the 400 it raised (issue #41).
 
 **Negation is pushed down too**, but not as `NOT (...)`. SQL comparisons against a missing JSON key yield NULL, `NOT NULL` is NULL, and the row drops out — while the in-memory evaluator treats a missing field as a failed match, so its negation *keeps* the row. The compiler emits the null-safe form instead:
 
@@ -168,13 +168,27 @@ For a local development database, resetting the D1 state and re-running the migr
 (json_extract(data_json, '$.status') = ?) IS NOT 1
 ```
 
-which means "the positive condition is false or unknown" — exactly the in-memory truth table. A negation only compiles when the inner SQL is equivalent to the inner predicate, never when it is a superset: negating a superset does not produce a superset of the negation.
+which means "the positive condition is false or unknown" — exactly the in-memory truth table. A negation only compiles when the inner SQL is equivalent to the inner predicate; if a future operator has no exact SQL form, the compiler throws instead of negating a superset, because negating a superset does not produce a superset of the negation.
 
 The wrapped form is not index-usable. That is inherent — a negation is rarely selective enough for an index to help — and paying a scan beats pulling every candidate row into the Worker.
 
-**Refined in memory**: `contains`, `like`, `not_like`, and any group containing them under `any`. All three fold case by one rule — a JS regexp with the `i` flag, so `contains` is `like` with the needle taken literally — while SQLite's `LIKE` folds ASCII only. Pushing them down as `LIKE` would therefore change which rows match on non-ASCII data, so the store fetches a bounded candidate set and applies `matchesPredicateExpression` to it instead. (Issue #41 has measurements for a `GLOB`-based pushdown that would preserve the rule exactly.)
+**Text operators are folded into `GLOB`, not `LIKE`.** SQLite's `LIKE` folds ASCII only, so `v LIKE '%ä%'` misses `ÄRGER`. The pushdown folds the *pattern* instead of the data — the pattern is short, the data is long, and `GLOB` supports character classes:
 
-That rule is **not** "case-insensitive over all of Unicode", and it is worth knowing where it stops. It is the ES `Canonicalize` operation behind the `i` flag, which never applies a case mapping that changes length or that reaches ASCII from outside ASCII, and which does not fold anything outside the BMP:
+| Filter | Bound pattern |
+| --- | --- |
+| `contains "ärger"` | `*[Ää][Rr][Gg][Ee][Rr]*` |
+| `like "%ς%"` | `*[Σςσ]*` |
+| `not_like "%ä%"` | `json_extract(...) IS NOT NULL AND (json_extract(...) GLOB '*[Ää]*') IS NOT 1` |
+
+The pattern is always a bound parameter, never SQL text. `contains` is compiled by routing the needle through `containsLikePattern` — the same escaping the in-memory rule uses, so `50%` stays literal — and then translating that one pattern shape in `src/core/like-glob.ts`. `GLOB` has no `ESCAPE` clause, so its three metacharacters become single-member classes (`[*]`, `[?]`, `[[]`). A literal `^` is emitted **raw**: `[^]` negates a class, and measured on SQLite 3.51.3 `'a^b' GLOB '*[^]*'` is 0 while `'a^b' GLOB '*^*'` is 1.
+
+`not_like` needs the presence check spelled out: in memory a missing or JSON-null field fails the match and the row drops, while `(NULL GLOB ?) IS NOT 1` is 1 and would keep it.
+
+A pattern ending in a lone `\` can never match (the in-memory rule compiles it to `(?!)`). `GLOB` cannot say that, so `like` degrades to `0 = 1` — while `not_like` still keeps exactly the rows whose field is present, which is not the same as negating `0 = 1`.
+
+The fold groups are a table generated from the ES `Canonicalize` behind the regexp `i` flag: 1144 multi-member groups over the BMP, largest 4 members, verified against regexp `i` in both directions with zero divergences (the full BMP cross-product is 2.0 billion comparisons, 18 s — run once, not in the suite; the suite regenerates the table and checks the case-related pairs). Grouping by `toLowerCase` instead diverges from regexp `i` on 72 ordered BMP pairs and would be wrong. `tests/core/like-glob.test.ts` rebuilds the table from the running engine and fails if it differs, because the in-memory side is whatever *this* runtime's regexp `i` does — a V8 Unicode data update would otherwise move one side and not the other.
+
+That rule is **not** "case-insensitive over all of Unicode", and it is worth knowing where it stops. It never applies a case mapping that changes length or that reaches ASCII from outside ASCII, and it does not fold anything outside the BMP:
 
 | Input | Needle | Folded? |
 | --- | --- | --- |
@@ -185,21 +199,39 @@ That rule is **not** "case-insensitive over all of Unicode", and it is worth kno
 | `İstanbul` | `i` | no — same reason |
 | `𐐀` (Deseret) | `𐐨` | no — outside the BMP |
 
-The last row covers 614 codepoint pairs, i.e. every cased astral script: Deseret, Osage, Adlam, Vithkuqi, Warang Citi, Medefaidrin, Old Hungarian. Text in those scripts is matched **case-sensitively**. `String.toLowerCase` would fold all of them, so this rule is genuinely narrower — the trade is that Canonicalize is reproducible outside JS, which is what makes a SQL pushdown possible at all.
+The last row covers 614 codepoint pairs, i.e. every cased astral script: Deseret, Osage, Adlam, Vithkuqi, Warang Citi, Medefaidrin, Old Hungarian. Text in those scripts is matched **case-sensitively**. `String.toLowerCase` would fold all of them, so this rule is genuinely narrower — the trade is that Canonicalize is reproducible outside JS, which is what makes the pushdown possible at all.
 
-When that candidate set exceeds `D1_PROJECTION_MAX_POST_FILTER_ROWS` the query is **rejected**, not silently truncated, and the error names the operator:
+### Two accepted divergences, and a length cap
 
-```
-D1_PROJECTION_REFINEMENT_TOO_BROAD: Filtering on contains cannot be pushed into SQL,
-and the remaining predicate matched more than 1000 candidate rows on 'Note'. Add a
-filter that does push down (an equality, range, or set membership) alongside it.
-```
+**`_` on astral-plane data.** `_` is one UTF-16 *code unit* in memory and compiles to `?`, which is one *code point* in `GLOB`. Measured: `'😀' GLOB '?'` is 1 and `'😀' GLOB '??'` is 0, while in memory `__` matches 😀 and `_` does not. Neither `?` nor `??` is even a consistent superset, so no fallback saves it. The exact fix is to redefine `_` as one code point, which would also have to change the standalone browser copy in `src/adapters/desk/client-src/forms.ts`, whose parity test covers only `contains` — the drift would ship silently. Blast radius: `contains` escapes `_`, so Desk's quick filter and the file list are exact even on astral data; only a hand-written `like`/`not_like` pattern containing `_` is affected.
 
-Pagination is not distorted: the refinement path fetches every candidate up to the bound, filters, then slices, so `total` is exact and offsets are stable.
+**Unpaired surrogates.** Two rows storing `"\ud83d"` and `"\ude00"` are stored distinctly (CESU-8, `EDA0BD` vs `EDB880`) but `GLOB` reports them equal — SQLite's UTF-8 reader collapses the malformed sequences — while in memory they are different code units. Reachable only with lone surrogates in stored data.
 
-`D1ProjectionListQuery.refinement` carries the predicate and the operators that forced it, so a caller that wants to log or surface "this query was refined in memory" has the reason available rather than a bare flag.
+Both are pinned by tests in `tests/adapters/d1-projection-glob.test.ts` so they stay known boundaries rather than field reports. A third, closely related boundary: a non-string value left in a text field diverges too, because SQLite's text coercion is not JS `String()` (JSON `true` becomes the integer 1, and `1 GLOB '*[rR][uU]*'` is 0 where memory says `"true"` contains `ru`). Schema validation makes that unreachable except after a field's type changes from `number` to `text` with old rows still numeric.
 
-Parity between the D1 adapter and the in-memory adapter — including rows whose field is absent or JSON null, which is where a naive negation goes wrong — is asserted against a real SQLite engine in `tests/adapters/d1-projection-negation.test.ts`.
+**Pattern length.** Folding expands a pattern by up to 6.00x in UTF-8 bytes (`Т` → `[Ттᲄᲅ]`, 2 bytes → 12), and SQLite raises "LIKE or GLOB pattern too complex" past `SQLITE_MAX_LIKE_PATTERN_LENGTH` — measured in bytes, not characters: 49998 bytes accepted, 50001 rejected. The compiler therefore caps the compiled pattern at `D1_PROJECTION_TEXT_PATTERN_MAX_BYTES` (4096) and raises a 400 naming the field and the limit, rather than letting a user-supplied filter value surface as a raw SQLite error. The cap sits an order of magnitude under the engine's because that limit is a compile-time option and workerd's value is not published. 4096 bytes is about a thousand ASCII characters of needle.
+
+### What it costs
+
+Both `LIKE` and `GLOB` are full scans — a leading wildcard defeats every index — so the win here is not speed, it is that the 1000-row cap and the per-row JSON parse in the Worker both disappear. Measured at 100k rows on the real core schema (node:sqlite 3.51.3, mean of 10 after 3 warmups), `COUNT(*)` over `json_extract(data_json,'$.title')`:
+
+| Condition | Time |
+| --- | --- |
+| `IS NOT NULL` (no matcher) | 29.2 ms |
+| `LIKE '%needle%'` | 29.9 ms |
+| `GLOB '*needle*'` | 30.2 ms |
+| `GLOB '*[Nn][Ee][Ee][Dd][Ll][Ee]*'` | 38.4 ms |
+| `GLOB '*[Nn]eedle*'` | 37.9 ms |
+
+So the classes cost about 28% more than `LIKE`, and nearly all of it comes from the first element after `*` being a class — a single leading class costs the same as a fully expanded pattern.
+
+`EXPLAIN QUERY PLAN` with bound values, with and without `ANALYZE`, still picks `idx_cf_frappe_documents_list` for the tenant/doctype seek and the `updated_at` order, so a page can still terminate early — but only when matches are dense. With 100 matching rows in 100k, `LIMIT 50 OFFSET 0` cost 28.3 ms, i.e. half the table. `COUNT(*)` is always a full scan. **A text filter therefore reads the whole doctype twice per page** (rows and total). `total` staying exact is what keeps pagination stable, so that is the trade this change accepts; bounding `total` for text filters is a separate decision.
+
+### What this did not fix
+
+The in-memory `like` regexp is still catastrophically backtracking, and this change only removes the D1 list path's exposure to it. Measured on one 61-character row of `"a"`: the pattern `%a%a%a%a%z` costs 27 ms, `%a%a%a%a%a%z` 256 ms, `%a%a%a%a%a%a%z` 2097 ms — polynomial in the number of `%`, for a **single row**. Patterns are user-supplied through the list API, so one row is enough to burn a Worker's CPU budget. `matchesPredicateExpression` is still reachable from `src/adapters/in-memory/list-filters.ts`, automation rules and notification rules. A pattern-complexity bound (wildcard count, not just length) belongs on both sides and is not in this change.
+
+Parity between the D1 adapter and the in-memory adapter — including rows whose field is absent or JSON null, which is where a naive negation goes wrong — is asserted against a real SQLite engine in `tests/adapters/d1-projection-negation.test.ts` and, for the text operators, `tests/adapters/d1-projection-glob.test.ts`. The latter also runs a seeded 120000-pair differential of the compiled `GLOB` against `likePatternMatches` over an alphabet of every `GLOB` and `like` metacharacter plus the known fold groups, twice: once for `like` patterns and once for `contains` needles.
 
 ## Rules for contributors
 

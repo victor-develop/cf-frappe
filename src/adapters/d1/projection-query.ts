@@ -7,6 +7,9 @@ import type {
   PredicateOperand,
   PredicateOperator
 } from "../../core/types.js";
+import { FrameworkError } from "../../core/errors.js";
+import { containsLikePattern } from "../../core/predicates.js";
+import { likeGlobPattern } from "../../core/like-glob.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
 import { d1JsonExtract, d1JsonType } from "./json-path.js";
 
@@ -16,53 +19,38 @@ export interface D1ProjectionListQuery {
   readonly where: string;
   readonly params: readonly JsonPrimitive[];
   readonly orderBy: string;
-  /**
-   * Set when the pushed-down `WHERE` is a superset of the predicate and the rows
-   * it returns still need an in-memory pass. `operators` names why, so a slow
-   * query is diagnosable instead of mysterious.
-   */
-  readonly refinement?: D1ProjectionRefinement;
-}
-
-export interface D1ProjectionRefinement {
-  readonly predicate: PredicateExpression;
-  readonly operators: readonly PredicateOperator[];
 }
 
 /**
- * Operators with no SQL equivalent that preserves the in-memory semantics.
- * `contains`, `like` and `not_like` all fold case by one rule — a JS regexp
- * with the `i` flag — while SQLite's `LIKE` folds ASCII only, so pushing them
- * down would change which rows match on non-ASCII data. They are therefore
- * compiled as a superset and refined in memory.
+ * The largest `GLOB` pattern this compiler will bind, in UTF-8 bytes.
  *
- * That rule is not "full Unicode": it is the ES Canonicalize used by the `i`
- * flag, which covers most of the BMP but never applies a mapping that changes
- * length or that reaches ASCII from outside it, and does not fold anything
- * outside the BMP. It is narrower than `String.toLowerCase`, and deliberately
- * so — being reproducible is what makes a pushdown possible at all (issue #41).
+ * SQLite raises "LIKE or GLOB pattern too complex" past
+ * `SQLITE_MAX_LIKE_PATTERN_LENGTH`, counted in bytes: measured on SQLite 3.51.3
+ * a 49998-byte pattern is accepted and a 50001-byte one raises. Case-folding a
+ * pattern expands it by up to 6.00x in bytes (`Т` -> `[Ттᲄᲅ]`, 2 bytes -> 12),
+ * so a long needle can cross that line where the old in-memory path handled any
+ * length. This bound sits an order of magnitude below the engine's, because the
+ * engine's is a compile-time option and workerd's value is not published —
+ * sitting at the measured limit would be betting on a number from a different
+ * build. 4096 bytes still admits about a thousand ASCII characters of needle,
+ * far past anything a quick filter types.
  */
-const D1_REFINED_OPERATORS: readonly PredicateOperator[] = ["contains", "like", "not_like"];
+export const D1_PROJECTION_TEXT_PATTERN_MAX_BYTES = 4096;
 
 const D1_PROJECTION_COLUMNS =
   "tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at";
 
 /**
  * SQL for a projection list page. The `LIMIT`/`OFFSET` placeholders are bound
- * after {@link D1ProjectionListQuery.params}; pass `paged: false` for the
- * post-filter path, which binds a single candidate cap instead.
+ * after {@link D1ProjectionListQuery.params}.
  */
-export function d1ProjectionListSql(
-  query: D1ProjectionListQuery,
-  options: { readonly paged?: boolean } = {}
-): string {
-  const paged = options.paged ?? true;
+export function d1ProjectionListSql(query: D1ProjectionListQuery): string {
   return (
     `SELECT ${D1_PROJECTION_COLUMNS}\n` +
     `         FROM ${D1_DOCUMENTS_TABLE}\n` +
     `         WHERE ${query.where}\n` +
     `         ORDER BY ${query.orderBy}\n` +
-    `         ${paged ? "LIMIT ? OFFSET ?" : "LIMIT ?"}`
+    `         LIMIT ? OFFSET ?`
   );
 }
 
@@ -74,50 +62,36 @@ export function d1ProjectionCountSql(query: D1ProjectionListQuery): string {
 export function d1ProjectionListQuery(query: ListDocumentsQuery): D1ProjectionListQuery {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
-  const predicate = query.predicate;
-  const filtered = predicateWhere(predicate);
+  const filtered = predicateWhere(query.predicate);
   return {
     limit,
     offset,
     where: ["tenant_id = ?", "doctype = ?", ...filtered.conditions].join(" AND "),
     params: [query.tenantId, query.doctype, ...filtered.params],
-    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc"),
-    ...(filtered.refined.length > 0 && predicate !== undefined
-      ? { refinement: { predicate, operators: filtered.refined } }
-      : {})
+    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc")
   };
 }
 
 interface PredicateWhere {
   readonly conditions: readonly string[];
   readonly params: readonly JsonPrimitive[];
-  /** Operators that could not be pushed down; empty means the SQL is exact. */
-  readonly refined: readonly PredicateOperator[];
   /**
    * True when the conditions are equivalent to the predicate rather than a
    * superset of it. Only a complete condition may be negated: negating a
    * superset does not produce a superset of the negation.
+   *
+   * Every operator is now pushed down exactly, so this is always true and the
+   * checks that read it are unreachable — they are kept as throws rather than
+   * deleted because the next operator without an exact SQL form would otherwise
+   * silently return every row. PR #40 shipped a wrong operator-negation table
+   * that only the real engine caught; an assertion is cheaper than that.
    */
   readonly complete: boolean;
 }
 
-function refinedOperatorsOf(expression: PredicateExpression): readonly PredicateOperator[] {
-  if (expression.kind === "not") {
-    return refinedOperatorsOf(expression.predicate);
-  }
-  if (expression.kind === "group") {
-    return dedupeOperators(expression.predicates.flatMap(refinedOperatorsOf));
-  }
-  return [expression.operator];
-}
-
-function dedupeOperators(operators: readonly PredicateOperator[]): readonly PredicateOperator[] {
-  return [...new Set(operators)];
-}
-
 function predicateWhere(expression: PredicateExpression | undefined): PredicateWhere {
   return expression === undefined
-    ? { conditions: [], params: [], refined: [], complete: true }
+    ? { conditions: [], params: [], complete: true }
     : predicateExpressionWhere(expression);
 }
 
@@ -146,43 +120,51 @@ function predicateExpressionWhere(expression: PredicateExpression): PredicateWhe
  */
 function predicateNotWhere(inner: PredicateExpression): PredicateWhere {
   const compiled = predicateExpressionWhere(inner);
-  if (!compiled.complete || compiled.conditions.length === 0) {
-    // The inner SQL is a superset, so its negation would drop matching rows.
-    return {
-      conditions: [],
-      params: [],
-      refined: compiled.refined.length > 0 ? compiled.refined : refinedOperatorsOf(inner),
-      complete: false
-    };
-  }
+  assertPushedDownExactly(compiled, "a negated predicate");
   return {
     conditions: [`(${compiled.conditions.join(" AND ")}) IS NOT 1`],
     params: compiled.params,
-    refined: [],
     complete: true
   };
 }
 
 function predicateGroupWhere(expression: Extract<PredicateExpression, { readonly kind: "group" }>): PredicateWhere {
   const children = expression.predicates.map(predicateExpressionWhere);
-  const refined = dedupeOperators(children.flatMap((child) => child.refined));
-  if (expression.match === "any" && refined.length > 0) {
-    // An OR cannot drop a branch: if any branch needs refinement, the whole
-    // group has to be evaluated in memory.
-    return { conditions: [], params: [], refined, complete: false };
+  if (children.length === 0) {
+    // Validation rejects an empty group ("Predicate group must include at least
+    // one predicate"), but this compiler is exported and takes a raw query, and
+    // an empty group would otherwise emit the syntactically invalid `()`.
+    throw new Error("D1 projection predicate groups must contain at least one predicate");
   }
-  const pushedDown = children.filter((child) => child.conditions.length > 0);
-  const complete = refined.length === 0 && children.every((child) => child.complete);
-  if (pushedDown.length === 0) {
-    return { conditions: [], params: [], refined, complete };
+  for (const child of children) {
+    // An OR cannot drop a branch, and an AND of a superset with an exact
+    // condition is still a superset once negated, so nothing here tolerates a
+    // partial child.
+    assertPushedDownExactly(child, `a '${expression.match}' predicate group`);
   }
   const joiner = expression.match === "all" ? " AND " : " OR ";
   return {
-    conditions: [`(${pushedDown.map((child) => child.conditions.join(" AND ")).join(joiner)})`],
-    params: pushedDown.flatMap((child) => child.params),
-    refined,
-    complete
+    conditions: [`(${children.map((child) => child.conditions.join(" AND ")).join(joiner)})`],
+    params: children.flatMap((child) => child.params),
+    complete: true
   };
+}
+
+/**
+ * Fails loudly when a compiled child is a superset of its predicate.
+ *
+ * Unreachable today — every operator has an exact SQL form. It exists so that
+ * adding one that does not is a 500 with a name in it rather than a list that
+ * quietly contains rows the predicate excludes.
+ */
+function assertPushedDownExactly(compiled: PredicateWhere, context: string): void {
+  if (!compiled.complete || compiled.conditions.length === 0) {
+    throw new Error(
+      `D1 projection predicates must compile to exact SQL, but ${context} did not. ` +
+        "An operator without an exact SQL form cannot be pushed down: negating or OR-ing a " +
+        "superset does not produce a superset."
+    );
+  }
 }
 
 function predicateComparisonWhere(
@@ -196,8 +178,8 @@ function predicateComparisonWhere(
     case "eq": {
       const scalar = scalarPredicateValue(value, operator);
       return scalar === null
-        ? { conditions: [nullEqualityExpression(field, expression)], params: [], refined: [], complete: true }
-        : { conditions: [`${expression} = ?`], params: [sqliteJsonValue(scalar)], refined: [], complete: true };
+        ? { conditions: [nullEqualityExpression(field, expression)], params: [], complete: true }
+        : { conditions: [`${expression} = ?`], params: [sqliteJsonValue(scalar)], complete: true };
     }
     case "ne": {
       const scalar = scalarPredicateValue(value, operator);
@@ -206,8 +188,7 @@ function predicateComparisonWhere(
           ? `${expression} IS NOT NULL`
           : `${expression} IS NOT NULL AND ${expression} != ?`],
         params: scalar === null ? [] : [sqliteJsonValue(scalar)],
-        refined: [],
-      complete: true
+        complete: true
       };
     }
     case "in": {
@@ -215,8 +196,7 @@ function predicateComparisonWhere(
       return {
         conditions: [values.length === 0 ? "0 = 1" : `${expression} IN (${values.map(() => "?").join(", ")})`],
         params: values.map(sqliteJsonValue),
-        refined: [],
-      complete: true
+        complete: true
       };
     }
     case "not_in": {
@@ -226,56 +206,49 @@ function predicateComparisonWhere(
           ? `${expression} IS NOT NULL`
           : `${expression} IS NOT NULL AND ${expression} NOT IN (${values.map(() => "?").join(", ")})`],
         params: values.map(sqliteJsonValue),
-        refined: [],
-      complete: true
+        complete: true
       };
     }
     case "is":
       return {
         conditions: [`${expression} ${presencePredicateValue(value, operator) === "set" ? "IS NOT NULL" : "IS NULL"}`],
         params: [],
-        refined: [],
-      complete: true
+        complete: true
       };
     case "contains":
     case "like":
     case "not_like":
-      return { conditions: [], params: [], refined: [operator], complete: false };
+      return textPredicateWhere(field, expression, operator, value);
     case "gt":
       return {
         conditions: [`${expression} > ?`],
         params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
-        refined: [],
-      complete: true
+        complete: true
       };
     case "gte":
       return {
         conditions: [`${expression} >= ?`],
         params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
-        refined: [],
-      complete: true
+        complete: true
       };
     case "lt":
       return {
         conditions: [`${expression} < ?`],
         params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
-        refined: [],
-      complete: true
+        complete: true
       };
     case "lte":
       return {
         conditions: [`${expression} <= ?`],
         params: [sqliteJsonValue(scalarPredicateValue(value, operator))],
-        refined: [],
-      complete: true
+        complete: true
       };
     case "between": {
       const [minimum, maximum] = rangePredicateValues(value, operator);
       return {
         conditions: [`(${expression} >= ? AND ${expression} <= ?)`],
         params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)],
-        refined: [],
-      complete: true
+        complete: true
       };
     }
     case "not_between": {
@@ -283,12 +256,103 @@ function predicateComparisonWhere(
       return {
         conditions: [`${expression} IS NOT NULL AND (${expression} < ? OR ${expression} > ?)`],
         params: [sqliteJsonValue(minimum), sqliteJsonValue(maximum)],
-        refined: [],
-      complete: true
+        complete: true
       };
     }
     default:
       throw new Error(`Unsupported predicate operator '${String(operator)}'`);
+  }
+}
+
+/**
+ * Compiles `contains`, `like` and `not_like` into a bound `GLOB` pattern.
+ *
+ * These were the last operators refined in the Worker: the store fetched a
+ * bounded candidate set, parsed each row's JSON and re-evaluated the predicate,
+ * and refused outright past 1000 candidates — so text search did not work on a
+ * large doctype at all (issue #41). `GLOB` with case-fold character classes
+ * reproduces the in-memory rule exactly, which removes both the cap and the
+ * per-row parse. It is not faster per row — a leading wildcard defeats every
+ * index either way, and the classes cost about 28% more than plain `LIKE`
+ * (measured at 100k rows: 29.9 ms for `LIKE '%needle%'` against 38.4 ms for the
+ * expanded classes, over a 29.2 ms no-matcher baseline). What it is, is
+ * *bounded*: no cap and no per-row JSON parse, which the old path had both of.
+ *
+ * `not_like` needs the presence check spelled out. In memory it requires the
+ * field to be present before negating, so a missing or JSON-null field drops the
+ * row — while `expr GLOB ?` on NULL is NULL and `(NULL) IS NOT 1` is 1, which
+ * would keep it.
+ */
+function textPredicateWhere(
+  field: string,
+  expression: string,
+  operator: "contains" | "like" | "not_like",
+  value: JsonValue
+): PredicateWhere {
+  if (operator === "contains") {
+    const needle = containsNeedle(value, operator);
+    return needle === undefined
+      ? neverMatchesWhere()
+      : globPredicateWhere(field, expression, operator, containsLikePattern(needle));
+  }
+  if (typeof value !== "string") {
+    // In memory both `like` and `not_like` require a string pattern and are
+    // false without one — `not_like` included, so this is not "keep every row".
+    return neverMatchesWhere();
+  }
+  return globPredicateWhere(field, expression, operator, value);
+}
+
+function globPredicateWhere(
+  field: string,
+  expression: string,
+  operator: "contains" | "like" | "not_like",
+  pattern: string
+): PredicateWhere {
+  const translated = likeGlobPattern(pattern);
+  if (translated.kind === "never") {
+    // A pattern ending in a lone `\` matches nothing. `not_like` still keeps
+    // exactly the rows whose field is present, which a bare `0 = 1` under a
+    // negation would get wrong in the other direction (it would keep every row,
+    // including the ones with no such field).
+    return operator === "not_like"
+      ? { conditions: [`${expression} IS NOT NULL`], params: [], complete: true }
+      : neverMatchesWhere();
+  }
+  assertTextPatternWithinLimit(field, translated.pattern);
+  return operator === "not_like"
+    ? {
+      conditions: [`${expression} IS NOT NULL AND (${expression} GLOB ?) IS NOT 1`],
+      params: [translated.pattern],
+      complete: true
+    }
+    : { conditions: [`${expression} GLOB ?`], params: [translated.pattern], complete: true };
+}
+
+function neverMatchesWhere(): PredicateWhere {
+  return { conditions: ["0 = 1"], params: [], complete: true };
+}
+
+/** `undefined` when the in-memory rule cannot match at all. */
+function containsNeedle(value: JsonValue, operator: PredicateOperator): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  // `String(actual)`/`String(expected)` is what the in-memory rule applies, so
+  // coerce the needle the same way rather than rejecting a non-string.
+  return String(scalarPredicateValue(value, operator));
+}
+
+function assertTextPatternWithinLimit(field: string, pattern: string): void {
+  const bytes = new TextEncoder().encode(pattern).length;
+  if (bytes > D1_PROJECTION_TEXT_PATTERN_MAX_BYTES) {
+    throw new FrameworkError(
+      "D1_PROJECTION_TEXT_PATTERN_TOO_LONG",
+      `Text filter on '${field}' compiles to a ${bytes}-byte GLOB pattern, over the ` +
+        `${D1_PROJECTION_TEXT_PATTERN_MAX_BYTES}-byte limit. Case-folding expands a pattern by up ` +
+        "to 6x in bytes, so use a shorter search term.",
+      { status: 400 }
+    );
   }
 }
 

@@ -1,7 +1,5 @@
 import {
-  D1_PROJECTION_MAX_POST_FILTER_ROWS,
   D1ProjectionStore,
-  InMemoryProjectionStore,
   predicateExpressionFromListFilterExpression
 } from "../../src";
 import { d1ProjectionListQuery } from "../../src/adapters/d1/projection-query.js";
@@ -146,24 +144,29 @@ describe("D1ProjectionStore", () => {
     });
   });
 
-  it("post-filters contains without sending text matcher values to SQLite", async () => {
+  it("pushes contains into SQL as a bound GLOB pattern, never as SQL text", async () => {
     const db = new FakeD1Database([
       documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })
     ]);
     const store = new D1ProjectionStore(db as unknown as D1Database);
 
-    const result = await store.list({
+    await store.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "title", operator: "contains", value: "50%_Off" }])
     });
 
-    expect(result).toMatchObject({ data: [{ name: "D1 Sale" }], total: 1 });
+    // Which rows come back is not asserted here: this fake matches SQL by
+    // substring and passes every row for a shape it does not recognise, so it
+    // cannot evaluate GLOB. Row-level parity lives in
+    // d1-projection-glob.test.ts against a real engine.
     const [rows] = db.statements;
+    expect(rows?.sql).toContain("json_extract(data_json, '$.title') GLOB ?");
     expect(rows?.sql).not.toContain("LOWER(");
-    expect(rows?.sql).not.toContain("LIKE");
+    // The needle reaches SQLite as a parameter, so this is now an
+    // anti-interpolation guard rather than a "not pushed down" one.
     expect(rows?.sql).not.toContain("50%_Off");
-    expect(rows?.params).toEqual(["acme", "Note", D1_PROJECTION_MAX_POST_FILTER_ROWS + 1]);
+    expect(rows?.params).toEqual(["acme", "Note", "*50%_[Oo][Ff][Ff]*", 50, 0]);
   });
 
   it("renders advanced scalar operators with bound filter parameters", async () => {
@@ -392,144 +395,46 @@ describe("D1ProjectionStore", () => {
     expect(setDb.statements[0]?.params).toEqual(["acme", "Note", 50, 0]);
   });
 
-  it("post-filters pattern operators through the shared Predicate evaluator", async () => {
+  it("pushes like and not_like into SQL, including the patterns that match nothing", async () => {
     const db = new FakeD1Database([
-      documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } }),
-      documentRow({ name: "D1 Launchpad", data: { title: "Launchpad" } }),
-      documentRow({ name: "D1 Routine", data: { title: "Routine Check" } })
+      documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } })
     ]);
     const store = new D1ProjectionStore(db as unknown as D1Database);
+    const compile = async (operator: "like" | "not_like", value: string) => {
+      const fake = new FakeD1Database(db.rows);
+      await new D1ProjectionStore(fake as unknown as D1Database).list({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: filterPredicate([{ field: "title", operator, value }])
+      });
+      return fake.statements[0]!;
+    };
 
-    const like = await store.list({
-      tenantId: "acme",
-      doctype: "Note",
-      predicate: filterPredicate([{ field: "title", operator: "like", value: "launch%" }])
-    });
+    const like = await compile("like", "launch%");
+    expect(like.sql).toContain("json_extract(data_json, '$.title') GLOB ?");
+    expect(like.sql).not.toContain("launch%");
+    expect(like.params).toEqual(["acme", "Note", "[Ll][Aa][Uu][Nn][Cc][Hh]*", 50, 0]);
 
-    expect(like.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
-    expect(like.total).toBe(2);
-    const [rows] = db.statements;
-    expect(rows?.sql).not.toContain("LOWER(");
-    expect(rows?.sql).not.toContain("LIKE");
-    expect(rows?.sql).not.toContain("launch%");
-    expect(rows?.params).toEqual(["acme", "Note", D1_PROJECTION_MAX_POST_FILTER_ROWS + 1]);
+    // `not_like` carries its own presence check: in memory a missing or JSON
+    // null field fails the match and the row drops, while `(NULL GLOB ?) IS NOT
+    // 1` is true and would keep it.
+    const notLike = await compile("not_like", "%launch%");
+    expect(notLike.sql).toContain(
+      "json_extract(data_json, '$.title') IS NOT NULL AND (json_extract(data_json, '$.title') GLOB ?) IS NOT 1"
+    );
+    expect(notLike.params).toEqual(["acme", "Note", "*[Ll][Aa][Uu][Nn][Cc][Hh]*", 50, 0]);
 
-    const notLikeDb = new FakeD1Database(db.rows);
-    const notLikeStore = new D1ProjectionStore(notLikeDb as unknown as D1Database);
-    const notLike = await notLikeStore.list({
-      tenantId: "acme",
-      doctype: "Note",
-      predicate: filterPredicate([{ field: "title", operator: "not_like", value: "%launch%" }])
-    });
+    // A trailing lone `\\` escapes nothing and can never match. GLOB has no way
+    // to say that, so the condition degrades to a false one — and the negated
+    // operator keeps exactly the rows whose field is present instead.
+    const neverLike = await compile("like", "launch plan\\");
+    expect(neverLike.sql).toContain("AND (0 = 1)");
+    expect(neverLike.params).toEqual(["acme", "Note", 50, 0]);
 
-    expect(notLike.data.map((document) => document.name)).toEqual(["D1 Routine"]);
-    expect(notLike.total).toBe(1);
-    expect(notLikeDb.statements[0]?.sql).not.toContain("LOWER(");
-    expect(notLikeDb.statements[0]?.sql).not.toContain("LIKE");
-    expect(notLikeDb.statements[0]?.sql).not.toContain("%launch%");
-    expect(notLikeDb.statements[0]?.params).toEqual([
-      "acme",
-      "Note",
-      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
-    ]);
-
-    const escapedDb = new FakeD1Database(db.rows);
-    const escapedStore = new D1ProjectionStore(escapedDb as unknown as D1Database);
-    const escaped = await escapedStore.list({
-      tenantId: "acme",
-      doctype: "Note",
-      predicate: filterPredicate([{ field: "title", operator: "like", value: "\\l%" }])
-    });
-
-    expect(escaped.data.map((document) => document.name)).toEqual(["D1 Launch", "D1 Launchpad"]);
-    expect(escapedDb.statements[0]?.params).toEqual([
-      "acme",
-      "Note",
-      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
-    ]);
-
-    const trailingEscapeDb = new FakeD1Database(db.rows);
-    const trailingEscapeStore = new D1ProjectionStore(trailingEscapeDb as unknown as D1Database);
-    const trailingEscape = await trailingEscapeStore.list({
-      tenantId: "acme",
-      doctype: "Note",
-      predicate: filterPredicate([{ field: "title", operator: "like", value: "launch plan\\" }])
-    });
-
-    expect(trailingEscape).toMatchObject({ data: [], total: 0 });
-    expect(trailingEscapeDb.statements[0]?.params).toEqual([
-      "acme",
-      "Note",
-      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
-    ]);
-  });
-
-  it("matches in-memory Unicode case folding, wildcards, escaping, and negation", async () => {
-    const snapshots = [
-      documentSnapshot({ name: "D1 Umlaut", data: { title: "Ärger", priority: "Low" } }),
-      documentSnapshot({ name: "D1 Literal", data: { title: "Value 100% Ready", priority: "Low" } }),
-      documentSnapshot({ name: "D1 Routine", data: { title: "Routine", priority: "High" } }),
-      documentSnapshot({ name: "D1 Null", data: { title: null, priority: "Low" } }),
-      documentSnapshot({ name: "D1 Missing", data: { priority: "Low" } })
-    ];
-    const db = new FakeD1Database(snapshots.map(rowFromSnapshot));
-    const d1 = new D1ProjectionStore(db as unknown as D1Database);
-    const memory = new InMemoryProjectionStore();
-    for (const snapshot of snapshots) {
-      await memory.save(snapshot);
-    }
-
-    const cases: ReadonlyArray<readonly [PredicateExpression, readonly string[]]> = [
-      [filterPredicate([{ field: "title", operator: "contains", value: "ä" }]), ["D1 Umlaut"]],
-      [filterPredicate([{ field: "title", operator: "like", value: "ä_ger" }]), ["D1 Umlaut"]],
-      [filterPredicate([{ field: "title", operator: "like", value: "value 100\\%%" }]), ["D1 Literal"]],
-      [filterPredicate([{ field: "title", operator: "not_like", value: "%ä%" }]), ["D1 Literal", "D1 Routine"]],
-      [{
-        kind: "group",
-        match: "any",
-        predicates: [
-          filterPredicate([{ field: "priority", value: "High" }]),
-          filterPredicate([{ field: "title", operator: "like", value: "ä%" }])
-        ]
-      }, ["D1 Umlaut", "D1 Routine"]]
-    ];
-
-    for (const [predicate, expectedNames] of cases) {
-      const query = { tenantId: "acme", doctype: "Note", predicate } as const;
-      const [d1Result, memoryResult] = await Promise.all([d1.list(query), memory.list(query)]);
-      expect(d1Result.data.map((document) => document.name)).toEqual(expectedNames);
-      expect(d1Result).toEqual(memoryResult);
-    }
-
-    expect(db.statements.every((statement) => !statement.sql.includes("LOWER("))).toBe(true);
-    expect(db.statements.every((statement) => !statement.sql.includes("NOT ("))).toBe(true);
-    // Negation is no longer refined in memory, so it is asserted against a real
-    // SQLite engine in d1-projection-negation.test.ts: this fake interprets a
-    // subset of SQL by hand and cannot evaluate `(...) IS NOT 1`.
-  });
-
-  it("rejects a refinement that would scan too many candidates, naming the operator", async () => {
-    const db = new FakeD1Database(Array.from(
-      { length: D1_PROJECTION_MAX_POST_FILTER_ROWS + 1 },
-      (_, index) => documentRow({ name: `D1 ${index}`, data: { title: "Ärger" } })
-    ));
-    const store = new D1ProjectionStore(db as unknown as D1Database);
-
-    await expect(store.list({
-      tenantId: "acme",
-      doctype: "Note",
-      predicate: filterPredicate([{ field: "title", operator: "contains", value: "ä" }])
-    })).rejects.toMatchObject({
-      code: "D1_PROJECTION_REFINEMENT_TOO_BROAD",
-      // The message names the operator that could not be pushed down, so a slow
-      // or rejected query is diagnosable without reading the compiler.
-      message: expect.stringContaining("Filtering on contains cannot be pushed into SQL")
-    });
-    expect(db.statements[0]?.params).toEqual([
-      "acme",
-      "Note",
-      D1_PROJECTION_MAX_POST_FILTER_ROWS + 1
-    ]);
+    const neverNotLike = await compile("not_like", "launch plan\\");
+    expect(neverNotLike.sql).toContain("AND (json_extract(data_json, '$.title') IS NOT NULL)");
+    expect(neverNotLike.sql).not.toContain("0 = 1");
+    expect(neverNotLike.params).toEqual(["acme", "Note", 50, 0]);
   });
 
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
