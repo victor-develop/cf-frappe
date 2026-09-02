@@ -1,3 +1,4 @@
+import { containsFoldedText } from "../../src/core/predicates.js";
 import { boot, resetRegistries } from "../../src/adapters/desk/client-src/boot";
 import {
   CHILD_TABLE_ROW_INDEX_FIELD,
@@ -771,6 +772,36 @@ describe("client-src form binding", () => {
       expect(hiddenFor(cmp("like", fieldOp("status"), lit(5)), "5")).toBe(false);
       expect(hiddenFor(cmp("not_like", fieldOp("status"), lit("%pen%")), "closed")).toBe(true);
       expect(hiddenFor(cmp("not_like", fieldOp("status"), lit("%pen%")), "opened")).toBe(false);
+    });
+
+    it("folds case in contains exactly as the predicate kernel does", () => {
+      // This evaluator is a standalone copy of the kernel's rules — the browser
+      // bundle cannot import them — so nothing but a test keeps the two in
+      // step. It drifted once (#53): `contains` here matched by
+      // `toLowerCase().indexOf`, which is a different rule from `like`'s
+      // case-insensitive regexp, so conditional visibility disagreed with the
+      // server on real input.
+      const cases: ReadonlyArray<readonly [string, string]> = [
+        ["\u03c3igma", "\u03c2"],
+        ["\u03c2igma", "\u03c3"],
+        ["\u03a3igma", "\u03c2"],
+        ["\u0130stanbul", "i"],
+        ["\u00b5 meter", "\u03bc"],
+        ["\u03d1eta", "\u03b8"],
+        ["\u212a" + "lvin", "k"],
+        ["\u212b" + "ngstrom", "\u00e5"],
+        ["\u2126" + "hm", "\u03c9"],
+        ["x\u{10400}y", "\u{10428}"],
+        ["\u00c4rger", "\u00e4"],
+        ["50% off", "50%"],
+        ["a_b", "a_b"]
+      ];
+
+      for (const [value, needle] of cases) {
+        const client = hiddenFor(cmp("contains", fieldOp("status"), lit(needle)), value);
+        const kernel = containsFoldedText(value, needle);
+        expect({ value, needle, client }).toEqual({ value, needle, client: kernel });
+      }
     });
 
     it("evaluates ordered comparisons numerically and lexically", () => {

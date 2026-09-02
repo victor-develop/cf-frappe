@@ -1,5 +1,6 @@
 import { badRequest, notFound } from "../core/errors.js";
 import { can } from "../core/permissions.js";
+import { containsFoldedText } from "../core/predicates.js";
 import { csvLine } from "./csv.js";
 import type {
   ReportChartDefinition,
@@ -918,7 +919,9 @@ function matchesReportFilterValue(
     case "ne":
       return actual !== expected;
     case "contains":
-      return String(actual ?? "").toLowerCase().includes(String(expected).toLowerCase());
+      // Same rule as the predicate kernel's `contains`, so the report builder's
+      // "Contains" filter and a list view's agree on the same data (#53).
+      return containsFoldedText(String(actual ?? ""), String(expected));
     case "gte":
       return compareReportValues(actual, scalarReportFilterValue(expected)) >= 0;
     case "lte":

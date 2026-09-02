@@ -820,12 +820,16 @@ function matchesFormPredicateComparison(binding: FormBinding, expression: Unknow
       : expected === "not set" && (actual === undefined || actual === null);
   }
   if (operator === "contains") {
+    // Must fold case the same way `like` does, and the same way the kernel's
+    // `contains` does — this evaluator decides conditional visibility on its
+    // own, so a rule of its own would hide fields the server would show.
+    // See issue #53.
     return (
       actual !== undefined &&
       actual !== null &&
       expected !== undefined &&
       expected !== null &&
-      String(actual).toLowerCase().indexOf(String(expected).toLowerCase()) >= 0
+      likePatternMatches(actual, `%${escapeLikePattern(String(expected))}%`)
     );
   }
   if (operator === "like" || operator === "not_like") {
@@ -964,6 +968,11 @@ function likePatternRegex(pattern: string): string {
     }
   }
   return regex;
+}
+
+/** Keeps `%`, `_` and `\` literal when a plain string becomes a `like` pattern. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function escapeRegex(value: unknown): string {
