@@ -6,6 +6,7 @@ import {
   documentDeliveryOutboxRecordId,
   DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   foldDocumentDeliveryOutbox,
+  foldDocumentDeliveryOutboxFrom,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords,
   type DocumentDeliveryOutboxEventPayload,
@@ -263,13 +264,13 @@ export class DocumentDeliveryOutboxService {
       }
       try {
         const saved = await this.events.append(stream, state.version, planned.events);
-        return selectedDocumentDeliveryOutboxRecords(foldDocumentDeliveryOutbox(tenantId, [
-          ...(await this.events.readStream(stream, {
-            maxSequence: state.version,
-            payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
-          })),
-          ...saved
-        ]), planned.recordIds);
+        // `state` was folded from exactly the events this used to re-read, so
+        // resume from it rather than reading and folding the stream a second
+        // time on every outbox operation. See issue #28.
+        return selectedDocumentDeliveryOutboxRecords(
+          foldDocumentDeliveryOutboxFrom(state, tenantId, saved),
+          planned.recordIds
+        );
       } catch (error) {
         if (isDocumentConflictError(error) && attempt < MAX_OUTBOX_APPEND_ATTEMPTS) {
           continue;
