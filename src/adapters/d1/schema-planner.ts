@@ -61,6 +61,7 @@ export const D1_JOB_EXECUTION_MESSAGE_MIGRATION_ID = "0003_cf_frappe_job_executi
 export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
 export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_rollbacks";
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
+export const D1_EVENT_DOCUMENT_NAME_MIGRATION_ID = "0007_cf_frappe_events_document_name";
 
 /**
  * Trailing projection-index column that lets the default list ordering
@@ -269,12 +270,46 @@ export const D1_AUTOMATION_RUN_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[]
 ];
 
 /**
+ * Serves a document-column lookup inside one named stream —
+ * `AuditEventStore.readDocumentEvents` with an explicit `stream`, which is how
+ * the delivery outbox reads a single record out of a stream shared by the whole
+ * tenant.
+ *
+ * The trailing `sequence` is load-bearing, and which column that is was settled
+ * by measurement rather than by reading the shape. Without it — a plain
+ * `(tenant_id, doctype, document_name)` index — SQLite prefers
+ * `idx_cf_frappe_events_stream_sequence` on a table with no statistics, because
+ * that index satisfies the query's `ORDER BY sequence ASC`, and then scans the
+ * entire stream. 50k events in one outbox stream, node:sqlite, warm: 3460 µs
+ * against 2.1 µs.
+ *
+ * That preference is a no-statistics artefact: after `ANALYZE` the three-column
+ * index *is* chosen, at 2.4 µs with a temporary B-tree for the ordering. But
+ * nothing in the framework runs `ANALYZE` as part of a migration — see
+ * `statistics.ts` — so the un-analyzed plan is the one to design for.
+ *
+ * `stream` is deliberately **not** in the key. It reads like it belongs, being a
+ * fourth equality column, but adding it changes neither the plan nor the timing
+ * while costing 23% more index storage and a slower append. Equality columns
+ * past the point where the ordering is satisfied buy nothing here.
+ */
+export const D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "index_cf_frappe_events_document_name",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_events_document_name " +
+      `ON ${D1_EVENTS_TABLE}(tenant_id, doctype, document_name, sequence);`
+  }
+];
+
+/**
  * Plans one partial index per declared field list. Each index key is
  * `(tenant_id, doctype, ...declared fields, updated_at)`: the declared fields
  * serve the filter, and the trailing {@link D1_PROJECTION_SORT_COLUMN} lets the
  * default list ordering be read straight off the index instead of falling back
  * to a temporary B-tree sort.
  */
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -355,6 +390,11 @@ export function planD1Migrations(
           id: D1_AUTOMATION_RUN_MIGRATION_ID,
           label: "cf-frappe automation run claim index",
           statements: D1_AUTOMATION_RUN_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
+          label: "cf-frappe event document name index",
+          statements: D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS
         })
       ]
     : [];

@@ -4,6 +4,7 @@ import {
   documentDeliveryOutboxRecordId,
   documentDeliveryRetryDue,
   foldDocumentDeliveryOutbox,
+  foldDocumentDeliveryOutboxRecord,
   isDocumentDeliveryOutboxEvent,
   isDocumentDeliveryOutboxPayloadKind,
   selectedDocumentDeliveryOutboxRecords,
@@ -89,9 +90,46 @@ describe("document delivery outbox events", () => {
     });
   });
 
-  it("folds claim, failure, retry, and delivery transitions", () => {
+  it("folds claim, failure, and retry transitions", () => {
     const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
     const state = foldDocumentDeliveryOutbox("acme", [
+      enqueuedEvent(1, outboxId, "email", "2026-01-01T00:00:00.000Z"),
+      claimedEvent(2, outboxId, "claim-1", "2026-01-01T00:01:00.000Z"),
+      failedEvent(3, outboxId, "claim-1", "queue unavailable", "2026-01-01T00:05:00.000Z"),
+      claimedEvent(4, outboxId, "claim-2", "2026-01-01T00:05:00.000Z")
+    ]);
+
+    expect(state.version).toBe(4);
+    expect(state.records.get(outboxId)).toMatchObject({
+      id: outboxId,
+      status: "claimed",
+      attempts: 2,
+      claimId: "claim-2",
+      claimedAt: "2026-01-01T00:05:00.000Z"
+    });
+    expect(state.records.get(outboxId)).not.toHaveProperty("error");
+    expect(state.records.get(outboxId)).not.toHaveProperty("retryAt");
+  });
+
+  it("drops delivered records from the working set", () => {
+    // The working set is folded on every outbox operation, so keeping delivered
+    // records made it grow with the tenant's entire delivery history (#28).
+    const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
+    const state = foldDocumentDeliveryOutbox("acme", [
+      enqueuedEvent(1, outboxId, "email", "2026-01-01T00:00:00.000Z"),
+      claimedEvent(2, outboxId, "claim-1", "2026-01-01T00:01:00.000Z"),
+      deliveredEvent(3, outboxId, "claim-1", "2026-01-01T00:06:00.000Z")
+    ]);
+
+    expect(state.version).toBe(3);
+    expect(state.records.size).toBe(0);
+  });
+
+  it("folds one record's own events into terminal delivered state", () => {
+    // What the working set gives up, this recovers — bounded by one record's
+    // history instead of the tenant's.
+    const outboxId = documentDeliveryOutboxRecordId("evt_source", "email");
+    const record = foldDocumentDeliveryOutboxRecord("acme", outboxId, [
       enqueuedEvent(1, outboxId, "email", "2026-01-01T00:00:00.000Z"),
       claimedEvent(2, outboxId, "claim-1", "2026-01-01T00:01:00.000Z"),
       failedEvent(3, outboxId, "claim-1", "queue unavailable", "2026-01-01T00:05:00.000Z"),
@@ -99,16 +137,40 @@ describe("document delivery outbox events", () => {
       deliveredEvent(5, outboxId, "claim-2", "2026-01-01T00:06:00.000Z")
     ]);
 
-    expect(state.version).toBe(5);
-    expect(state.records.get(outboxId)).toMatchObject({
+    expect(record).toMatchObject({
       id: outboxId,
       status: "delivered",
       attempts: 2,
       claimId: "claim-2",
       deliveredAt: "2026-01-01T00:06:00.000Z"
     });
-    expect(state.records.get(outboxId)).not.toHaveProperty("error");
-    expect(state.records.get(outboxId)).not.toHaveProperty("retryAt");
+    expect(record).not.toHaveProperty("error");
+    expect(record).not.toHaveProperty("retryAt");
+  });
+
+  it("returns null for a record with no events", () => {
+    expect(foldDocumentDeliveryOutboxRecord("acme", "evt_source:email", [])).toBeNull();
+  });
+
+  it("ignores events belonging to another record in the shared stream", () => {
+    // Outbox records share one stream per tenant, so a fold that trusted
+    // whatever it was handed would apply one record's delivery to another.
+    const mine = documentDeliveryOutboxRecordId("evt_source", "email");
+    const theirs = documentDeliveryOutboxRecordId("evt_other", "email");
+    const events = [
+      enqueuedEvent(1, mine, "email", "2026-01-01T00:00:00.000Z"),
+      enqueuedEvent(2, theirs, "email", "2026-01-01T00:01:00.000Z"),
+      deliveredEvent(3, theirs, "claim-1", "2026-01-01T00:02:00.000Z")
+    ];
+
+    expect(foldDocumentDeliveryOutboxRecord("acme", mine, events)).toMatchObject({
+      id: mine,
+      status: "pending"
+    });
+    expect(foldDocumentDeliveryOutboxRecord("acme", theirs, events)).toMatchObject({
+      id: theirs,
+      status: "delivered"
+    });
   });
 
   it("sorts and selects records deterministically", () => {

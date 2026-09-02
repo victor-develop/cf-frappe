@@ -146,19 +146,13 @@ export function foldDocumentDeliveryOutboxFrom(
         }
         break;
       }
-      case "DocumentDeliveryOutboxDelivered": {
-        const current = records.get(event.payload.outboxId);
-        if (current) {
-          const { error: _error, retryAt: _retryAt, ...deliverable } = current;
-          records.set(current.id, {
-            ...deliverable,
-            status: "delivered",
-            claimId: event.payload.claimId,
-            deliveredAt: event.occurredAt
-          });
-        }
+      case "DocumentDeliveryOutboxDelivered":
+        // Delivered records leave the working set. Keeping them made this state
+        // grow with every delivery the tenant had ever made, and every outbox
+        // operation folds it — see issue #28. The delivery is still in the event
+        // stream; `foldDocumentDeliveryOutboxRecord` reads one back.
+        records.delete(event.payload.outboxId);
         break;
-      }
       case "DocumentDeliveryOutboxFailed": {
         const current = records.get(event.payload.outboxId);
         if (current) {
@@ -222,4 +216,94 @@ declare module "../core/types.js" {
       { readonly kind: "DocumentDeliveryOutboxFailed" }
     >;
   }
+}
+
+/**
+ * Folds one outbox record's own events, keeping terminal state.
+ *
+ * {@link foldDocumentDeliveryOutboxFrom} drops delivered records so the working
+ * set stays bounded, which means it cannot answer "did this already finish?".
+ * This can, and it is bounded by that record's own history rather than the
+ * tenant's.
+ */
+export function foldDocumentDeliveryOutboxRecord(
+  tenantId: TenantId,
+  outboxId: string,
+  events: readonly DomainEvent[]
+): DocumentDeliveryOutboxRecord | null {
+  return foldDocumentDeliveryOutboxRecordFrom(null, tenantId, outboxId, events);
+}
+
+/** Resumable form, so a snapshot can stand in for the head of the record's events. */
+export function foldDocumentDeliveryOutboxRecordFrom(
+  initial: DocumentDeliveryOutboxRecord | null,
+  tenantId: TenantId,
+  outboxId: string,
+  events: readonly DomainEvent[]
+): DocumentDeliveryOutboxRecord | null {
+  let record: DocumentDeliveryOutboxRecord | null = initial;
+  for (const event of events) {
+    if (!isDocumentDeliveryOutboxEvent(event) || event.payload.outboxId !== outboxId) {
+      // The outbox id is a required input rather than something inferred from
+      // the first event: outbox records share one stream per tenant, so a fold
+      // that took whatever it was handed would apply one record's terminal
+      // event to another. Callers cannot get that wrong here.
+      continue;
+    }
+    switch (event.payload.kind) {
+      case "DocumentDeliveryOutboxEnqueued":
+        record = {
+          id: event.payload.outboxId,
+          tenantId,
+          target: event.payload.target,
+          sourceEventId: event.payload.sourceEventId,
+          sourceEventType: event.payload.sourceEventType,
+          payloadKind: event.payload.payloadKind,
+          doctype: event.payload.doctype,
+          documentName: event.payload.documentName,
+          actorId: event.payload.actorId,
+          payload: event.payload.payload ?? {},
+          status: "pending",
+          attempts: 0,
+          enqueuedAt: event.occurredAt
+        };
+        break;
+      case "DocumentDeliveryOutboxClaimed":
+        if (record) {
+          const { error: _error, retryAt: _retryAt, ...claimable } = record;
+          record = {
+            ...claimable,
+            status: "claimed",
+            attempts: record.attempts + 1,
+            claimId: event.payload.claimId,
+            claimedAt: event.occurredAt
+          };
+        }
+        break;
+      case "DocumentDeliveryOutboxDelivered":
+        if (record) {
+          const { error: _error, retryAt: _retryAt, ...deliverable } = record;
+          record = {
+            ...deliverable,
+            status: "delivered",
+            claimId: event.payload.claimId,
+            deliveredAt: event.occurredAt
+          };
+        }
+        break;
+      case "DocumentDeliveryOutboxFailed":
+        if (record) {
+          record = {
+            ...record,
+            status: "failed",
+            claimId: event.payload.claimId,
+            failedAt: event.occurredAt,
+            error: event.payload.error,
+            ...(event.payload.retryAt === undefined ? {} : { retryAt: event.payload.retryAt })
+          };
+        }
+        break;
+    }
+  }
+  return record;
 }

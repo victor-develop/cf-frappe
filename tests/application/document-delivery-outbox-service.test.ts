@@ -9,6 +9,7 @@ import {
 } from "../../src";
 import type {
   DocumentDeliveryOutboxEventPayload,
+  NewDomainEvent,
   DocumentEventPayload,
   DocumentSnapshot,
   DomainEvent,
@@ -205,6 +206,152 @@ describe("DocumentDeliveryOutboxService", () => {
     ).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
   });
 
+  it("keeps the working set bounded as deliveries accumulate", async () => {
+    // The working set is folded on every outbox operation, so delivered records
+    // used to make each of those operations more expensive than the last (#28).
+    const events = new InMemoryDocumentStore();
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(
+        Array.from({ length: 12 }, (_unused, index) => `outbox-event-${index}`)
+      )
+    });
+    const sourceIds = ["evt_a", "evt_b", "evt_c", "evt_d"];
+    for (const sourceId of sourceIds) {
+      await outbox.enqueueFromDomainEvent({
+        event: { ...domainEvent(), id: sourceId },
+        targets: ["email"]
+      });
+    }
+    const claimed = await outbox.claimPending({ tenantId: "acme", claimId: "claim-1", limit: 10, now });
+    expect(claimed).toHaveLength(4);
+    for (const record of claimed) {
+      await outbox.markDelivered({ tenantId: "acme", outboxId: record.id, claimId: "claim-1" });
+    }
+
+    await expect(outbox.list("acme")).resolves.toEqual([]);
+    for (const sourceId of sourceIds) {
+      await expect(outbox.record("acme", `${sourceId}:email`)).resolves.toMatchObject({
+        id: `${sourceId}:email`,
+        status: "delivered"
+      });
+    }
+  });
+
+  it("does not re-enqueue a source event whose delivery already completed", async () => {
+    // Deduplication reads the events rather than the working set, precisely
+    // because the record leaves that set once delivered. Folding state instead
+    // would let an at-least-once caller queue the same delivery twice.
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1", "claim-event-1", "deliver-event-1", "enqueue-again"])
+    });
+    await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+    await outbox.claimPending({ tenantId: "acme", claimId: "claim-1", now });
+    await outbox.markDelivered({ tenantId: "acme", outboxId: "evt_source:email", claimId: "claim-1" });
+
+    await expect(
+      outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] })
+    ).resolves.toEqual([]);
+    await expect(outbox.list("acme")).resolves.toEqual([]);
+  });
+
+  it("treats delivering an already-delivered record as success", async () => {
+    // An at-least-once consumer can be handed the same message twice. A second
+    // markDelivered has to be a no-op, not a notFound it would retry forever.
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1", "claim-event-1", "deliver-event-1"])
+    });
+    await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+    await outbox.claimPending({ tenantId: "acme", claimId: "claim-1", now });
+    const first = await outbox.markDelivered({
+      tenantId: "acme",
+      outboxId: "evt_source:email",
+      claimId: "claim-1"
+    });
+
+    // Note the claim id: a redelivery need not know which claim won, and the
+    // stale-claim conflict must not fire once the record is already terminal.
+    await expect(
+      outbox.markDelivered({ tenantId: "acme", outboxId: "evt_source:email", claimId: "claim-anything" })
+    ).resolves.toEqual(first);
+  });
+
+  it("still reports a genuinely unknown record as not found", async () => {
+    const outbox = new DocumentDeliveryOutboxService({
+      events: new InMemoryDocumentStore(),
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1"])
+    });
+    await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+
+    await expect(outbox.record("acme", "evt_missing:email")).resolves.toBeNull();
+    await expect(
+      outbox.markDelivered({ tenantId: "acme", outboxId: "evt_missing:email", claimId: "claim-1" })
+    ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+  });
+
+  it("does not double-enqueue when the append loses a concurrency race", async () => {
+    // Deduplication has to be recomputed on every attempt. Reading it once
+    // before the retry loop leaves the decision stale exactly when a competitor
+    // has just committed the record the check was meant to find.
+    const events = new ConflictOnceDocumentDeliveryStore();
+    const competitor = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["competitor-enqueue"])
+    });
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1", "enqueue-retry"])
+    });
+    events.conflictNextAppendWith(() =>
+      competitor.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] })
+    );
+
+    await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+
+    const stream = await events.readStream(documentDeliveryOutboxStream("acme"));
+    expect(stream.filter((event) => event.payload.kind === "DocumentDeliveryOutboxEnqueued")).toHaveLength(1);
+    await expect(outbox.list("acme")).resolves.toMatchObject([
+      { id: "evt_source:email", status: "pending", attempts: 0 }
+    ]);
+  });
+
+  it("stays idempotent when a redelivery loses a concurrency race", async () => {
+    // The already-delivered check has to be recomputed on every attempt too: on
+    // the retry the record is gone from the working set, so a stale "not
+    // delivered" decision walks into a notFound the consumer would then treat
+    // as a failure.
+    const events = new ConflictOnceDocumentDeliveryStore();
+    const outbox = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["enqueue-1", "claim-event-1", "deliver-event-1", "deliver-event-2"])
+    });
+    await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+    await outbox.claimPending({ tenantId: "acme", claimId: "claim-1", now });
+    const winner = new DocumentDeliveryOutboxService({
+      events,
+      clock: fixedClock(now),
+      ids: deterministicIds(["winner-deliver"])
+    });
+    events.conflictNextAppendWith(() =>
+      winner.markDelivered({ tenantId: "acme", outboxId: "evt_source:email", claimId: "claim-1" })
+    );
+
+    await expect(
+      outbox.markDelivered({ tenantId: "acme", outboxId: "evt_source:email", claimId: "claim-1" })
+    ).resolves.toMatchObject({ id: "evt_source:email", status: "delivered" });
+    const stream = await events.readStream(documentDeliveryOutboxStream("acme"));
+    expect(stream.filter((event) => event.payload.kind === "DocumentDeliveryOutboxDelivered")).toHaveLength(1);
+  });
+
   it("records delivery intents from the composed after-commit hook", async () => {
     const events = new InMemoryDocumentStore();
     const outbox = new DocumentDeliveryOutboxService({
@@ -236,6 +383,33 @@ function documentDeliveryOutboxPayload(
   payload: Extract<DocumentEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }>
 ): Extract<DocumentDeliveryOutboxEventPayload, { readonly kind: "DocumentDeliveryOutboxEnqueued" }> {
   return payload;
+}
+
+/**
+ * Lets one append lose an optimistic-concurrency race: the first `append` to the
+ * outbox stream commits a competitor's events first, so the caller sees a
+ * conflict and retries. This is the shape that exposed a stale read taken
+ * outside the retry loop.
+ */
+class ConflictOnceDocumentDeliveryStore extends InMemoryDocumentStore {
+  private pending: (() => Promise<unknown>) | undefined;
+
+  conflictNextAppendWith(competitor: () => Promise<unknown>): void {
+    this.pending = competitor;
+  }
+
+  override async append(
+    stream: StreamName,
+    expectedVersion: number,
+    events: readonly NewDomainEvent[]
+  ): Promise<readonly DomainEvent[]> {
+    const competitor = this.pending;
+    if (competitor !== undefined) {
+      this.pending = undefined;
+      await competitor();
+    }
+    return super.append(stream, expectedVersion, events);
+  }
 }
 
 class RecordingReadOptionsDocumentDeliveryStore extends InMemoryDocumentStore {

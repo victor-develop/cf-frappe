@@ -1330,8 +1330,8 @@ if (seededAfterRollback.data.length !== 0) {
 
     expect(first).toBe(0);
     expect(stdout.text()).toContain("Planned D1 migrations from src/apps/index.ts into migrations");
-    expect(stdout.text()).toContain("Wrote migrations/0009_doctype_customer_v2_indexes.sql (1 statements)");
-    const generated = await readFile(join(target, "migrations/0009_doctype_customer_v2_indexes.sql"), "utf8");
+    expect(stdout.text()).toContain("Wrote migrations/0010_doctype_customer_v2_indexes.sql (1 statements)");
+    const generated = await readFile(join(target, "migrations/0010_doctype_customer_v2_indexes.sql"), "utf8");
     expect(generated).toContain("-- doctype_customer_v2_indexes: Customer projection indexes");
     expect(generated).toContain("-- checksum: fnv1a32:");
     expect(generated).toContain("WHERE doctype = 'Customer';");
@@ -1440,7 +1440,8 @@ if (seededAfterRollback.data.length !== 0) {
     expect(stdout.text()).toContain("Wrote fresh-migrations/0001_cf_frappe_core.sql");
     expect(stdout.text()).toContain("Wrote fresh-migrations/0005_cf_frappe_data_patch_rollbacks.sql");
     expect(stdout.text()).toContain("Wrote fresh-migrations/0006_cf_frappe_automation_runs.sql");
-    expect(stdout.text()).toContain("Wrote fresh-migrations/0007_doctype_task_v1_indexes.sql");
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0007_cf_frappe_events_document_name.sql");
+    expect(stdout.text()).toContain("Wrote fresh-migrations/0008_doctype_task_v1_indexes.sql");
     await expect(readFile(join(tempRoot, "fresh-migrations/0001_cf_frappe_core.sql"), "utf8")).resolves.toContain(
       "-- 0001_cf_frappe_core: cf-frappe event/projection tables"
     );
