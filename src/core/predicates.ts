@@ -523,8 +523,14 @@ function comparePredicateValues(
         ? actual !== undefined && actual !== null
         : expected === "not set" && (actual === undefined || actual === null);
     case "contains":
+      // `contains` is `like` with the needle taken literally, and it has to fold
+      // case the same way — see issue #53. It used to compare
+      // `toLowerCase().includes(...)`, which is a genuinely different rule from
+      // the regex used by `like`: they disagree on Greek variant letters, on the
+      // Kelvin sign, and on dotted capital I, so the same field answered
+      // differently depending on which operator asked.
       return actual !== undefined && actual !== null && expected !== undefined && expected !== null &&
-        String(actual).toLowerCase().includes(String(expected).toLowerCase());
+        containsFoldedText(String(actual), String(expected));
     case "like":
       return actual !== undefined && actual !== null && typeof expected === "string" &&
         likePatternMatches(actual, expected);
@@ -587,7 +593,36 @@ function compareValues(left: JsonPrimitive, right: JsonValue | undefined): numbe
 }
 
 function likePatternMatches(actual: JsonValue, pattern: string): boolean {
-  return new RegExp(`^${likePatternRegex(pattern)}$`, "i").test(String(actual));
+  return compiledLikePattern(pattern).test(String(actual));
+}
+
+/**
+ * Compiled `like` patterns, keyed by the pattern text.
+ *
+ * Text refinement calls this once per candidate row with the same pattern, and
+ * compiling it each time cost about 6x the match itself: 20k rows went from
+ * 2.3 ms to 14.1 ms. The cache is bounded and cleared wholesale rather than
+ * evicted one entry at a time — a filter workload reuses a handful of patterns,
+ * so the simple thing is enough, and the bound is what stops a stream of
+ * distinct patterns from growing it without limit.
+ *
+ * Safe to share: these regexps carry no `g` or `y` flag, so they hold no
+ * per-call state.
+ */
+const LIKE_PATTERN_CACHE_LIMIT = 256;
+const likePatternCache = new Map<string, RegExp>();
+
+function compiledLikePattern(pattern: string): RegExp {
+  const cached = likePatternCache.get(pattern);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const compiled = new RegExp(`^${likePatternRegex(pattern)}$`, "i");
+  if (likePatternCache.size >= LIKE_PATTERN_CACHE_LIMIT) {
+    likePatternCache.clear();
+  }
+  likePatternCache.set(pattern, compiled);
+  return compiled;
 }
 
 function likePatternRegex(pattern: string): string {
@@ -615,6 +650,28 @@ function likePatternRegex(pattern: string): string {
     regex += escapeRegex(char ?? "");
   }
   return regex;
+}
+
+/**
+ * `contains`, as one shared rule: `like` with the needle taken literally.
+ *
+ * Exported because the same question is asked in two other places — the report
+ * builder's text filter and the browser-side conditional-visibility evaluator —
+ * and each of those having its own folding rule is what issue #53 was about.
+ * The browser bundle cannot import this (it is compiled standalone), so it keeps
+ * a copy that `tests/desk-client-src/forms.test.ts` holds to this one.
+ */
+export function containsFoldedText(value: string, needle: string): boolean {
+  return likePatternMatches(value, `%${escapeLikePattern(needle)}%`);
+}
+
+/**
+ * Keeps `%`, `_` and the escape character literal when a plain string becomes a
+ * `like` pattern. Without this, `contains "50%"` would silently become a prefix
+ * match.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function escapeRegex(value: string): string {

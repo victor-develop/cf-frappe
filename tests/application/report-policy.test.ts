@@ -1,3 +1,4 @@
+import { containsFoldedText } from "../../src/core/predicates.js";
 import {
   BoundedOrderedReportRows,
   buildReportFilterControls,
@@ -598,6 +599,39 @@ describe("report policy", () => {
       .toThrow("Report filter expression references unknown filter 'missing'");
     expect(() => materializeReportFilterExpression(report, doctype, { filter: "minimum", value: "" }))
       .toThrow("Report filter expression filter 'minimum' is missing a value");
+  });
+
+  it("folds case in a contains filter exactly as the predicate kernel does", () => {
+    // The report builder's default text filter is `contains`, and it used to
+    // fold case by its own rule — so the same data under the same "Contains"
+    // label answered differently here than in a list view (#53).
+    const report = {
+      name: "Task Report",
+      doctype: "Task",
+      columns: [{ name: "title" }],
+      filters: [{ name: "title", field: "title", operator: "contains" as const }]
+    };
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["\u03c3igma", "\u03c2"],
+      ["\u03c2igma", "\u03c3"],
+      ["\u0130stanbul", "i"],
+      ["\u00b5 meter", "\u03bc"],
+      ["\u212a" + "lvin", "k"],
+      ["x\u{10400}y", "\u{10428}"],
+      ["\u00c4rger", "\u00e4"],
+      ["50% off", "50%"],
+      ["a_b", "a_b"],
+      ["axb", "a_b"]
+    ];
+
+    for (const [value, needle] of cases) {
+      const matched = matchesReportRowFilters({ title: value }, report, { title: needle }, undefined);
+      expect({ value, needle, matched }).toEqual({
+        value,
+        needle,
+        matched: containsFoldedText(value, needle)
+      });
+    }
   });
 
   it("matches report rows through flat filters and compound expressions", () => {

@@ -31,10 +31,16 @@ export interface D1ProjectionRefinement {
 
 /**
  * Operators with no SQL equivalent that preserves the in-memory semantics.
- * `contains`, `like` and `not_like` fold case over the full Unicode range
- * (a JS regexp with the `i` flag), while SQLite's `LIKE` folds ASCII only, so
- * pushing them down would change which rows match on non-ASCII data. They are
- * therefore compiled as a superset and refined in memory.
+ * `contains`, `like` and `not_like` all fold case by one rule — a JS regexp
+ * with the `i` flag — while SQLite's `LIKE` folds ASCII only, so pushing them
+ * down would change which rows match on non-ASCII data. They are therefore
+ * compiled as a superset and refined in memory.
+ *
+ * That rule is not "full Unicode": it is the ES Canonicalize used by the `i`
+ * flag, which covers most of the BMP but never applies a mapping that changes
+ * length or that reaches ASCII from outside it, and does not fold anything
+ * outside the BMP. It is narrower than `String.toLowerCase`, and deliberately
+ * so — being reproducible is what makes a pushdown possible at all (issue #41).
  */
 const D1_REFINED_OPERATORS: readonly PredicateOperator[] = ["contains", "like", "not_like"];
 

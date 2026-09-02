@@ -172,7 +172,20 @@ which means "the positive condition is false or unknown" — exactly the in-memo
 
 The wrapped form is not index-usable. That is inherent — a negation is rarely selective enough for an index to help — and paying a scan beats pulling every candidate row into the Worker.
 
-**Refined in memory**: `contains`, `like`, `not_like`, and any group containing them under `any`. These fold case over the full Unicode range (a JS regexp with the `i` flag) while SQLite's `LIKE` folds ASCII only, so pushing them down would change which rows match on non-ASCII data. The store fetches a bounded candidate set and applies `matchesPredicateExpression` to it.
+**Refined in memory**: `contains`, `like`, `not_like`, and any group containing them under `any`. All three fold case by one rule — a JS regexp with the `i` flag, so `contains` is `like` with the needle taken literally — while SQLite's `LIKE` folds ASCII only. Pushing them down as `LIKE` would therefore change which rows match on non-ASCII data, so the store fetches a bounded candidate set and applies `matchesPredicateExpression` to it instead. (Issue #41 has measurements for a `GLOB`-based pushdown that would preserve the rule exactly.)
+
+That rule is **not** "case-insensitive over all of Unicode", and it is worth knowing where it stops. It is the ES `Canonicalize` operation behind the `i` flag, which never applies a case mapping that changes length or that reaches ASCII from outside ASCII, and which does not fold anything outside the BMP:
+
+| Input | Needle | Folded? |
+| --- | --- | --- |
+| `Ärger` | `ä` | yes |
+| `σigma` | `ς` | yes — the regexp folds Greek variant letters |
+| `Straße` | `SS` | no — `ß` → `SS` changes length |
+| `Kelvin` (U+212A) | `k` | no — non-ASCII may not fold to ASCII |
+| `İstanbul` | `i` | no — same reason |
+| `𐐀` (Deseret) | `𐐨` | no — outside the BMP |
+
+The last row covers 614 codepoint pairs, i.e. every cased astral script: Deseret, Osage, Adlam, Vithkuqi, Warang Citi, Medefaidrin, Old Hungarian. Text in those scripts is matched **case-sensitively**. `String.toLowerCase` would fold all of them, so this rule is genuinely narrower — the trade is that Canonicalize is reproducible outside JS, which is what makes a SQL pushdown possible at all.
 
 When that candidate set exceeds `D1_PROJECTION_MAX_POST_FILTER_ROWS` the query is **rejected**, not silently truncated, and the error names the operator:
 

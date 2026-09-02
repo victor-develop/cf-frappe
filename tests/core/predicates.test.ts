@@ -172,7 +172,89 @@ describe("predicate kernel", () => {
       input: {}
     })).toBe(true);
   });
+
+  it("folds case in contains and like by the regexp Canonicalize rule", () => {
+    // Absolute expectations, not `contains === like`. An equality assertion only
+    // pins the delegation: swapping the *shared* rule to `toLowerCase` keeps
+    // both operators agreeing and passes. These values are what the ES `i`-flag
+    // Canonicalize does, and the rule itself is what issue #41's SQL pushdown
+    // depends on being reproducible.
+    //
+    // Each row below is a case where the two operators disagreed before #53.
+    const expectations: ReadonlyArray<readonly [string, string, boolean]> = [
+      // Greek variant letters: folded by the regexp, not by `toLowerCase`.
+      ["\u03c3igma", "\u03c2", true],
+      ["\u03c2igma", "\u03c3", true],
+      ["\u03a3igma", "\u03c2", true],
+      ["\u00b5 meter", "\u03bc", true],
+      ["\u03d1eta", "\u03b8", true],
+      // Canonicalize refuses any mapping that reaches ASCII from outside it, so
+      // these are *not* folded even though `toLowerCase` folds them.
+      ["\u0130stanbul", "i", false],
+      ["\u212a" + "lvin", "k", false],
+      // Nor any mapping that changes length.
+      ["Stra\u00dfe", "SS", false],
+      // Plain ASCII and Latin-1 fold as expected.
+      ["\u00c4rger", "\u00e4", true],
+      ["OPENED", "pen", true]
+    ];
+
+    for (const [value, needle, expected] of expectations) {
+      expect(evaluate("contains", value, needle), `contains ${JSON.stringify(value)} / ${JSON.stringify(needle)}`).toBe(
+        expected
+      );
+      expect(evaluate("like", value, `%${needle}%`), `like ${JSON.stringify(value)} / ${JSON.stringify(needle)}`).toBe(
+        expected
+      );
+    }
+  });
+
+  it("keeps matching correctly past the compiled-pattern cache bound", () => {
+    // The cache is cleared wholesale when it fills, so a workload that cycles
+    // through more distinct patterns than the bound must still match correctly
+    // rather than serve a stale or missing compilation.
+    for (let index = 0; index < 600; index += 1) {
+      expect(evaluate("like", `value-${index}`, `%${index}`)).toBe(true);
+      expect(evaluate("like", `value-${index}`, `%${index}x`)).toBe(false);
+    }
+    expect(evaluate("contains", "50% off", "50%")).toBe(true);
+  });
+
+  it("does not fold case outside the BMP", () => {
+    // The `i` flag without `u` canonicalizes per UTF-16 code unit, so cased
+    // astral scripts — Deseret here, and also Adlam, Osage, Vithkuqi, Warang
+    // Citi, Medefaidrin and Old Hungarian — are matched case-sensitively. 614
+    // codepoint pairs are affected. This is a real narrowing against the old
+    // `toLowerCase` rule for `contains`, and it is the price of having one rule
+    // that SQL can reproduce; it is called out in docs rather than papered over.
+    expect(evaluate("contains", "x\u{10400}y", "\u{10400}")).toBe(true);
+    expect(evaluate("contains", "x\u{10400}y", "\u{10428}")).toBe(false);
+    expect(evaluate("like", "x\u{10400}y", "%\u{10428}%")).toBe(false);
+  });
+
+  it("treats like wildcards in a contains needle as literal text", () => {
+    // `contains` builds a `like` pattern, so an unescaped needle would turn a
+    // user's "50%" into a prefix match and "a_b" into a single-character
+    // wildcard.
+    expect(evaluate("contains", "50% off", "50%")).toBe(true);
+    expect(evaluate("contains", "500 off", "50%")).toBe(false);
+    expect(evaluate("contains", "a_b", "a_b")).toBe(true);
+    expect(evaluate("contains", "axb", "a_b")).toBe(false);
+    expect(evaluate("contains", "back\\slash", "ck\\sl")).toBe(true);
+    expect(evaluate("contains", "cksl", "ck\\sl")).toBe(false);
+    // A trailing backslash is literal in a needle, unlike in a `like` pattern
+    // where it escapes nothing and can never match.
+    expect(evaluate("contains", "trailing\\", "ing\\")).toBe(true);
+    expect(evaluate("like", "trailing\\", "%ing\\")).toBe(false);
+  });
 });
+
+function evaluate(operator: "contains" | "like", value: string, needle: string): boolean {
+  return evaluatePredicateExpression(
+    { kind: "compare", left: field("after", "owner"), operator, right: literal(needle) },
+    { before: null, after: snapshot({ status: "Done", score: 1, owner: value }), input: {} }
+  );
+}
 
 function compare(
   left: PredicateOperand,
