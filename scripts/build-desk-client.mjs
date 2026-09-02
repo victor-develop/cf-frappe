@@ -18,8 +18,12 @@
  *    (assets map + manifest served by the worker at /desk/islands/<hashed-file>).
  *
  * Determinism: no timestamps, no absolute paths (esbuild path comments are relative to the
- * repo root via absWorkingDir), content-hashed island names, LF newlines. Island bundles are
- * minified with NODE_ENV=production so React ships its production build.
+ * repo root via absWorkingDir), LF newlines. Island bundles are minified with
+ * NODE_ENV=production so React ships its production build.
+ *
+ * Island file names are hashed from content here rather than by esbuild's `[hash]`, which
+ * also takes module paths in and therefore changed names when `node_modules` was a symlink
+ * (issue #56). esbuild's hash survives only as a link-time unique id.
  */
 
 import { createHash } from "node:crypto";
@@ -28,6 +32,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
+import { contentHashedName, topologicalIslandOrder } from "./island-asset-names.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -118,14 +123,45 @@ const islandsResult = await build({
   assetNames: "[name]-[hash]"
 });
 
-const islandFiles = new Map();
+const builtIslandFiles = new Map();
 for (const output of islandsResult.outputFiles) {
-  islandFiles.set(basename(output.path), output.text.replace(/\r\n/g, "\n"));
+  builtIslandFiles.set(basename(output.path), output.text.replace(/\r\n/g, "\n"));
 }
+
+// esbuild's `[hash]` is not a content hash: it also takes module paths in, so
+// the same bytes get a different name when `node_modules` is a symlink and
+// `react` resolves through a different path. That made `npm run build:client`
+// produce names the committed bundle does not have, and `check:client-fresh`
+// then failed on a file the author never touched. See issue #56.
+//
+// So esbuild's hash is used only as a unique id during linking, and the names
+// that land on disk are rehashed here from content alone. Dependencies are
+// renamed before the chunks that import them, so a referrer is hashed over the
+// content it will actually ship with.
+const islandFiles = new Map();
+const finalIslandName = new Map();
+for (const built of topologicalIslandOrder(islandsResult.metafile, builtIslandFiles)) {
+  let content = builtIslandFiles.get(built);
+  for (const [from, to] of finalIslandName) {
+    content = content.split(from).join(to);
+  }
+  const renamed = contentHashedName(built, content);
+  finalIslandName.set(built, renamed);
+  islandFiles.set(renamed, content);
+}
+
 const entryFileByEntryPoint = new Map();
 for (const [outputPath, meta] of Object.entries(islandsResult.metafile.outputs)) {
   if (meta.entryPoint) {
-    entryFileByEntryPoint.set(meta.entryPoint, basename(outputPath));
+    const built = basename(outputPath);
+    const renamed = finalIslandName.get(built);
+    if (renamed === undefined) {
+      // Falling back to esbuild's name here would publish a path-sensitive name
+      // that is not even a key of DESK_ISLAND_ASSETS, so the loader's dynamic
+      // import of it would 404 at runtime.
+      throw new Error(`island entry output '${built}' was never renamed`);
+    }
+    entryFileByEntryPoint.set(meta.entryPoint, renamed);
   }
 }
 
@@ -153,8 +189,11 @@ const [loaderOutput] = loaderResult.outputFiles;
 if (!loaderOutput) {
   throw new Error("esbuild produced no output for the desk island loader");
 }
-const loaderFile = basename(loaderOutput.path);
-islandFiles.set(loaderFile, loaderOutput.text.replace(/\r\n/g, "\n"));
+// The loader is built after the rename above, so the manifest baked into it
+// already names the final files; hashing its content is enough.
+const loaderContent = loaderOutput.text.replace(/\r\n/g, "\n");
+const loaderFile = contentHashedName(basename(loaderOutput.path), loaderContent);
+islandFiles.set(loaderFile, loaderContent);
 
 const islandsDistDir = join(repoRoot, "dist", "client", "islands");
 mkdirSync(islandsDistDir, { recursive: true });
