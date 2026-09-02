@@ -138,13 +138,11 @@ describe("DocumentDeliveryOutboxService", () => {
       stream: documentDeliveryOutboxStream("acme"),
       options: { payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS }
     });
-    expect(events.reads).toContainEqual({
-      stream: documentDeliveryOutboxStream("acme"),
-      options: {
-        maxSequence: 0,
-        payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
-      }
-    });
+    // One read per operation, not two: the post-append fold resumes from the
+    // state already in memory instead of re-reading the stream up to the version
+    // it was folded from. See issue #28.
+    expect(events.reads.every((read) => read.options?.maxSequence === undefined)).toBe(true);
+    expect(events.reads).toHaveLength(2);
   });
 
   it("claims pending records, retries failed records when due, and marks delivery terminal", async () => {
