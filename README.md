@@ -240,11 +240,15 @@ npm run d1:migrate:remote
 npm run deploy
 ```
 
-For authentication, choose one of:
+**cf-frappe is an identity consumer, not an identity provider.** Use Cloudflare Access or generic OIDC in production; `signed-session` is the fallback for development, demos, and small deployments.
 
-- signed-session auth for simple applications,
-- Cloudflare Access for Zero Trust protected internal applications,
-- generic OIDC for Okta, Auth0, Google Workspace, and other RS256 providers.
+| Mode | Fits | What the deployment must supply |
+| --- | --- | --- |
+| **Cloudflare Access** | Internal systems behind Zero Trust | Nothing — Cloudflare handles the IdP; the Worker verifies the Access JWT |
+| **Generic OIDC** | You already run Okta, Entra, Google Workspace, Auth0 | issuer, audience, JWKS URL |
+| **signed-session** | Development, demos, small deployments, external users with no IdP | Nothing — cf-frappe stores password hashes itself |
+
+What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
 ### Development Setup
 
@@ -291,6 +295,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [ReturnsOS Example](examples/returns/README.md): full reference application for multi-workflow and durable Automation.
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
+- [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
 - [Todo Example](examples/todos): small metadata-only model example.
@@ -528,11 +533,15 @@ npm run d1:migrate:remote
 npm run deploy
 ```
 
-认证方式可以选择：
+**cf-frappe 是身份消费者，不是身份提供者。** 生产部署请用 Cloudflare Access 或通用 OIDC；`signed-session` 是开发、demo 与小型部署的 fallback。
 
-- signed-session：适合简单应用，
-- Cloudflare Access：适合 Zero Trust 保护的内部系统，
-- 通用 OIDC：适合 Okta、Auth0、Google Workspace 等 RS256 provider。
+| 方式 | 适用 | 部署方要准备什么 |
+| --- | --- | --- |
+| **Cloudflare Access** | Zero Trust 保护的内部系统 | 什么都不用 —— CF 负责对接 IdP，Worker 只验 Access JWT |
+| **通用 OIDC** | 已有 Okta / Entra / Google Workspace / Auth0 | issuer、audience、JWKS URL 三个值 |
+| **signed-session** | 开发、demo、小型部署、无 IdP 的外部使用者 | 什么都不用 —— cf-frappe 自存密码哈希 |
+
+委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
 ### 开发环境
 
@@ -579,6 +588,7 @@ See [English TODO](#todo).
 - [ReturnsOS Example](examples/returns/README.md)：多工作流和持久化 Automation 的完整参考应用。
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
+- [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。
 - [Todo Example](examples/todos)：一个小型元数据示例。
