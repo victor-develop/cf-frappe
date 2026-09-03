@@ -559,6 +559,26 @@ describe("D1 projection text pushdown against a real SQLite engine", () => {
     expect((await memory.list(query)).data).toEqual([]);
   });
 
+  it("diverges from memory on unpaired surrogates in an ordered comparison too", async () => {
+    // The other half of the surrogate boundary, and the other direction.
+    // `compareTextBinary` encodes with `TextEncoder`, which maps any lone
+    // surrogate to U+FFFD (`EFBFBD`), while a value round-tripped through
+    // `json_extract` comes back as CESU-8 (`EDA0BD`). So SQLite sorts a lone
+    // surrogate *before* U+E000 and memory sorts it after — and two different
+    // lone surrogates are equal in memory and unequal in SQL.
+    //
+    // Encoding CESU-8 instead would fix this and break the common case: a
+    // well-formed astral character has to stay one four-byte sequence.
+    for (const [name, title] of [["S1", "\ud83d"], ["S2", "\ude00"], ["S3", "\u{1F600}"]] as const) {
+      await d1.save(snapshot(name, { title, priority: "Low" }));
+      await memory.save(snapshot(name, { title, priority: "Low" }));
+    }
+
+    const query = { tenantId: "acme", doctype: "Note", predicate: afterField("title", "\ue000", "gt") } as const;
+    expect((await d1.list(query)).data.map((document) => document.name)).toEqual(["S3"]);
+    expect((await memory.list(query)).data.map((document) => document.name).sort()).toEqual(["S1", "S2", "S3"]);
+  });
+
   it("diverges from memory on a non-string value left behind in a text field", async () => {
     // Unreachable through validation — `src/core/schema.ts` validates text
     // fields as strings on write and the operator is only allowed on text-like

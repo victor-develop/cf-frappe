@@ -211,7 +211,11 @@ Bytes, not JavaScript's `<`: that compares UTF-16 code units, which puts an astr
 
 **`_` on astral-plane data.** `_` is one UTF-16 *code unit* in memory and compiles to `?`, which is one *code point* in `GLOB`. Measured: `'😀' GLOB '?'` is 1 and `'😀' GLOB '??'` is 0, while in memory `__` matches 😀 and `_` does not. Neither `?` nor `??` is even a consistent superset, so no fallback saves it. The exact fix is to redefine `_` as one code point, which would also have to change the standalone browser copy in `src/adapters/desk/client-src/forms.ts`, whose parity test covers only `contains` — the drift would ship silently. Blast radius: `contains` escapes `_`, so Desk's quick filter and the file list are exact even on astral data; only a hand-written `like`/`not_like` pattern containing `_` is affected.
 
-**Unpaired surrogates.** Two rows storing `"\ud83d"` and `"\ude00"` are stored distinctly (CESU-8, `EDA0BD` vs `EDB880`) but `GLOB` reports them equal — SQLite's UTF-8 reader collapses the malformed sequences — while in memory they are different code units. Reachable only with lone surrogates in stored data.
+**Unpaired surrogates**, in both directions. Two rows storing `"\ud83d"` and `"\ude00"` are stored distinctly (CESU-8, `EDA0BD` vs `EDB880`) but `GLOB` reports them equal — SQLite's UTF-8 reader collapses the malformed sequences — while in memory they are different code units.
+
+The same inputs also break the byte comparison above, the other way round: `TextEncoder` maps any lone surrogate to U+FFFD (`EFBFBD`), so in memory the two rows compare *equal* and both sort after `\ue000`, while SQLite keeps `EDA0BD` and `EDB880` distinct and sorts both *before* it. Measured — `title gt "\ue000"` returns the astral row alone on D1 and additionally both lone-surrogate rows in memory. Encoding CESU-8 in `compareTextBinary` would fix this and break the common case, since a well-formed astral character has to stay one four-byte sequence.
+
+Both are reachable only with lone surrogates in stored data.
 
 **U+0000 is refused on both sides rather than being a boundary.** SQLite's `patternCompare` walks NUL-terminated C strings, so a bound pattern is read only up to its first U+0000: `contains "\u0000"` compiles to `*\u0000*`, SQLite reads `*`, and **every row matches — the filter is silently gone**. `json_extract` truncates the same way, so `"report\u0000final"` extracts as `"report"` and `contains "final"` misses a row the in-memory rule matches.
 

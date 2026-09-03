@@ -616,6 +616,16 @@ const TEXT_COMPARISON_ENCODER = new TextEncoder();
  * against a real engine — `ORDER BY v COLLATE BINARY` gives
  * `["Z", "z", "\ue000", "\ufffd", "\u{1F600}"]`, and `<` gives
  * `["Z", "z", "\u{1F600}", "\ue000", "\ufffd"]`.
+ *
+ * Equivalence stops at unpaired surrogates, and only there. `TextEncoder`
+ * replaces one with U+FFFD (`EF BF BD`), while a value round-tripped through
+ * `json_extract` comes back as CESU-8 (`ED A0 BD` for `\ud83d`) — so
+ * `title gt "\ue000"` keeps a lone-surrogate row here and drops it in SQL, and
+ * two different lone surrogates compare equal here and unequal there. Encoding
+ * CESU-8 instead would fix the ordering and break the far more common case,
+ * since a well-formed astral character must stay one four-byte sequence.
+ * `docs/projection-indexes.md` records it alongside the `GLOB` divergence on the
+ * same inputs; both need a lone surrogate to be stored in the first place.
  */
 function compareTextBinary(left: string, right: string): number {
   if (left === right) {
