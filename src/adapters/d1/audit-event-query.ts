@@ -71,7 +71,7 @@ export function auditDocumentEventQuery(query: AuditDocumentEventQuery): AuditEv
     sql: `SELECT id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json
          FROM ${D1_EVENTS_TABLE}
          WHERE ${where}
-         ORDER BY sequence ASC${query.limit !== undefined ? " LIMIT ?" : ""}`,
+         ORDER BY sequence ${query.order === "desc" ? "DESC" : "ASC"}${query.limit !== undefined ? " LIMIT ?" : ""}`,
     params
   };
 }

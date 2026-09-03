@@ -2,14 +2,18 @@ import { notFound } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import { documentDeliveryOutboxStream } from "../core/streams.js";
 import {
+  documentDeliveryOutboxCheckpoint,
   documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
+  DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME,
   DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS,
   foldDocumentDeliveryOutbox,
   foldDocumentDeliveryOutboxFrom,
   foldDocumentDeliveryOutboxRecord,
+  foldDocumentDeliveryOutboxRecordFrom,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords,
+  type DocumentDeliveryOutboxCheckpointPayload,
   type DocumentDeliveryOutboxEventPayload,
   type DocumentDeliveryOutboxRecord,
   type DocumentDeliveryOutboxState,
@@ -20,6 +24,7 @@ import type {
   DocumentSnapshot,
   DomainEvent,
   NewDomainEvent,
+  StreamName,
   TenantId
 } from "../core/types.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -46,6 +51,19 @@ export type {
 const MAX_OUTBOX_APPEND_ATTEMPTS = 5;
 
 const OUTBOX_DOCTYPE = "__DocumentDeliveryOutbox";
+
+/**
+ * Most in-flight records a compaction checkpoint will carry.
+ *
+ * Above this, no checkpoint is written and the tenant's reads go back to
+ * folding the whole stream — the pre-#28 cost. The alternative is a checkpoint
+ * whose payload grows with the backlog and a `state()` that issues one indexed
+ * read per carried id; at the default claim limit (25) a drain already holds
+ * 25 in flight, so this is the point where "bounded" stops being true either
+ * way and the honest answer is to stop compacting rather than to hide the cost
+ * in a wide event.
+ */
+const DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_CARRY_OVER_LIMIT = 25;
 
 export interface DocumentDeliveryOutboxServiceOptions {
   /**
@@ -289,7 +307,7 @@ export class DocumentDeliveryOutboxService {
     command: CompleteDocumentDeliveryOutboxCommand,
     kind: "DocumentDeliveryOutboxDelivered"
   ): Promise<readonly DocumentDeliveryOutboxRecord[]> {
-    return this.appendWithRetry(command.tenantId, async (state) => {
+    return this.appendWithRetry(command.tenantId, async (state, attempt) => {
       const lookup = documentDeliveryOutboxRecordLookup(state, command.outboxId);
       if (lookup.status === "missing") {
         // Absent from the working set means one of two things, and only the
@@ -315,20 +333,90 @@ export class DocumentDeliveryOutboxService {
       };
       return {
         recordIds: [command.outboxId],
-        events: [{
-          id: this.ids.next("evt_"),
-          tenantId: command.tenantId,
-          stream: documentDeliveryOutboxStream(command.tenantId),
-          type: documentDeliveryOutboxEventType(payload),
-          doctype: "__DocumentDeliveryOutbox",
-          documentName: command.outboxId,
-          actorId: "system",
-          occurredAt: this.clock.now(),
-          payload,
-          metadata: command.metadata ?? {}
-        }]
+        events: [
+          // The checkpoint goes FIRST, in the same commit as the delivery.
+          //
+          // Same commit, because that is what makes "a checkpoint conflict is
+          // not a delivery failure" true by construction: one CAS, and a
+          // conflict re-runs this callback against fresh state, recomputing the
+          // checkpoint rather than committing a stale one. A separate append
+          // would need its own retry loop and a swallow-on-conflict rule.
+          //
+          // First, because the checkpoint summarises `state.version` — the head
+          // before this commit — so it lands at `upToSequence + 1`. A reader
+          // resuming at `upToSequence + 1` therefore starts *on* the checkpoint
+          // and the delivered event that follows it is inside the tail. Put it
+          // second and the delivery sits at `upToSequence + 1`, outside a read
+          // that begins at the checkpoint, and the record it terminates would be
+          // rehydrated from `carryOver` as still in flight.
+          ...this.plannedCheckpoint(command.tenantId, state, attempt),
+          {
+            id: this.ids.next("evt_"),
+            tenantId: command.tenantId,
+            stream: documentDeliveryOutboxStream(command.tenantId),
+            type: documentDeliveryOutboxEventType(payload),
+            doctype: "__DocumentDeliveryOutbox",
+            documentName: command.outboxId,
+            actorId: "system",
+            occurredAt: this.clock.now(),
+            payload,
+            metadata: command.metadata ?? {}
+          }
+        ]
       };
     });
+  }
+
+  /**
+   * The compaction checkpoint to commit alongside a delivery, or nothing.
+   *
+   * `upToSequence` is `state.version` and `carryOver` is every record the
+   * working set still holds at that version, so the claim it makes is true by
+   * construction rather than by arithmetic: `state.records` *is* the in-flight
+   * set at `state.version`, and a reader that rehydrates those ids and folds
+   * from `state.version + 1` reconstructs exactly this state. Nothing here
+   * depends on which sequence the delivered event lands on.
+   */
+  private plannedCheckpoint(
+    tenantId: TenantId,
+    state: DocumentDeliveryOutboxState,
+    attempt: number
+  ): readonly NewDomainEvent[] {
+    if (attempt >= MAX_OUTBOX_APPEND_ATTEMPTS) {
+      // Last chance to deliver: commit the delivery on its own. A checkpoint is
+      // an optimisation and must never be the reason a delivery fails — not
+      // even for a reason bundling does not cover, such as its derived id
+      // colliding with a row already in the events table.
+      return [];
+    }
+    if (state.records.size > DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_CARRY_OVER_LIMIT) {
+      return [];
+    }
+    const payload: DocumentDeliveryOutboxEventPayload = {
+      kind: "DocumentDeliveryOutboxCheckpointed",
+      upToSequence: state.version,
+      carryOver: [...state.records.keys()]
+    };
+    return [
+      {
+        // Derived, not drawn from the id generator: every outbox test hands
+        // `deterministicIds` an exactly-sized list, and consuming an id here
+        // would exhaust all of them. Uniqueness comes from the CAS — at most
+        // one commit can succeed at a given `state.version`, so no two
+        // checkpoints in a stream can share an `upToSequence` — which is also
+        // why checkpoints make strict progress without tracking the last one.
+        id: `evt_outbox_checkpoint_${tenantId}_${String(state.version)}`,
+        tenantId,
+        stream: documentDeliveryOutboxStream(tenantId),
+        type: documentDeliveryOutboxEventType(payload),
+        doctype: OUTBOX_DOCTYPE,
+        documentName: DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME,
+        actorId: "system",
+        occurredAt: this.clock.now(),
+        payload,
+        metadata: {}
+      }
+    ];
   }
 
   private requireRecord(state: DocumentDeliveryOutboxState, outboxId: string): DocumentDeliveryOutboxRecord {
@@ -342,7 +430,9 @@ export class DocumentDeliveryOutboxService {
   private async appendWithRetry(
     tenantId: TenantId,
     plan: (
-      state: DocumentDeliveryOutboxState
+      state: DocumentDeliveryOutboxState,
+      /** 1-based, so a plan can drop optional events on the final attempt. */
+      attempt: number
     ) => Promise<{
       readonly events: readonly NewDomainEvent[];
       readonly recordIds?: readonly string[];
@@ -352,7 +442,7 @@ export class DocumentDeliveryOutboxService {
     const stream = documentDeliveryOutboxStream(tenantId);
     for (let attempt = 1; attempt <= MAX_OUTBOX_APPEND_ATTEMPTS; attempt += 1) {
       const state = await this.state(tenantId);
-      const planned = await plan(state);
+      const planned = await plan(state, attempt);
       if (planned.events.length === 0) {
         return selectedDocumentDeliveryOutboxRecords(planned.state ?? state, planned.recordIds);
       }
@@ -375,12 +465,161 @@ export class DocumentDeliveryOutboxService {
     throw new Error("Unreachable document delivery outbox append retry state");
   }
 
+  /**
+   * The tenant's in-flight working set, resumed from the last compaction
+   * checkpoint rather than from the start of the stream.
+   *
+   * Without a checkpoint this folds the whole stream, which is what every
+   * operation used to do: measured 87 / 177 / 267 / 357 events read per
+   * enqueue+claim+deliver round at rounds 10 / 20 / 30 / 40 (#28). With one it
+   * reads the checkpoint (one indexed row), the tail after it, and one indexed
+   * read per carried-over id — a flat 24 events per round, and a flat 33 with a
+   * permanently failing record pinned in flight. The trade is round trips: 11
+   * reads per round rather than 5.
+   */
   private async state(tenantId: TenantId): Promise<DocumentDeliveryOutboxState> {
-    return foldDocumentDeliveryOutbox(
+    const stream = documentDeliveryOutboxStream(tenantId);
+    const checkpoint = await this.lastCheckpoint(tenantId, stream);
+    const carried = checkpoint === null ? null : await this.carriedOverRecords(tenantId, checkpoint);
+    if (checkpoint === null || carried === null) {
+      // No checkpoint yet, or one the stream contradicts. Either way the whole
+      // stream is the only trustworthy answer; compaction is an optimisation and
+      // must never be the reason a record goes missing.
+      return foldDocumentDeliveryOutbox(
+        tenantId,
+        await this.events.readStream(stream, { payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS })
+      );
+    }
+    return foldDocumentDeliveryOutboxFrom(
+      {
+        tenantId,
+        version: checkpoint.upToSequence,
+        records: carried
+      },
       tenantId,
-      await this.events.readStream(documentDeliveryOutboxStream(tenantId), {
+      // Inclusive lower bound of `upToSequence + 1`, which is the checkpoint's
+      // own sequence — so the checkpoint is inside this read and folds
+      // `state.version` up to the true stream head even when it is the last
+      // event in the stream. Using the checkpoint event's own sequence as the
+      // bound instead would be an off-by-one in the other direction and would
+      // drop the delivery that wrote it.
+      await this.events.readStream(stream, {
+        minSequence: checkpoint.upToSequence + 1,
         payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS
       })
     );
+  }
+
+  /**
+   * The newest compaction checkpoint in the tenant's outbox stream, or null.
+   *
+   * Reads exactly one row. The checkpoint is written under a `documentName`
+   * sentinel no outbox id can take, so
+   * `idx_cf_frappe_events_document_name` reaches it directly — three equality
+   * columns, no temporary B-tree — and an absent checkpoint is an empty index
+   * range rather than a scan.
+   *
+   * That second case is what the sentinel buys, and it is the state every
+   * already-deployed stream starts in: microseconds here against 6–14 ms for
+   * filtering on the `type` column or on the payload kind, which is a full
+   * backwards scan on every operation. The millisecond figures reproduce across
+   * machines; the microsecond ones vary by 5–13x with the harness, so treat them
+   * as an order of magnitude. See `docs/delivery-outbox.md`.
+   */
+  private async lastCheckpoint(
+    tenantId: TenantId,
+    stream: StreamName
+  ): Promise<DocumentDeliveryOutboxCheckpointPayload | null> {
+    const [newest] = await this.events.readDocumentEvents({
+      tenantId,
+      doctype: OUTBOX_DOCTYPE,
+      documentName: DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME,
+      stream,
+      order: "desc",
+      limit: 1
+    });
+    return newest === undefined ? null : documentDeliveryOutboxCheckpoint(newest);
+  }
+
+  /**
+   * Rehydrates the records a checkpoint carried past its own compaction point.
+   *
+   * This is what keeps a permanently failing target from pinning history:
+   * `claimableDocumentDeliveryOutboxRecords` re-claims the oldest in-flight
+   * record first, so a poison record stays the oldest forever, and a checkpoint
+   * that had to wait for it would never advance past its enqueue sequence.
+   * Carrying the id instead costs one indexed read.
+   */
+  /**
+   * The carried-over records **as of the checkpoint**, ready for the tail fold
+   * to replay the rest onto.
+   *
+   * Two facts are needed per record and they come from one read:
+   *
+   * - **State at `upToSequence`.** Only the prefix the checkpoint covers is
+   *   folded, because `state()` replays everything after it. Folding the whole
+   *   history here applied those later events twice, and
+   *   `DocumentDeliveryOutboxClaimed` is the one case in the fold that is not
+   *   idempotent — so `attempts` came out inflated by the number of claims
+   *   sitting above the newest checkpoint, growing with checkpoint spacing.
+   *   `list()` and {@link record} then disagreed about the same record, and
+   *   `documentDeliveryOutboxRetryAt` reads that number to back off.
+   * - **Whether it has finished since.** The full history decides that. A
+   *   carried record can finish between this read and the tail read — a
+   *   concurrent writer, or this read racing its own tail — and the working set
+   *   holds in-flight records only, so a torn read must not surface a delivered
+   *   record from `list()` in the window before the tail fold drops it.
+   *
+   * Bounding the read alone is not enough for the second point, which is why
+   * both folds run over the same events rather than the prefix being read on
+   * its own.
+   */
+  private async carriedOverRecords(
+    tenantId: TenantId,
+    checkpoint: DocumentDeliveryOutboxCheckpointPayload
+  ): Promise<ReadonlyMap<string, DocumentDeliveryOutboxRecord> | null> {
+    const records = new Map<string, DocumentDeliveryOutboxRecord>();
+    const histories = await Promise.all(
+      checkpoint.carryOver.map(async (outboxId) => ({
+        outboxId,
+        events: await this.events.readDocumentEvents({
+          tenantId,
+          doctype: OUTBOX_DOCTYPE,
+          documentName: outboxId,
+          stream: documentDeliveryOutboxStream(tenantId)
+        })
+      }))
+    );
+    for (const { outboxId, events } of histories) {
+      const atCheckpoint = foldDocumentDeliveryOutboxRecord(
+        tenantId,
+        outboxId,
+        events.filter((event) => event.sequence <= checkpoint.upToSequence)
+      );
+      if (atCheckpoint === null) {
+        // A carried id with no events at or below the checkpoint means the
+        // checkpoint disagrees with the stream. Skipping would drop an in-flight
+        // delivery silently, and the CAS would still succeed because the version
+        // comes from the tail read — so refuse the shortcut and fold the stream
+        // instead of trusting a checkpoint that cannot be right.
+        //
+        // Unreachable through the writer: `carryOver` is the working set's own
+        // keys at `state.version`, so every carried record's Enqueued is at or
+        // below it, and D1 reads are monotonic (no Sessions API, no read
+        // replicas). This is here because a wrong checkpoint does not heal
+        // itself and nothing else would notice.
+        return null;
+      }
+      const current = foldDocumentDeliveryOutboxRecordFrom(
+        atCheckpoint,
+        tenantId,
+        outboxId,
+        events.filter((event) => event.sequence > checkpoint.upToSequence)
+      );
+      if (current !== null && current.status !== "delivered") {
+        records.set(atCheckpoint.id, atCheckpoint);
+      }
+    }
+    return records;
   }
 }

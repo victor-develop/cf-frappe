@@ -37,7 +37,9 @@ export function readInMemoryAuditDocumentEvents(
             event.doctype === query.doctype &&
             event.documentName === query.documentName
         )
-  ).sort((left, right) => left.sequence - right.sequence);
+  ).sort((left, right) =>
+    query.order === "desc" ? right.sequence - left.sequence : left.sequence - right.sequence
+  );
   return query.limit === undefined ? events : events.slice(0, query.limit);
 }
 

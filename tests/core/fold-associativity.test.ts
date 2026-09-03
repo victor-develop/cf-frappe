@@ -295,6 +295,15 @@ const cases: readonly FoldCase<unknown>[] = [
         retryAt: "2026-01-01T00:10:00.000Z"
       },
       { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-2" },
+      // The compaction checkpoint has to be in this list for the prefix/resume
+      // split assertions to cover it at all: the discovery guard below
+      // enumerates exported `fold*` functions, so a new payload kind adds no
+      // case and leaves the fold green while the kind is untouched.
+      {
+        kind: "DocumentDeliveryOutboxCheckpointed",
+        upToSequence: 4,
+        carryOver: ["source-1:email"]
+      },
       { kind: "DocumentDeliveryOutboxDelivered", outboxId: "source-1:email", claimId: "claim-2" }
     ),
     foldAll: (stream) => foldDocumentDeliveryOutbox(TENANT, stream),
@@ -324,6 +333,16 @@ const cases: readonly FoldCase<unknown>[] = [
         retryAt: "2026-01-01T00:10:00.000Z"
       },
       { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-2" },
+      // A checkpoint carries no `outboxId`, so the per-record fold skips it on
+      // the id comparison. Including it here keeps the resumable and all-at-once
+      // folds agreeing over a stream that contains one — it does NOT pin the
+      // skip itself, which is behaviourally inert (`undefined !== outboxId` is
+      // already false) and held in place by tsc rather than by a test.
+      {
+        kind: "DocumentDeliveryOutboxCheckpointed",
+        upToSequence: 4,
+        carryOver: ["source-1:email"]
+      },
       { kind: "DocumentDeliveryOutboxDelivered", outboxId: "source-1:email", claimId: "claim-2" }
     ),
     foldAll: (stream) => foldDocumentDeliveryOutboxRecord(TENANT, "source-1:email", stream),

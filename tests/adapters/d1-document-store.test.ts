@@ -792,7 +792,17 @@ class FakeD1PreparedStatement {
           .filter((document) => document !== undefined)
       };
     }
-    if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("stream = ?")) {
+    if (
+      this.sql.includes("FROM cf_frappe_events") &&
+      this.sql.includes("stream = ?") &&
+      // The stream-qualified document lookup also ends in `stream = ?` but binds
+      // `(tenant_id, doctype, document_name, stream)`. Reaching this branch with
+      // it would read `params[0]` as the stream and silently return []; reaching
+      // the `tenant_id = ?` branch below would ignore the stream and order by
+      // time instead of sequence. This fake implements neither, so it has to
+      // reach the throw at the end.
+      !this.sql.includes("document_name = ?")
+    ) {
       if (this.sql.includes("1 = 0")) {
         return { results: [] };
       }
@@ -817,7 +827,11 @@ class FakeD1PreparedStatement {
         results: limit === undefined ? filtered : filtered.slice(0, limit)
       };
     }
-    if (this.sql.includes("FROM cf_frappe_events") && this.sql.includes("tenant_id = ?")) {
+    if (
+      this.sql.includes("FROM cf_frappe_events") &&
+      this.sql.includes("tenant_id = ?") &&
+      !this.sql.includes("stream = ?")
+    ) {
       if (this.sql.includes("1 = 0")) {
         return { results: [] };
       }
@@ -856,6 +870,14 @@ class FakeD1PreparedStatement {
       return {
         results: limit === undefined ? filtered : filtered.slice(0, limit)
       };
+    }
+    if (this.sql.includes("FROM cf_frappe_events")) {
+      // Fail loudly on an event query this fake has never been taught. Returning
+      // [] instead made a real adapter change look like a behaviour change in
+      // the code under test — the stream-qualified document lookup landed in the
+      // stream branch, had its tenant id read as a stream, and came back empty.
+      // See issue #42, which is about collapsing these hand-written fakes.
+      throw new Error(`FakeD1Database cannot answer this cf_frappe_events query: ${this.sql}`);
     }
     return { results: [] };
   }
