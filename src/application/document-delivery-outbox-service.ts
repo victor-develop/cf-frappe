@@ -480,7 +480,11 @@ export class DocumentDeliveryOutboxService {
   private async state(tenantId: TenantId): Promise<DocumentDeliveryOutboxState> {
     const stream = documentDeliveryOutboxStream(tenantId);
     const checkpoint = await this.lastCheckpoint(tenantId, stream);
-    if (checkpoint === null) {
+    const carried = checkpoint === null ? null : await this.carriedOverRecords(tenantId, checkpoint);
+    if (checkpoint === null || carried === null) {
+      // No checkpoint yet, or one the stream contradicts. Either way the whole
+      // stream is the only trustworthy answer; compaction is an optimisation and
+      // must never be the reason a record goes missing.
       return foldDocumentDeliveryOutbox(
         tenantId,
         await this.events.readStream(stream, { payloadKinds: DOCUMENT_DELIVERY_OUTBOX_PAYLOAD_KINDS })
@@ -490,7 +494,7 @@ export class DocumentDeliveryOutboxService {
       {
         tenantId,
         version: checkpoint.upToSequence,
-        records: await this.carriedOverRecords(tenantId, checkpoint)
+        records: carried
       },
       tenantId,
       // Inclusive lower bound of `upToSequence + 1`, which is the checkpoint's
@@ -511,12 +515,16 @@ export class DocumentDeliveryOutboxService {
    *
    * Reads exactly one row. The checkpoint is written under a `documentName`
    * sentinel no outbox id can take, so
-   * `idx_cf_frappe_events_document_name` reaches it directly: 2.0 µs on a
-   * 50k-event stream, and 0.6 µs when the stream has no checkpoint at all
-   * because that is an empty index range rather than a scan. Filtering on the
-   * `type` column or on the payload kind instead costs 6–14 ms in that second
-   * case — a full backwards scan on every operation, which is the state every
-   * already-deployed stream starts in.
+   * `idx_cf_frappe_events_document_name` reaches it directly — three equality
+   * columns, no temporary B-tree — and an absent checkpoint is an empty index
+   * range rather than a scan.
+   *
+   * That second case is what the sentinel buys, and it is the state every
+   * already-deployed stream starts in: microseconds here against 6–14 ms for
+   * filtering on the `type` column or on the payload kind, which is a full
+   * backwards scan on every operation. The millisecond figures reproduce across
+   * machines; the microsecond ones vary by 5–13x with the harness, so treat them
+   * as an order of magnitude. See `docs/delivery-outbox.md`.
    */
   private async lastCheckpoint(
     tenantId: TenantId,
@@ -540,7 +548,7 @@ export class DocumentDeliveryOutboxService {
    * `claimableDocumentDeliveryOutboxRecords` re-claims the oldest in-flight
    * record first, so a poison record stays the oldest forever, and a checkpoint
    * that had to wait for it would never advance past its enqueue sequence.
-   * Carrying the id instead costs one indexed read (2.0 µs at 50k events).
+   * Carrying the id instead costs one indexed read.
    */
   /**
    * The carried-over records **as of the checkpoint**, ready for the tail fold
@@ -569,7 +577,7 @@ export class DocumentDeliveryOutboxService {
   private async carriedOverRecords(
     tenantId: TenantId,
     checkpoint: DocumentDeliveryOutboxCheckpointPayload
-  ): Promise<ReadonlyMap<string, DocumentDeliveryOutboxRecord>> {
+  ): Promise<ReadonlyMap<string, DocumentDeliveryOutboxRecord> | null> {
     const records = new Map<string, DocumentDeliveryOutboxRecord>();
     const histories = await Promise.all(
       checkpoint.carryOver.map(async (outboxId) => ({
@@ -589,7 +597,18 @@ export class DocumentDeliveryOutboxService {
         events.filter((event) => event.sequence <= checkpoint.upToSequence)
       );
       if (atCheckpoint === null) {
-        continue;
+        // A carried id with no events at or below the checkpoint means the
+        // checkpoint disagrees with the stream. Skipping would drop an in-flight
+        // delivery silently, and the CAS would still succeed because the version
+        // comes from the tail read — so refuse the shortcut and fold the stream
+        // instead of trusting a checkpoint that cannot be right.
+        //
+        // Unreachable through the writer: `carryOver` is the working set's own
+        // keys at `state.version`, so every carried record's Enqueued is at or
+        // below it, and D1 reads are monotonic (no Sessions API, no read
+        // replicas). This is here because a wrong checkpoint does not heal
+        // itself and nothing else would notice.
+        return null;
       }
       const current = foldDocumentDeliveryOutboxRecordFrom(
         atCheckpoint,

@@ -65,7 +65,11 @@ It rides in the delivery's own `events` array, so there is one CAS. A conflict r
 
 Issue #28's own wording was a bare `upToSequence`, set to just below the oldest in-flight record. That is defeated by a single permanently failing target. `claimableDocumentDeliveryOutboxRecords` sorts by `enqueuedAt` ascending, so a poison record is re-claimed first on every drain and stays the oldest in-flight record indefinitely — and a checkpoint that had to wait for it never advances past its enqueue sequence. Measured that way, reads go straight back to linear: 96 / 186 / 276 / 366 events per round at rounds 10 / 20 / 30 / 40, the same slope as no fix at all. The pinned case is the likely case, not the corner.
 
-Carrying the ids costs one indexed read each (2.0 µs at 50k events) and holds the read flat at 33 events per round with a record stuck in `failed` on a far-future `retryAt`.
+Carrying the ids costs one indexed read each and holds the read flat at 33 events per round with a record stuck in `failed` on a far-future `retryAt`.
+
+`retryAt` is doing work in that sentence. A record that is genuinely retried — the real 30 s to 30 min backoff, so it is re-claimed and re-failed while healthy deliveries keep moving the checkpoint — grows the read again, because `carriedOverRecords` rehydrates it from its own full history every time. Measured at 8 events per round: 114 at round 10, 1634 at round 200, of which 1614 are that rehydration while the tail read stays flat at 16. So the flat number describes a stuck record, not a busy one.
+
+**Only `markDelivered` writes a checkpoint.** A tenant whose target is entirely broken never gets one, and its reads stay as unbounded as before — measured at 39 events per round rising to 1199 as retries reach 300. Compaction advances on success, and nothing else advances it.
 
 ### The lookup, and the case with no checkpoint
 
@@ -83,6 +87,8 @@ The checkpoint is written under `documentName = "__checkpoint"`, a sentinel no o
 The two middle rows stop at the first row of a backwards scan when a checkpoint sits near the tail, and scan the entire stream when none is there — an extra full scan per operation, on top of the full fold that also still happens, i.e. **worse than before this change** for a stream that has never compacted. The sentinel row is an empty index range instead, which is why its worst case is the cheapest number in the table.
 
 **A fifth index was considered and rejected.** `(stream, type, sequence)` plans the `type` lookup as `SEARCH … USING INDEX (stream=? AND type=?)` at 3.2 µs whether or not a checkpoint exists — but it costs 17% on the append hot path (50k inserts in one transaction, median of 7: 157 ms baseline versus 183 ms, with non-overlapping run ranges), and it is unnecessary once the sentinel puts the lookup on an index that is already there.
+
+**Read the µs column as an order of magnitude, not a figure.** It is `node:sqlite` returning a single row through this harness, and an independent re-measurement on another machine got 10.2 µs and 7.7 µs for the shipped row — 5x and 13x these — while reproducing the millisecond column closely (6.4 ms and 13.1 ms against 6.0 and 13.8). The load-bearing comparison is the one that survives both: **the shipped lookup is microseconds where the alternatives are milliseconds when the stream has no checkpoint yet**, which is the state every already-deployed stream starts in. The ordering *between* the microsecond variants did not hold across rigs and nothing depends on it.
 
 Newest-first is a new `order` option on `AuditDocumentEventQuery`, implemented once as SQL and once as a comparator. `ORDER BY sequence DESC` comes off `0007` without a temporary B-tree, so it costs the same 2.0 µs. Reading ascending instead is not a plan regression — it just returns the *oldest* checkpoint and compacts nothing, which is why `tests/adapters/document-delivery-outbox-compaction-sqlite.test.ts` asserts the direction differentially against the in-memory adapter rather than only asserting a plan.
 

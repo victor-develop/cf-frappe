@@ -714,6 +714,57 @@ describe("DocumentDeliveryOutboxService", () => {
       ).resolves.toMatchObject({ status: "delivered" });
     });
 
+    it("still reads a correct working set when a checkpoint contradicts the stream", async () => {
+      // A checkpoint claiming a record with no events at or below
+      // `upToSequence` cannot be right, and `state()` folds the whole stream
+      // instead of trusting it.
+      //
+      // Be honest about what this pins: the outcome, not the fallback. Turning
+      // that fallback back into a silent `continue` still passes, because the
+      // tail read starts at `upToSequence + 1` and therefore covers everything
+      // the dropped record needed. The difference is only observable if the
+      // per-record read is *staler* than the tail read, which needs
+      // non-monotonic reads — no Sessions API, no read replicas, so not
+      // reachable here. The fallback stays because a wrong checkpoint does not
+      // heal itself and nothing detects one, not because a test can kill it.
+      const events = new InMemoryDocumentStore();
+      const outbox = deliveryRounds(events);
+      await outbox.enqueueFromDomainEvent({ event: domainEvent(), targets: ["email"] });
+      const stream = documentDeliveryOutboxStream("acme");
+      const head = (await events.readStream(stream)).length;
+      await events.append(stream, head, [
+        {
+          id: "evt_bogus_checkpoint",
+          tenantId: "acme",
+          stream,
+          type: "DocumentDeliveryOutboxCheckpointed",
+          doctype: "__DocumentDeliveryOutbox",
+          documentName: DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME,
+          actorId: "system",
+          occurredAt: now,
+          payload: {
+            kind: "DocumentDeliveryOutboxCheckpointed",
+            // Zero: no event of any record is at or below it, so every carried
+            // id folds to nothing.
+            upToSequence: 0,
+            carryOver: ["evt_source:email"]
+          },
+          metadata: {}
+        }
+      ]);
+
+      await expect(outbox.list("acme")).resolves.toMatchObject([
+        { id: "evt_source:email", status: "pending" }
+      ]);
+      // And the record is still deliverable, so the fallback produced a usable
+      // version rather than one that conflicts forever.
+      const [claimed] = await outbox.claimPending({ tenantId: "acme", claimId: "claim-1", now });
+      expect(claimed).toMatchObject({ id: "evt_source:email", attempts: 1 });
+      await expect(
+        outbox.markDelivered({ tenantId: "acme", outboxId: "evt_source:email", claimId: "claim-1" })
+      ).resolves.toMatchObject({ status: "delivered" });
+    });
+
     it("counts attempts the same whether read through list or through record", async () => {
       // The carried-over state is folded from the record's own history and then
       // the tail is replayed onto it, so folding the whole history there applied
