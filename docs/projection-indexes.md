@@ -237,7 +237,7 @@ Both `LIKE` and `GLOB` are full scans — a leading wildcard defeats every index
 | `GLOB '*[Nn][Ee][Ee][Dd][Ll][Ee]*'` | 38.4 ms |
 | `GLOB '*[Nn]eedle*'` | 37.9 ms |
 
-So the classes cost about 28% more than `LIKE`, and nearly all of it comes from the first element after `*` being a class — a single leading class costs the same as a fully expanded pattern.
+So the classes cost roughly a quarter more than `LIKE` — 28% here, 24% on an independent re-measurement whose absolute numbers were about 2x these, so read the ratio and not the milliseconds. Most of it comes from the first element after `*` being a class. Whether a single leading class costs *the same* as a fully expanded pattern did not reproduce across machines (37.9 vs 38.4 ms here, 83.2 vs 66.6 ms there), so only the weaker claim holds: the leading class is where the cost is.
 
 `EXPLAIN QUERY PLAN` with bound values, with and without `ANALYZE`, still picks `idx_cf_frappe_documents_list` for the tenant/doctype seek and the `updated_at` order, so a page can still terminate early — but only when matches are dense. With 100 matching rows in 100k, `LIMIT 50 OFFSET 0` cost 28.3 ms, i.e. half the table. `COUNT(*)` is always a full scan.
 
@@ -245,7 +245,21 @@ So the classes cost about 28% more than `LIKE`, and nearly all of it comes from 
 
 The `+ 1` used to be `× 2`. The match count does not change between those pages, and re-asking for it made half of them a full-scan `COUNT(*)` under the same `GLOB`. Measured with a counting `D1Database` over a real engine, 4000 rows and 2000 matches, one `limit: 20` render: **20 statements with 10 counts, now 11 statements with 1 count**. `ListDocumentsQuery.skipTotal` is what the loop passes after the first page; a store may then report `total: 0` and skip counting, and both adapters do, so a caller that reads a total it asked not to be computed breaks the same way on either.
 
-The remaining `ceil(matches / 200)` reads are the price of deciding permissions outside SQL, and they grow with the match set: a 500k doctype matching 100k still issues about 500 of them for one click. `total` staying exact is what keeps pagination stable, so that is the trade this change accepts; bounding it, or pushing permissions into SQL, is a separate decision.
+The remaining `ceil(matches / 200)` reads are the price of deciding permissions outside SQL, and they grow with the match set. **State that as a limit, not as a cost note**, because past a point the request cannot finish. Measured on the compiled SQL against a real engine, no network:
+
+| Matches (of 500k rows) | Statements | SQL time |
+| --- | --- | --- |
+| 400 | 3 | ~0 s |
+| 2000 | 11 | ~0 s |
+| 10000 | 51 | 0.6 s |
+| 20000 | 101 | 1.5 s |
+| 100000 | 501 | **104 s** |
+
+Per-page cost climbs with the offset — 18.6 ms at offset 0, 276 ms at offset 99800, since `OFFSET` walks the matching rows — so the total is quadratic in the match set. Over D1 each statement also takes a round trip.
+
+**Nothing bounds a single request.** `clampLimit` bounds the page the caller asks for, not how many pages are scanned internally, and the only bound that ever existed was the 1000-candidate cap this change removed. So text filtering went from *"more than 1000 candidates is an immediate 400"* to *"unbounded"*: usable up to roughly 20k matches, which is what issue #41 was asking for, and unservable well before 100k.
+
+`total` staying exact is what keeps pagination stable, so that is the trade this change accepts. Putting a bound back, or pushing permissions into SQL, is a product decision and deliberately not made here.
 
 ### What this did not fix
 

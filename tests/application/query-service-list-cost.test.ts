@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { D1ProjectionStore } from "../../src/adapters/d1/projection-store.js";
 import { QueryService } from "../../src/application/query-service.js";
+import { InMemoryProjectionStore } from "../../src/adapters/in-memory/projection-store.js";
 import { createRegistry, defineDocType } from "../../src/index.js";
 import { createProjectionEngine } from "../sqlite-engine.js";
 
@@ -80,6 +81,47 @@ describe("list render cost", () => {
     expect({ rows: page.data.length, total: page.total }).toEqual({ rows: 20, total: 2000 });
     expect(counting.statements()).toBe(11);
     expect(counting.counts()).toBe(1);
+    engine.close();
+  });
+
+  it("reports total 0 under skipTotal in both stores, not just in D1", async () => {
+    // The in-memory store has the count for free, so reporting 0 is a choice
+    // rather than a saving: a caller that reads a total it asked not to be
+    // computed should break the same way on either adapter instead of only on
+    // D1. Nothing pinned that, and dropping the branch passed the whole suite.
+    const engine = createProjectionEngine([Note]);
+    engine.insert(
+      Array.from({ length: 30 }, (_unused, index) => ({
+        tenantId: "t1",
+        doctype: "Note",
+        name: `N${String(index).padStart(5, "0")}`,
+        data: { title: "Ärger" }
+      }))
+    );
+    const memory = new InMemoryProjectionStore();
+    for (let index = 0; index < 30; index += 1) {
+      await memory.save({
+        tenantId: "t1",
+        doctype: "Note",
+        name: `N${String(index).padStart(5, "0")}`,
+        version: 1,
+        docstatus: "draft",
+        data: { title: "Ärger" },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      });
+    }
+    const d1 = new D1ProjectionStore(engine.asD1Database());
+    const query = { tenantId: "t1", doctype: "Note", limit: 5, skipTotal: true } as const;
+
+    const [fromD1, fromMemory] = await Promise.all([d1.list(query), memory.list(query)]);
+
+    expect({ rows: fromD1.data.length, total: fromD1.total }).toEqual({ rows: 5, total: 0 });
+    expect({ rows: fromMemory.data.length, total: fromMemory.total }).toEqual({ rows: 5, total: 0 });
+    // And without it both still count, so the assertion above is about the flag
+    // rather than about an empty table.
+    await expect(d1.list({ ...query, skipTotal: false })).resolves.toMatchObject({ total: 30 });
+    await expect(memory.list({ ...query, skipTotal: false })).resolves.toMatchObject({ total: 30 });
     engine.close();
   });
 
