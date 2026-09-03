@@ -589,7 +589,48 @@ function compareValues(left: JsonPrimitive, right: JsonValue | undefined): numbe
   if (typeof left === "number" && typeof right === "number") {
     return left - right;
   }
-  return String(left).localeCompare(String(right ?? ""));
+  return compareTextBinary(String(left), String(right ?? ""));
+}
+
+const TEXT_COMPARISON_ENCODER = new TextEncoder();
+
+/**
+ * Orders two strings by their UTF-8 bytes, which is what SQLite's default
+ * `BINARY` collation does.
+ *
+ * This used to be `localeCompare`, and the two disagree — `localeCompare` says
+ * `"apple" < "B"`, byte order says the opposite, because lowercase ASCII sorts
+ * after uppercase. That only stayed invisible while text filters were refined in
+ * memory: a group mixing `contains` with `gt` fell out of the pushdown, got
+ * re-filtered here, and so happened to answer by this rule. With the text
+ * operators pushed down, the same group is answered entirely by SQLite, and the
+ * two adapters returned different rows for
+ * `all[title contains "p", title gt "B"]`.
+ *
+ * The engine's rule is the one kept, because a projection store cannot be made
+ * to sort like `Intl` — so aligning the other way was the only way to have one
+ * answer. It is a product-visible change for mixed-case and non-ASCII data.
+ *
+ * Bytes, not JavaScript's `<`: that compares UTF-16 code units, which orders an
+ * astral character *before* U+E000–U+FFFF while UTF-8 puts it after. Measured
+ * against a real engine — `ORDER BY v COLLATE BINARY` gives
+ * `["Z", "z", "\ue000", "\ufffd", "\u{1F600}"]`, and `<` gives
+ * `["Z", "z", "\u{1F600}", "\ue000", "\ufffd"]`.
+ */
+function compareTextBinary(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  const leftBytes = TEXT_COMPARISON_ENCODER.encode(left);
+  const rightBytes = TEXT_COMPARISON_ENCODER.encode(right);
+  const shared = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < shared; index += 1) {
+    const difference = leftBytes[index]! - rightBytes[index]!;
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return leftBytes.length - rightBytes.length;
 }
 
 /**

@@ -185,6 +185,55 @@ describe("D1 projection text pushdown against a real SQLite engine", () => {
     });
   });
 
+  it("agrees with memory when a text filter is combined with an ordered comparison", async () => {
+    // Ordered comparisons on text are where the two adapters used to part
+    // company: SQLite compares bytes, so `"apple" > "B"`, while the in-memory
+    // rule used `localeCompare`, which says the opposite. That stayed invisible
+    // only because a group containing `contains` fell out of the pushdown and
+    // got re-filtered in memory. With the text operators pushed down, this group
+    // is answered entirely by SQLite — so `compareValues` now compares UTF-8
+    // bytes too, and this is the case that was wrong.
+    for (const rowSet of [
+      { name: "P0", title: "apple pie" },
+      { name: "P1", title: "Banana" },
+      { name: "P2", title: "apricot" },
+      { name: "P3", title: "Cherry" }
+    ]) {
+      const document = snapshot(rowSet.name, { title: rowSet.title, priority: "Low" });
+      await d1.save(document);
+      await memory.save(document);
+    }
+
+    await expectParity(predicateGroup(
+      "all",
+      afterField("title", "p", "contains"),
+      afterField("title", "B", "gt")
+    ));
+    // And the ordered comparison on its own, which is the part that changed.
+    await expectParity(afterField("title", "B", "gt"));
+    await expectParity(afterField("title", "b", "lt"));
+  });
+
+  it("orders text by UTF-8 bytes, not by UTF-16 code units", async () => {
+    // These two orders differ, and only here: UTF-16 puts an astral character
+    // *before* U+E000-U+FFFF, UTF-8 puts it after. So `title gt "\ue000"`
+    // matches the astral row under SQLite's BINARY collation and does not match
+    // it under JavaScript's `<`. Without this case, replacing the byte
+    // comparison with `left < right` passes the whole suite.
+    for (const [name, title] of [["U1", "\ue000"], ["U2", "\ufffd"], ["U3", "\u{1F600}"]] as const) {
+      const document = snapshot(name, { title, priority: "Low" });
+      await d1.save(document);
+      await memory.save(document);
+    }
+
+    await expectParity(afterField("title", "\ue000", "gt"));
+    await expectParity(afterField("title", "\u{1F600}", "lt"));
+    // The astral row really is the one that separates them, so the assertion is
+    // not passing on an empty result.
+    const matched = await listedNames(afterField("title", "\ue000", "gt"));
+    expect(matched).toContain("U3");
+  });
+
   it("keeps a literal ^ literal instead of negating the class", async () => {
     // `^` first inside a GLOB class negates it, so emitting a literal `^` as the
     // single-member class `[^]` would match every character except `^` —
@@ -287,6 +336,103 @@ describe("D1 projection text pushdown against a real SQLite engine", () => {
       doctype: "Note",
       predicate: { kind: "group", match: "all", predicates: [] }
     })).toThrowError(/at least one predicate/);
+  });
+
+  it("keeps an operand the in-memory rule cannot match matching nothing", async () => {
+    // Each of these was a surviving mutation: replacing the never-matching
+    // condition with `1 = 1` kept every row and no test noticed. `not_like` is
+    // the one that must NOT become "keep everything" — the in-memory rule needs
+    // the field present *and* the operand a string, so a bad operand makes it
+    // false, not true.
+    //
+    // The two operators differ on purpose, and this pins which: `contains`
+    // coerces its needle with `String(expected)` exactly as the in-memory rule
+    // does, so `contains 5` is a real search for "5"; `like` and `not_like`
+    // require a string and match nothing without one.
+    for (const operator of ["contains", "like", "not_like"] as const) {
+      const compiled = d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: afterField("title", null as never, operator)
+      });
+      expect(compiled.where, `${operator} with null`).toContain("0 = 1");
+      await expectParity(afterField("title", null as never, operator));
+    }
+
+    for (const operator of ["like", "not_like"] as const) {
+      for (const operand of [5, true] as const) {
+        const compiled = d1ProjectionListQuery({
+          tenantId: "acme",
+          doctype: "Note",
+          predicate: afterField("title", operand as never, operator)
+        });
+        expect(compiled.where, `${operator} with ${JSON.stringify(operand)}`).toContain("0 = 1");
+        await expectParity(afterField("title", operand as never, operator));
+      }
+    }
+
+    // Coerced, not rejected — and the two stores agree on that too.
+    const coerced = d1ProjectionListQuery({
+      tenantId: "acme",
+      doctype: "Note",
+      predicate: afterField("title", 5 as never, "contains")
+    });
+    expect(coerced.where).toContain("GLOB ?");
+    expect(coerced.params).toContain("*5*");
+    await expectParity(afterField("title", 5 as never, "contains"));
+  });
+
+  it("applies the pattern byte budget to not_like as well", () => {
+    // Wrapping the budget check in `operator !== "not_like"` was a surviving
+    // mutation: the limit was only ever reached through `contains` in the tests,
+    // so it could silently stop applying to one operator.
+    const tooLong = `%${"Т".repeat(400)}%`;
+    expect(() =>
+      d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: afterField("title", tooLong, "not_like")
+      })
+    ).toThrow("byte limit");
+    expect(() =>
+      d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: afterField("title", tooLong, "like")
+      })
+    ).toThrow("byte limit");
+  });
+
+  it("rejects U+0000 rather than truncating the pattern to match every row", () => {
+    // SQLite's `patternCompare` walks NUL-terminated C strings, so `*\u0000*`
+    // is read as `*`. Before this rejection, `contains "\u0000"` returned every
+    // row while the in-memory rule returned only the row that contains U+0000 —
+    // a client-supplied character silently removing the filter.
+    for (const needle of ["\u0000", "a\u0000b", "trailing\u0000"]) {
+      expect(() =>
+        d1ProjectionListQuery({
+          tenantId: "acme",
+          doctype: "Note",
+          predicate: afterField("title", needle, "contains")
+        })
+      ).toThrow("contains U+0000");
+    }
+    expect(() =>
+      d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: afterField("title", "%\u0000%", "like")
+      })
+    ).toThrow("contains U+0000");
+    // `not_like` too: it takes the same compile path, and a truncated pattern
+    // under a negation drops rows instead of keeping them.
+    expect(() =>
+      d1ProjectionListQuery({
+        tenantId: "acme",
+        doctype: "Note",
+        predicate: afterField("title", "%\u0000%", "not_like")
+      })
+    ).toThrow("contains U+0000");
   });
 
   it("rejects a needle whose compiled pattern crosses the byte budget", () => {
@@ -477,6 +623,14 @@ describe("compiled GLOB against the shipped like rule, randomized", () => {
   // astral characters are deliberately absent: both have accepted divergences
   // pinned above, and including them here would turn a known boundary into a
   // flaky failure.
+  //
+  // U+0000 is absent for a different reason, and not because it is safe: it used
+  // to make `contains` match every row, and adding this one character to this
+  // alphabet was what found that. It cannot reach either side any more — a
+  // pattern containing it is a 400 and a value containing it fails validation —
+  // so generating it here would only exercise those two rejections, which
+  // `rejects U+0000 rather than truncating the pattern` and the schema tests
+  // pin directly.
   const ALPHABET = [
     ..."%_\\[]^*?-",
     ..."aA",

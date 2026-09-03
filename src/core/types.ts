@@ -624,6 +624,18 @@ export interface ListDocumentsQuery {
   readonly order?: ListOrderDirection;
   readonly limit?: number;
   readonly offset?: number;
+  /**
+   * Set when the caller already knows the total and only wants this page's rows.
+   * A store may then report `total: 0` and skip counting.
+   *
+   * Row-level permissions are decided in the Worker, so `QueryService` pages
+   * through the whole predicate match set to report an exact *readable* total.
+   * The count does not change between those pages, and re-running it made half
+   * the statements in a list render a full-table `COUNT(*)` — with a text filter
+   * pushed down as `GLOB`, each of those is a scan. Never set it when the total
+   * is going to be read.
+   */
+  readonly skipTotal?: boolean;
 }
 
 export interface ListDocumentsResult<TData extends DocumentData = DocumentData> {

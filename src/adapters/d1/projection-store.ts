@@ -66,10 +66,24 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
 
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const listQuery = d1ProjectionListQuery(query);
+    const page = this.db
+      .prepare(d1ProjectionListSql(listQuery))
+      .bind(...listQuery.params, listQuery.limit, listQuery.offset);
+    if (query.skipTotal === true) {
+      // One statement instead of two. The count is a full-table `COUNT(*)` under
+      // the same predicate, and a pushed-down text filter makes it a scan — so a
+      // caller paging for rows it already has the total for should not pay for it
+      // on every page.
+      const rowsOnly = await page.all();
+      return {
+        data: ((rowsOnly.results ?? []) as unknown as DocumentRow[]).map(documentFromRow),
+        limit: listQuery.limit,
+        offset: listQuery.offset,
+        total: 0
+      };
+    }
     const [rows, count] = await this.db.batch([
-      this.db
-        .prepare(d1ProjectionListSql(listQuery))
-        .bind(...listQuery.params, listQuery.limit, listQuery.offset),
+      page,
       this.db.prepare(d1ProjectionCountSql(listQuery)).bind(...listQuery.params)
     ]);
     if (!rows || !count) {

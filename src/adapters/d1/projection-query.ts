@@ -309,6 +309,7 @@ function globPredicateWhere(
   operator: "contains" | "like" | "not_like",
   pattern: string
 ): PredicateWhere {
+  assertTextPatternHasNoNul(field, pattern);
   const translated = likeGlobPattern(pattern);
   if (translated.kind === "never") {
     // A pattern ending in a lone `\` matches nothing. `not_like` still keeps
@@ -341,6 +342,32 @@ function containsNeedle(value: JsonValue, operator: PredicateOperator): string |
   // `String(actual)`/`String(expected)` is what the in-memory rule applies, so
   // coerce the needle the same way rather than rejecting a non-string.
   return String(scalarPredicateValue(value, operator));
+}
+
+/**
+ * Rejects a text filter whose pattern contains U+0000.
+ *
+ * SQLite's `patternCompare` walks NUL-terminated C strings, so a bound GLOB
+ * pattern is read only up to its first U+0000. `contains "\u0000"` compiles to
+ * `*\u0000*`, which SQLite reads as `*` — **every row matches, and the filter
+ * is silently gone**. Measured on a real engine with bound parameters:
+ * `GLOB '*' || char(0) || '*'` returned every row, the in-memory rule returned
+ * only the row that actually contains U+0000.
+ *
+ * The needle is client-supplied JSON, so this has to be refused rather than
+ * translated. A stored value cannot contain U+0000 either — `validateFieldValue`
+ * rejects it — so between the two the pushdown stays faithful instead of the
+ * divergence being written down and lived with.
+ */
+function assertTextPatternHasNoNul(field: string, pattern: string): void {
+  if (pattern.includes("\u0000")) {
+    throw new FrameworkError(
+      "D1_PROJECTION_TEXT_PATTERN_INVALID",
+      `Text filter on '${field}' contains U+0000, which SQLite's pattern matching cannot ` +
+        "represent: it truncates the pattern there and would match every row",
+      { status: 400 }
+    );
+  }
 }
 
 function assertTextPatternWithinLimit(field: string, pattern: string): void {

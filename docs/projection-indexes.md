@@ -203,9 +203,19 @@ The last row covers 614 codepoint pairs, i.e. every cased astral script: Deseret
 
 ### Two accepted divergences, and a length cap
 
+**Ordered comparisons on text changed rule.** `compareValues` compared with `localeCompare`, SQLite compares bytes, and the two disagree: `localeCompare` says `"apple" < "B"`, byte order says the opposite, because lowercase ASCII sorts after uppercase. That stayed invisible while text filters were refined in memory — a group mixing `contains` with `gt` fell out of the pushdown and got re-filtered by the JS rule. Pushed down, the same group is answered entirely by SQLite, and the two adapters returned different rows for `all[title contains "p", title gt "B"]`: D1 gave `[apple pie, apricot]`, memory gave `[]`.
+
+A projection store cannot be made to sort like `Intl`, so the engine's rule is the one kept and `compareValues` now compares UTF-8 bytes. **This is a product-visible change for mixed-case and non-ASCII data**, and it affects `gt`/`gte`/`lt`/`lte`/`between`/`not_between` on text everywhere `matchesPredicateExpression` runs, not only in lists.
+
+Bytes, not JavaScript's `<`: that compares UTF-16 code units, which puts an astral character *before* U+E000–U+FFFF while UTF-8 puts it after. Measured — `ORDER BY v COLLATE BINARY` gives `["Z", "z", "\ue000", "\ufffd", "😀"]` and `<` gives `["Z", "z", "😀", "\ue000", "\ufffd"]`. A test pins that case, because without it replacing the byte comparison with `<` passes the whole suite.
+
 **`_` on astral-plane data.** `_` is one UTF-16 *code unit* in memory and compiles to `?`, which is one *code point* in `GLOB`. Measured: `'😀' GLOB '?'` is 1 and `'😀' GLOB '??'` is 0, while in memory `__` matches 😀 and `_` does not. Neither `?` nor `??` is even a consistent superset, so no fallback saves it. The exact fix is to redefine `_` as one code point, which would also have to change the standalone browser copy in `src/adapters/desk/client-src/forms.ts`, whose parity test covers only `contains` — the drift would ship silently. Blast radius: `contains` escapes `_`, so Desk's quick filter and the file list are exact even on astral data; only a hand-written `like`/`not_like` pattern containing `_` is affected.
 
 **Unpaired surrogates.** Two rows storing `"\ud83d"` and `"\ude00"` are stored distinctly (CESU-8, `EDA0BD` vs `EDB880`) but `GLOB` reports them equal — SQLite's UTF-8 reader collapses the malformed sequences — while in memory they are different code units. Reachable only with lone surrogates in stored data.
+
+**U+0000 is refused on both sides rather than being a boundary.** SQLite's `patternCompare` walks NUL-terminated C strings, so a bound pattern is read only up to its first U+0000: `contains "\u0000"` compiles to `*\u0000*`, SQLite reads `*`, and **every row matches — the filter is silently gone**. `json_extract` truncates the same way, so `"report\u0000final"` extracts as `"report"` and `contains "final"` misses a row the in-memory rule matches.
+
+Neither is a divergence worth documenting and living with, because the needle is client-supplied. A pattern containing U+0000 is a 400 (`D1_PROJECTION_TEXT_PATTERN_INVALID`), and `validateFieldValue` rejects U+0000 in `text`, `longText`, `link`, `date` and `datetime` values — so between the two the pushdown stays faithful by construction. `eq` was never affected, since it compares fixed-length bytes.
 
 Both are pinned by tests in `tests/adapters/d1-projection-glob.test.ts` so they stay known boundaries rather than field reports. A third, closely related boundary: a non-string value left in a text field diverges too, because SQLite's text coercion is not JS `String()` (JSON `true` becomes the integer 1, and `1 GLOB '*[rR][uU]*'` is 0 where memory says `"true"` contains `ru`). Schema validation makes that unreachable except after a field's type changes from `number` to `text` with old rows still numeric.
 
@@ -225,7 +235,13 @@ Both `LIKE` and `GLOB` are full scans — a leading wildcard defeats every index
 
 So the classes cost about 28% more than `LIKE`, and nearly all of it comes from the first element after `*` being a class — a single leading class costs the same as a fully expanded pattern.
 
-`EXPLAIN QUERY PLAN` with bound values, with and without `ANALYZE`, still picks `idx_cf_frappe_documents_list` for the tenant/doctype seek and the `updated_at` order, so a page can still terminate early — but only when matches are dense. With 100 matching rows in 100k, `LIMIT 50 OFFSET 0` cost 28.3 ms, i.e. half the table. `COUNT(*)` is always a full scan. **A text filter therefore reads the whole doctype twice per page** (rows and total). `total` staying exact is what keeps pagination stable, so that is the trade this change accepts; bounding `total` for text filters is a separate decision.
+`EXPLAIN QUERY PLAN` with bound values, with and without `ANALYZE`, still picks `idx_cf_frappe_documents_list` for the tenant/doctype seek and the `updated_at` order, so a page can still terminate early — but only when matches are dense. With 100 matching rows in 100k, `LIMIT 50 OFFSET 0` cost 28.3 ms, i.e. half the table. `COUNT(*)` is always a full scan.
+
+**What a page costs is a `QueryService` question, not a store one.** Row-level permissions are decided in the Worker, so `listDocuments` pages through the whole predicate match set 200 rows at a time to report an exact *readable* total. So one rendered page issues `ceil(matches / 200) + 1` statements, not two: one `COUNT(*)` and one 200-row read per page.
+
+The `+ 1` used to be `× 2`. The match count does not change between those pages, and re-asking for it made half of them a full-scan `COUNT(*)` under the same `GLOB`. Measured with a counting `D1Database` over a real engine, 4000 rows and 2000 matches, one `limit: 20` render: **20 statements with 10 counts, now 11 statements with 1 count**. `ListDocumentsQuery.skipTotal` is what the loop passes after the first page; a store may then report `total: 0` and skip counting, and both adapters do, so a caller that reads a total it asked not to be computed breaks the same way on either.
+
+The remaining `ceil(matches / 200)` reads are the price of deciding permissions outside SQL, and they grow with the match set: a 500k doctype matching 100k still issues about 500 of them for one click. `total` staying exact is what keeps pagination stable, so that is the trade this change accepts; bounding it, or pushing permissions into SQL, is a separate decision.
 
 ### What this did not fix
 
