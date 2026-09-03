@@ -7,22 +7,16 @@ import type {
   TenantId
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
-import { matchesPredicateExpression } from "../../core/list-view.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
 import { listD1AutomationRunClaimCandidateSnapshots } from "./automation-run-index.js";
-import { FrameworkError } from "../../core/errors.js";
 import {
   d1ProjectionCountSql,
   d1ProjectionListQuery,
-  d1ProjectionListSql,
-  type D1ProjectionListQuery,
-  type D1ProjectionRefinement
+  d1ProjectionListSql
 } from "./projection-query.js";
 import { documentFromRow, type DocumentRow } from "./serde.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
-
-export const D1_PROJECTION_MAX_POST_FILTER_ROWS = 1_000;
 
 export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimStore {
   constructor(private readonly db: D1Database) {}
@@ -72,13 +66,24 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
 
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const listQuery = d1ProjectionListQuery(query);
-    if (listQuery.refinement !== undefined) {
-      return listWithRefinement(this.db, query.doctype, listQuery, listQuery.refinement);
+    const page = this.db
+      .prepare(d1ProjectionListSql(listQuery))
+      .bind(...listQuery.params, listQuery.limit, listQuery.offset);
+    if (query.skipTotal === true) {
+      // One statement instead of two. The count is a full-table `COUNT(*)` under
+      // the same predicate, and a pushed-down text filter makes it a scan — so a
+      // caller paging for rows it already has the total for should not pay for it
+      // on every page.
+      const rowsOnly = await page.all();
+      return {
+        data: ((rowsOnly.results ?? []) as unknown as DocumentRow[]).map(documentFromRow),
+        limit: listQuery.limit,
+        offset: listQuery.offset,
+        total: 0
+      };
     }
     const [rows, count] = await this.db.batch([
-      this.db
-        .prepare(d1ProjectionListSql(listQuery))
-        .bind(...listQuery.params, listQuery.limit, listQuery.offset),
+      page,
       this.db.prepare(d1ProjectionCountSql(listQuery)).bind(...listQuery.params)
     ]);
     if (!rows || !count) {
@@ -99,36 +104,4 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
   }): Promise<readonly DocumentSnapshot[]> {
     return listD1AutomationRunClaimCandidateSnapshots(this.db, query);
   }
-}
-
-async function listWithRefinement(
-  db: D1Database,
-  doctype: DocTypeName,
-  query: D1ProjectionListQuery,
-  refinement: D1ProjectionRefinement
-): Promise<ListDocumentsResult> {
-  const result = await db
-    .prepare(d1ProjectionListSql(query, { paged: false }))
-    .bind(...query.params, D1_PROJECTION_MAX_POST_FILTER_ROWS + 1)
-    .all<DocumentRow>();
-  const rows = (result.results ?? []) as DocumentRow[];
-  if (rows.length > D1_PROJECTION_MAX_POST_FILTER_ROWS) {
-    throw new FrameworkError(
-      "D1_PROJECTION_REFINEMENT_TOO_BROAD",
-      `Filtering on ${refinement.operators.join(", ")} cannot be pushed into SQL, and the remaining ` +
-        `predicate matched more than ${D1_PROJECTION_MAX_POST_FILTER_ROWS} candidate rows on ` +
-        `'${doctype}'. Add a filter that does push down (an equality, range, or set membership) ` +
-        "alongside it.",
-      { status: 400 }
-    );
-  }
-  const matching = rows
-    .map(documentFromRow)
-    .filter((document) => matchesPredicateExpression(document, refinement.predicate));
-  return {
-    data: matching.slice(query.offset, query.offset + query.limit),
-    limit: query.limit,
-    offset: query.offset,
-    total: matching.length
-  };
 }

@@ -589,22 +589,87 @@ function compareValues(left: JsonPrimitive, right: JsonValue | undefined): numbe
   if (typeof left === "number" && typeof right === "number") {
     return left - right;
   }
-  return String(left).localeCompare(String(right ?? ""));
+  return compareTextBinary(String(left), String(right ?? ""));
 }
 
-function likePatternMatches(actual: JsonValue, pattern: string): boolean {
+const TEXT_COMPARISON_ENCODER = new TextEncoder();
+
+/**
+ * Orders two strings by their UTF-8 bytes, which is what SQLite's default
+ * `BINARY` collation does.
+ *
+ * This used to be `localeCompare`, and the two disagree — `localeCompare` says
+ * `"apple" < "B"`, byte order says the opposite, because lowercase ASCII sorts
+ * after uppercase. That only stayed invisible while text filters were refined in
+ * memory: a group mixing `contains` with `gt` fell out of the pushdown, got
+ * re-filtered here, and so happened to answer by this rule. With the text
+ * operators pushed down, the same group is answered entirely by SQLite, and the
+ * two adapters returned different rows for
+ * `all[title contains "p", title gt "B"]`.
+ *
+ * The engine's rule is the one kept, because a projection store cannot be made
+ * to sort like `Intl` — so aligning the other way was the only way to have one
+ * answer. It is a product-visible change for mixed-case and non-ASCII data.
+ *
+ * Bytes, not JavaScript's `<`: that compares UTF-16 code units, which orders an
+ * astral character *before* U+E000–U+FFFF while UTF-8 puts it after. Measured
+ * against a real engine — `ORDER BY v COLLATE BINARY` gives
+ * `["Z", "z", "\ue000", "\ufffd", "\u{1F600}"]`, and `<` gives
+ * `["Z", "z", "\u{1F600}", "\ue000", "\ufffd"]`.
+ *
+ * Equivalence stops at unpaired surrogates, and only there. `TextEncoder`
+ * replaces one with U+FFFD (`EF BF BD`), while a value round-tripped through
+ * `json_extract` comes back as CESU-8 (`ED A0 BD` for `\ud83d`) — so
+ * `title gt "\ue000"` keeps a lone-surrogate row here and drops it in SQL, and
+ * two different lone surrogates compare equal here and unequal there. Encoding
+ * CESU-8 instead would fix the ordering and break the far more common case,
+ * since a well-formed astral character must stay one four-byte sequence.
+ * `docs/projection-indexes.md` records it alongside the `GLOB` divergence on the
+ * same inputs; both need a lone surrogate to be stored in the first place.
+ */
+function compareTextBinary(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  const leftBytes = TEXT_COMPARISON_ENCODER.encode(left);
+  const rightBytes = TEXT_COMPARISON_ENCODER.encode(right);
+  const shared = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < shared; index += 1) {
+    const difference = leftBytes[index]! - rightBytes[index]!;
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return leftBytes.length - rightBytes.length;
+}
+
+/**
+ * The authority on what a `like` pattern means, for every store.
+ *
+ * Exported because the D1 adapter no longer evaluates text filters in the
+ * Worker — it compiles them to SQLite `GLOB` (issue #41) — and the only way to
+ * know that translation is faithful is to differential-test it against this
+ * function. Note what the rule is *not*: the `i` flag canonicalizes per UTF-16
+ * code unit and never applies a mapping that changes length or reaches ASCII
+ * from outside it, so `ß`, `ı` and everything outside the BMP do not fold.
+ */
+export function likePatternMatches(actual: JsonValue, pattern: string): boolean {
   return compiledLikePattern(pattern).test(String(actual));
 }
 
 /**
  * Compiled `like` patterns, keyed by the pattern text.
  *
- * Text refinement calls this once per candidate row with the same pattern, and
+ * An in-memory list scan calls this once per row with the same pattern, and
  * compiling it each time cost about 6x the match itself: 20k rows went from
- * 2.3 ms to 14.1 ms. The cache is bounded and cleared wholesale rather than
- * evicted one entry at a time — a filter workload reuses a handful of patterns,
- * so the simple thing is enough, and the bound is what stops a stream of
- * distinct patterns from growing it without limit.
+ * 2.3 ms to 14.1 ms. The D1 store no longer takes that path — it compiles the
+ * pattern to `GLOB` once — but the in-memory store, automation rules and
+ * notification rules still do.
+ *
+ * The cache is bounded and cleared wholesale rather than evicted one entry at a
+ * time — a filter workload reuses a handful of patterns, so the simple thing is
+ * enough, and the bound is what stops a stream of distinct patterns from
+ * growing it without limit.
  *
  * Safe to share: these regexps carry no `g` or `y` flag, so they hold no
  * per-call state.
@@ -662,13 +727,27 @@ function likePatternRegex(pattern: string): string {
  * a copy that `tests/desk-client-src/forms.test.ts` holds to this one.
  */
 export function containsFoldedText(value: string, needle: string): boolean {
-  return likePatternMatches(value, `%${escapeLikePattern(needle)}%`);
+  return likePatternMatches(value, containsLikePattern(needle));
+}
+
+/**
+ * The `like` pattern that `contains <needle>` is defined as.
+ *
+ * Exported so the D1 adapter can compile `contains` by translating this one
+ * pattern shape instead of growing its own needle-escaping rule — having more
+ * than one rule for the same question is what issue #53 was about, and a second
+ * rule on the SQL side would recreate the split.
+ *
+ * The escaping is not incidental: without it a user's `50%` would silently
+ * become a prefix match.
+ */
+export function containsLikePattern(needle: string): string {
+  return `%${escapeLikePattern(needle)}%`;
 }
 
 /**
  * Keeps `%`, `_` and the escape character literal when a plain string becomes a
- * `like` pattern. Without this, `contains "50%"` would silently become a prefix
- * match.
+ * `like` pattern.
  */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");

@@ -749,6 +749,14 @@ export class QueryService {
     const data: DocumentSnapshot[] = [];
     const scanPageSize = 200;
     let readableTotal = 0;
+    // Row-level permissions are decided here, not in SQL, and `total` is the
+    // count of *readable* documents — so the whole predicate match set has to be
+    // paged through. What must not be repeated is the match count itself: it is
+    // the same on every page, and it is a full-table `COUNT(*)` under the same
+    // predicate. Once a text filter compiles to `GLOB` that count is a scan, so
+    // asking for it once instead of once per page removes half the statements in
+    // a list render and all of the repeated scans.
+    let matchTotal: number | undefined;
     for (let scanOffset = 0; ;) {
       const result = await this.projections.list({
         tenantId: query.tenantId,
@@ -757,8 +765,12 @@ export class QueryService {
         orderBy: query.orderBy,
         order: query.order,
         limit: scanPageSize,
-        offset: scanOffset
+        offset: scanOffset,
+        ...(matchTotal === undefined ? {} : { skipTotal: true })
       });
+      if (matchTotal === undefined) {
+        matchTotal = result.total;
+      }
       const readable = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType, action);
       for (const document of readable) {
         if (readableTotal >= query.offset && data.length < query.limit) {
@@ -766,7 +778,7 @@ export class QueryService {
         }
         readableTotal += 1;
       }
-      const scan = planProjectionPageScan({ offset: scanOffset, pageSize: scanPageSize, total: result.total });
+      const scan = planProjectionPageScan({ offset: scanOffset, pageSize: scanPageSize, total: matchTotal });
       if (scan.status === "complete") {
         return {
           data,

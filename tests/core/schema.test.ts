@@ -532,6 +532,39 @@ describe("schema", () => {
     ]);
   });
 
+  it("rejects U+0000 in a string field", () => {
+    // SQLite reads text as a NUL-terminated C string in `json_extract` and in
+    // pattern matching, so a stored U+0000 truncates the value the projection
+    // store reads back: `"report\u0000final"` extracts as `"report"`, and a
+    // `contains "final"` filter then misses a row the in-memory rule matches.
+    // Refusing it here keeps the two adapters answering the same question
+    // instead of documenting a divergence nobody can see. See issue #41.
+    const Note = defineDocType({
+      name: "Note",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "body", type: "longText" },
+        { name: "owner", type: "link", linkTo: "User" }
+      ]
+    });
+
+    expect(validateDocumentData(Note, {
+      title: "report\u0000final",
+      body: "fine",
+      owner: "u1"
+    })).toMatchObject([{ field: "title", code: "nul" }]);
+    expect(validateDocumentData(Note, {
+      title: "fine",
+      body: "a\u0000b",
+      owner: "u\u00001"
+    })).toMatchObject([
+      { field: "body", code: "nul" },
+      { field: "owner", code: "nul" }
+    ]);
+    // And nothing else changed: a plain string still passes.
+    expect(validateDocumentData(Note, { title: "report final", body: "fine", owner: "u1" })).toEqual([]);
+  });
+
   it("treats an empty required table as missing", () => {
     const Invoice = defineDocType({
       name: "Sales Invoice",

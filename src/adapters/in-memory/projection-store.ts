@@ -37,7 +37,10 @@ export class InMemoryProjectionStore implements ProjectionStore {
       data: all.slice(offset, offset + limit).map(cloneDocumentSnapshot),
       limit,
       offset,
-      total: all.length
+      // This store has the count for free, but it reports 0 under `skipTotal`
+      // anyway: a caller that reads a total it asked not to be computed should
+      // break the same way on both adapters rather than only on D1.
+      total: query.skipTotal === true ? 0 : all.length
     };
   }
 

@@ -203,6 +203,15 @@ function validateField(
     case "link":
       if (typeof value !== "string") {
         fail("type", `Field '${field.name}' must be a string`);
+      } else if (value.includes("\u0000")) {
+        // SQLite treats text as a NUL-terminated C string in `json_extract` and
+        // in pattern matching, so a stored U+0000 truncates the value the
+        // projection store reads back: `"report\u0000final"` extracts as
+        // `"report"`, and a `contains "final"` filter then misses a row the
+        // in-memory rule matches. Refusing it at the write keeps the two
+        // adapters answering the same question rather than documenting a
+        // divergence nobody can see.
+        fail("nul", `Field '${field.name}' must not contain U+0000`);
       }
       break;
     case "integer":

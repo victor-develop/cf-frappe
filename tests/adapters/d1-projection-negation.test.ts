@@ -88,14 +88,14 @@ describe("D1 projection predicate parity on a real SQLite engine", () => {
     ],
     ["eq on a pushed-down field", afterField("priority", "Low"), ["JsonNull", "Literal", "Missing", "Umlaut"]],
     [
-      "contains folds case over the full Unicode range",
+      "contains folds case the way the in-memory rule does",
       afterField("title", "ä", "contains"),
       ["Umlaut"]
     ],
     ["like honours escaped wildcards", afterField("title", "value 100\\%%", "like"), ["Literal"]],
     ["not_like requires the field to be present", afterField("title", "%ä%", "not_like"), ["Literal", "Routine"]],
     [
-      "any-group mixing a pushed-down branch with a refined one",
+      "any-group mixing an equality branch with a text branch",
       predicateGroup("any", afterField("priority", "High"), afterField("title", "ä%", "like")),
       ["Routine", "Umlaut"]
     ]
