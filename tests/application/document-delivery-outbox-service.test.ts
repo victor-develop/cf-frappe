@@ -714,6 +714,53 @@ describe("DocumentDeliveryOutboxService", () => {
       ).resolves.toMatchObject({ status: "delivered" });
     });
 
+    it("counts attempts the same whether read through list or through record", async () => {
+      // The carried-over state is folded from the record's own history and then
+      // the tail is replayed onto it, so folding the whole history there applied
+      // every event above the checkpoint twice. `Claimed` is the one case in the
+      // fold that is not idempotent, so `attempts` came out inflated — and by a
+      // growing amount, since it counts the claims sitting above the newest
+      // checkpoint. Observed right after a claim, which is when the checkpoint
+      // is furthest behind and when a consumer actually reads the number.
+      const events = new InMemoryDocumentStore();
+      const outbox = new DocumentDeliveryOutboxService({
+        events,
+        clock: fixedClock(now),
+        ids: deterministicIds(Array.from({ length: 900 }, (_unused, index) => `evt_${index}`))
+      });
+      await outbox.enqueueFromDomainEvent({ event: { ...domainEvent(), id: "evt_poison" }, targets: ["email"] });
+
+      const observed: string[] = [];
+      for (let round = 1; round <= 4; round += 1) {
+        // A record that keeps succeeding is what moves the checkpoint forward,
+        // so the poison record stays carried over across all four rounds.
+        await outbox.enqueueFromDomainEvent({
+          event: { ...domainEvent(), id: `evt_ok_${round}` },
+          targets: ["email"]
+        });
+        const claimed = await outbox.claimPending({ tenantId: "acme", claimId: `claim-${round}`, limit: 10, now });
+        const listed = (await outbox.list("acme")).find((record) => record.id === "evt_poison:email");
+        const read = await outbox.record("acme", "evt_poison:email");
+        const returned = claimed.find((record) => record.id === "evt_poison:email");
+        observed.push(`${listed?.attempts}/${read?.attempts}/${returned?.attempts}`);
+        for (const record of claimed) {
+          if (record.id === "evt_poison:email") {
+            await outbox.markFailed({
+              tenantId: "acme",
+              outboxId: record.id,
+              claimId: `claim-${round}`,
+              error: "boom"
+            });
+          } else {
+            await outbox.markDelivered({ tenantId: "acme", outboxId: record.id, claimId: `claim-${round}` });
+          }
+        }
+      }
+
+      // list / record / the claim's own return value, all agreeing.
+      expect(observed).toEqual(["1/1/1", "2/2/2", "3/3/3", "4/4/4"]);
+    });
+
     it("does not surface a carried record that finished after the checkpoint was read", async () => {
       // A torn read: the tail comes back as it was before a competitor's
       // delivery, while the per-record rehydration sees that delivery. The

@@ -333,9 +333,11 @@ const cases: readonly FoldCase<unknown>[] = [
         retryAt: "2026-01-01T00:10:00.000Z"
       },
       { kind: "DocumentDeliveryOutboxClaimed", outboxId: "source-1:email", claimId: "claim-2" },
-      // A checkpoint carries no `outboxId`, so the per-record fold has to skip
-      // it before the guard that compares one. Folding it here proves the skip
-      // happens rather than the switch merely lacking a case.
+      // A checkpoint carries no `outboxId`, so the per-record fold skips it on
+      // the id comparison. Including it here keeps the resumable and all-at-once
+      // folds agreeing over a stream that contains one — it does NOT pin the
+      // skip itself, which is behaviourally inert (`undefined !== outboxId` is
+      // already false) and held in place by tsc rather than by a test.
       {
         kind: "DocumentDeliveryOutboxCheckpointed",
         upToSequence: 4,

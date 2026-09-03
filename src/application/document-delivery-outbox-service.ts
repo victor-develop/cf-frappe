@@ -10,6 +10,7 @@ import {
   foldDocumentDeliveryOutbox,
   foldDocumentDeliveryOutboxFrom,
   foldDocumentDeliveryOutboxRecord,
+  foldDocumentDeliveryOutboxRecordFrom,
   selectedDocumentDeliveryOutboxRecords,
   sortedDocumentDeliveryOutboxRecords,
   type DocumentDeliveryOutboxCheckpointPayload,
@@ -489,7 +490,7 @@ export class DocumentDeliveryOutboxService {
       {
         tenantId,
         version: checkpoint.upToSequence,
-        records: await this.carriedOverRecords(tenantId, checkpoint.carryOver)
+        records: await this.carriedOverRecords(tenantId, checkpoint)
       },
       tenantId,
       // Inclusive lower bound of `upToSequence + 1`, which is the checkpoint's
@@ -541,19 +542,63 @@ export class DocumentDeliveryOutboxService {
    * that had to wait for it would never advance past its enqueue sequence.
    * Carrying the id instead costs one indexed read (2.0 µs at 50k events).
    */
+  /**
+   * The carried-over records **as of the checkpoint**, ready for the tail fold
+   * to replay the rest onto.
+   *
+   * Two facts are needed per record and they come from one read:
+   *
+   * - **State at `upToSequence`.** Only the prefix the checkpoint covers is
+   *   folded, because `state()` replays everything after it. Folding the whole
+   *   history here applied those later events twice, and
+   *   `DocumentDeliveryOutboxClaimed` is the one case in the fold that is not
+   *   idempotent — so `attempts` came out inflated by the number of claims
+   *   sitting above the newest checkpoint, growing with checkpoint spacing.
+   *   `list()` and {@link record} then disagreed about the same record, and
+   *   `documentDeliveryOutboxRetryAt` reads that number to back off.
+   * - **Whether it has finished since.** The full history decides that. A
+   *   carried record can finish between this read and the tail read — a
+   *   concurrent writer, or this read racing its own tail — and the working set
+   *   holds in-flight records only, so a torn read must not surface a delivered
+   *   record from `list()` in the window before the tail fold drops it.
+   *
+   * Bounding the read alone is not enough for the second point, which is why
+   * both folds run over the same events rather than the prefix being read on
+   * its own.
+   */
   private async carriedOverRecords(
     tenantId: TenantId,
-    carryOver: readonly string[]
+    checkpoint: DocumentDeliveryOutboxCheckpointPayload
   ): Promise<ReadonlyMap<string, DocumentDeliveryOutboxRecord>> {
     const records = new Map<string, DocumentDeliveryOutboxRecord>();
-    for (const record of await Promise.all(carryOver.map(async (id) => this.record(tenantId, id)))) {
-      // A carried record can have finished since the checkpoint was written —
-      // a concurrent writer, or this read racing its own tail. The working set
-      // holds in-flight records only, and the tail fold would drop a delivered
-      // one anyway; dropping it here means a torn read cannot surface a
-      // delivered record from `list()` in the window before that fold runs.
-      if (record !== null && record.status !== "delivered") {
-        records.set(record.id, record);
+    const histories = await Promise.all(
+      checkpoint.carryOver.map(async (outboxId) => ({
+        outboxId,
+        events: await this.events.readDocumentEvents({
+          tenantId,
+          doctype: OUTBOX_DOCTYPE,
+          documentName: outboxId,
+          stream: documentDeliveryOutboxStream(tenantId)
+        })
+      }))
+    );
+    for (const { outboxId, events } of histories) {
+      const atCheckpoint = foldDocumentDeliveryOutboxRecord(
+        tenantId,
+        outboxId,
+        events.filter((event) => event.sequence <= checkpoint.upToSequence)
+      );
+      if (atCheckpoint === null) {
+        continue;
+      }
+      const current = foldDocumentDeliveryOutboxRecordFrom(
+        atCheckpoint,
+        tenantId,
+        outboxId,
+        events.filter((event) => event.sequence > checkpoint.upToSequence)
+      );
+      if (current !== null && current.status !== "delivered") {
+        records.set(atCheckpoint.id, atCheckpoint);
       }
     }
     return records;
