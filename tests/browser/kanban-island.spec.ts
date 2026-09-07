@@ -1,13 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedDemoFixtures } from "./demo";
 
 const BOARD_PATH = "/desk/kanbans/Return%20Case%20Board";
 
 test("Kanban island: keyboard card moves persist, with a working no-JS style fallback boundary", async ({ page }) => {
-  await page.goto("/demo");
-  await page.getByRole("button", { name: "Demo Administrator", exact: true }).click();
-  await expect(page.getByText("Current persona: Demo Administrator", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Seed deterministic demo data", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fixtures are ready", exact: true })).toBeVisible();
+  await seedDemoFixtures(page);
 
   const draftReturn = await seededReturnNameForOrder(page, "ORD-1006");
 

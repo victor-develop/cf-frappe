@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { seedDemoFixtures } from "./demo";
 
 /**
  * Mobile-viewport acceptance for the generic DocType slice: every page in
@@ -12,11 +13,7 @@ test.use({ viewport: { width: 390, height: 844 } });
 const LIST_PATH = "/desk/Return%20Request";
 
 test("mobile DocType journey: quick-filtered list -> form edit -> save persists, with usability essentials", async ({ page }) => {
-  await page.goto("/demo");
-  await page.getByRole("button", { name: "Demo Administrator", exact: true }).click();
-  await expect(page.getByText("Current persona: Demo Administrator", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Seed deterministic demo data", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fixtures are ready", exact: true })).toBeVisible();
+  await seedDemoFixtures(page);
 
   // ORD-1003's return has reason "Damaged"; ORD-1001's has "Changed Mind",
   // so the quick filter below must keep the first and drop the second.

@@ -1,11 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { seedDemoFixtures } from "./demo";
 
 test("ReturnsOS exposes permission-aware Related resources and Printing journeys", async ({ page }) => {
-  await page.goto("/demo");
-  await page.getByRole("button", { name: "Demo Administrator", exact: true }).click();
-  await expect(page.getByText("Current persona: Demo Administrator", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Seed deterministic demo data", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fixtures are ready", exact: true })).toBeVisible();
+  await seedDemoFixtures(page);
 
   const returnName = await seededReturnNameForOrder(page, "ORD-1001");
   const encodedReturnName = encodeURIComponent(returnName);
