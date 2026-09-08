@@ -38,15 +38,21 @@ export class DocumentFoldSnapshots {
    */
   async resume(stream: StreamName): Promise<DocumentSnapshot | null> {
     const base = await this.read(stream);
-    if (base === null) {
-      return foldDocument(await this.store.readStream(stream));
+    if (base !== null) {
+      try {
+        // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the
+        // last event it already folded, `+ 2` skips one.
+        return foldDocumentFrom(
+          base.state,
+          await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 })
+        );
+      } catch {
+        // A stored state this fold cannot consume must degrade to a cold fold.
+        // A snapshot that can fail the caller is not ignorable, which is the one
+        // thing the design forbids.
+      }
     }
-    // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the last
-    // event it already folded, `+ 2` skips one.
-    return foldDocumentFrom(
-      base.state,
-      await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 })
-    );
+    return foldDocument(await this.store.readStream(stream));
   }
 
   /**
@@ -80,7 +86,11 @@ export class DocumentFoldSnapshots {
         foldName: DOCUMENT_FOLD_NAME,
         foldVersion: DOCUMENT_FOLD_VERSION,
         uptoSequence,
-        state: commit.snapshot
+        // A fresh object, because a store is now allowed to keep what it is
+        // handed rather than copying it — deep-copying an unbounded fold's state
+        // cost more than the snapshot saved. A `DocumentSnapshot` is flat, so
+        // one level plus its `data` is the whole of it.
+        state: { ...commit.snapshot, data: { ...commit.snapshot.data } }
       });
     } catch {
       // Deliberately ignored — see the doc comment.

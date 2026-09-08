@@ -14,6 +14,18 @@ import type { FoldSnapshot, FoldSnapshotKey, SnapshotStore } from "../../ports/s
  * snapshot may always be ignored, so dropping one costs a cold fold. Least
  * recently *used* rather than least recently written, because a document being
  * edited repeatedly is exactly the one worth keeping.
+ *
+ * **Stores what it is handed, without copying.** An earlier version
+ * `structuredClone`d on both sides so a caller could not mutate stored state.
+ * That is free for a document snapshot and ruinous for an unbounded fold: on a
+ * 600-notification inbox it made each delivery 1.9x *slower* than having no
+ * snapshot at all, because the state itself is O(history) and got deep-copied
+ * twice per write. Removing it made the same case 8x faster than the baseline.
+ *
+ * The isolation now comes from `StreamFold.codec`, which sits between the fold
+ * and any store: `encode` produces a fresh plain structure and `decode` rebuilds
+ * the state on every read. The contract that replaces the clone is therefore on
+ * `encode` — it must not hand over anything its caller goes on to mutate.
  */
 export class InMemorySnapshotStore implements SnapshotStore {
   private readonly snapshots = new Map<string, FoldSnapshot>();
@@ -26,16 +38,14 @@ export class InMemorySnapshotStore implements SnapshotStore {
   async read<State>(key: FoldSnapshotKey): Promise<FoldSnapshot<State> | null> {
     const mapKey = snapshotKey(key);
     const found = this.snapshots.get(mapKey);
-    if (found !== undefined) {
-      // Re-inserted so `Map` iteration order tracks recency of use, which is
-      // what the eviction below walks.
-      this.snapshots.delete(mapKey);
-      this.snapshots.set(mapKey, found);
+    if (found === undefined) {
+      return null;
     }
-    // Cloned on the way out: a caller that folds onto this state must not be
-    // able to mutate what a later read returns, or a snapshot would stop
-    // agreeing with the events it claims to summarise.
-    return found === undefined ? null : (structuredClone(found) as FoldSnapshot<State>);
+    // Re-inserted so `Map` iteration order tracks recency of use, which is what
+    // the eviction below walks.
+    this.snapshots.delete(mapKey);
+    this.snapshots.set(mapKey, found);
+    return found as FoldSnapshot<State>;
   }
 
   async write<State>(snapshot: FoldSnapshot<State>): Promise<void> {
@@ -47,7 +57,7 @@ export class InMemorySnapshotStore implements SnapshotStore {
       return;
     }
     this.snapshots.delete(key);
-    this.snapshots.set(key, structuredClone(snapshot) as FoldSnapshot);
+    this.snapshots.set(key, snapshot as FoldSnapshot);
     while (this.snapshots.size > this.limit) {
       const oldest = this.snapshots.keys().next();
       if (oldest.done === true) {

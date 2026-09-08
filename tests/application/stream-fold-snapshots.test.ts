@@ -11,7 +11,11 @@ const COUNTING_FOLD: StreamFold<readonly string[]> = {
   name: "counting",
   version: 1,
   payloadKinds: ["DocumentCreated"],
-  foldFrom: (prior, events) => [...(prior ?? []), ...events.map((event) => event.payload.kind)]
+  foldFrom: (prior, events) => [...(prior ?? []), ...events.map((event) => event.payload.kind)],
+  codec: {
+    encode: (state) => [...state],
+    decode: (stored) => (Array.isArray(stored) ? (stored as readonly string[]) : null)
+  }
 };
 
 function event(index: number, kind: "DocumentCreated" | "DocumentUpdated"): NewDomainEvent {
@@ -50,8 +54,9 @@ describe("stream fold snapshots", () => {
     // The reason `payloadKinds` is bound to the fold rather than passed per
     // call. A snapshot taken over one subset of a stream and resumed over
     // another folds events its state has already seen, or misses ones it has
-    // not — and the notification stream cannot show this, because it holds only
-    // one kind. This one is deliberately mixed.
+    // not. The notification stream cannot show it: it holds three kinds, but the
+    // fold wants all three, so the filter is a no-op there. This one is mixed
+    // with a kind the fold rejects.
     const events = new InMemoryEventStore();
     const snapshots = new InMemorySnapshotStore();
     const folds = new StreamFoldSnapshots(events, snapshots);
@@ -67,6 +72,36 @@ describe("stream fold snapshots", () => {
     // Two from the snapshot plus one filtered event from the tail — never an
     // Updated, and never a Created counted twice.
     expect(resumed).toEqual(["DocumentCreated", "DocumentCreated", "DocumentCreated"]);
+  });
+
+  it("degrades to a cold fold when foldFrom rejects the stored state", async () => {
+    // The second line of defence, and it needs its own test: the durable-store
+    // corruption case is stopped earlier, by `decode` refusing the shape, so
+    // nothing was exercising this. The case it covers is state `decode` cannot
+    // tell is wrong — an older version of the fold whose shape still validates.
+    //
+    // What must not happen is the throw escaping `resume`. A snapshot that
+    // cannot be used has to be ignorable, which is the one thing the whole
+    // design forbids breaking.
+    const events = new InMemoryEventStore();
+    const snapshots = new InMemorySnapshotStore();
+    const hostile: StreamFold<readonly string[]> = {
+      ...COUNTING_FOLD,
+      foldFrom: (prior, folded) => {
+        if (prior !== null) {
+          throw new Error("this fold cannot consume that state");
+        }
+        return COUNTING_FOLD.foldFrom(prior, folded);
+      }
+    };
+    const folds = new StreamFoldSnapshots(events, snapshots);
+    const saved = await seed(events, 4);
+    await folds.record(STREAM, hostile, ["stale"], saved.at(-1)!.sequence);
+
+    await expect(folds.resume(STREAM, hostile)).resolves.toEqual([
+      "DocumentCreated",
+      "DocumentCreated"
+    ]);
   });
 
   it("gives the same answer with no snapshot store at all", async () => {

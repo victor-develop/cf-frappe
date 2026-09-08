@@ -30,7 +30,7 @@ import {
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { SnapshotStore } from "../ports/snapshot-store.js";
-import { StreamFoldSnapshots, type StreamFold } from "./stream-fold-snapshots.js";
+import { StreamFoldSnapshots, type FoldStateCodec, type StreamFold } from "./stream-fold-snapshots.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import {
   normalizeUserNotificationId,
@@ -75,8 +75,54 @@ const USER_NOTIFICATIONS_FOLD = (tenantId: TenantId, userId: string): StreamFold
   name: "userNotifications",
   version: 1,
   payloadKinds: USER_NOTIFICATION_PAYLOAD_KINDS,
-  foldFrom: (prior, events) => foldUserNotificationsFrom(prior, tenantId, userId, events)
+  foldFrom: (prior, events) => foldUserNotificationsFrom(prior, tenantId, userId, events),
+  codec: USER_NOTIFICATIONS_CODEC
 });
+
+/**
+ * The `Map` in this state has to be spelled out for a store.
+ *
+ * `JSON.stringify` turns a `Map` into `{}`, and the fold then calls
+ * `new Map(prior.notifications)` on a plain object and throws — which, against a
+ * durable store, is a permanent failure for that user rather than a cold fold.
+ * Recording the entries as an array keeps the round trip lossless.
+ *
+ * `decode` returns null for anything it does not recognise instead of trusting
+ * the row, so a state written by an older shape of this fold is a cache miss.
+ */
+const USER_NOTIFICATIONS_CODEC: FoldStateCodec<UserNotificationState> = {
+  encode: (state) => ({
+    tenantId: state.tenantId,
+    userId: state.userId,
+    version: state.version,
+    notifications: [...state.notifications.entries()]
+  }),
+  decode: (stored) => {
+    if (typeof stored !== "object" || stored === null) {
+      return null;
+    }
+    const candidate = stored as {
+      readonly tenantId?: unknown;
+      readonly userId?: unknown;
+      readonly version?: unknown;
+      readonly notifications?: unknown;
+    };
+    if (
+      typeof candidate.tenantId !== "string" ||
+      typeof candidate.userId !== "string" ||
+      typeof candidate.version !== "number" ||
+      !Array.isArray(candidate.notifications)
+    ) {
+      return null;
+    }
+    return {
+      tenantId: candidate.tenantId,
+      userId: candidate.userId,
+      version: candidate.version,
+      notifications: new Map(candidate.notifications as [string, UserNotificationRecord][])
+    };
+  }
+};
 
 export interface NotificationRuleProvider {
   notificationRulesFor(
