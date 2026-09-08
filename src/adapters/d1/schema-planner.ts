@@ -2,6 +2,7 @@ import type { DocTypeDefinition, RetiredIndexDefinition } from "../../core/types
 import { FrameworkError } from "../../core/errors.js";
 import {
   D1_AUTOMATION_RUNS_TABLE,
+  D1_FOLD_SNAPSHOTS_TABLE,
   D1_DATA_PATCHES_TABLE,
   D1_DOCUMENTS_TABLE,
   D1_EVENTS_TABLE,
@@ -62,6 +63,7 @@ export const D1_DATA_PATCH_MIGRATION_ID = "0004_cf_frappe_data_patches";
 export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_rollbacks";
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 export const D1_EVENT_DOCUMENT_NAME_MIGRATION_ID = "0007_cf_frappe_events_document_name";
+export const D1_FOLD_SNAPSHOT_MIGRATION_ID = "0008_cf_frappe_fold_snapshots";
 
 /**
  * Trailing projection-index column that lets the default list ordering
@@ -310,6 +312,34 @@ export const D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS: readonly PlannedSqlStatem
  * to a temporary B-tree sort.
  */
 
+/**
+ * Folded state, so a write does not replay a stream's whole history.
+ *
+ * Keyed `(stream, fold_name, fold_version)` rather than by stream: one stream is
+ * folded several different ways, and the version is what keeps state from an
+ * older shape of a fold from being folded onto rather than ignored. See
+ * `src/ports/snapshot-store.ts`.
+ *
+ * No index beyond the primary key. Every access is a point read or an upsert on
+ * the full key — nothing lists or scans this table, and issue #17's rule that a
+ * snapshot may always be ignored means nothing needs to.
+ */
+export const D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_fold_snapshots",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_FOLD_SNAPSHOTS_TABLE} (` +
+      "stream TEXT NOT NULL, " +
+      "fold_name TEXT NOT NULL, " +
+      "fold_version INTEGER NOT NULL, " +
+      "upto_sequence INTEGER NOT NULL, " +
+      "state_json TEXT NOT NULL, " +
+      "updated_at TEXT NOT NULL, " +
+      "PRIMARY KEY (stream, fold_name, fold_version)" +
+      ");"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -395,6 +425,11 @@ export function planD1Migrations(
           id: D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
           label: "cf-frappe event document name index",
           statements: D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_FOLD_SNAPSHOT_MIGRATION_ID,
+          label: "cf-frappe fold snapshots",
+          statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
         })
       ]
     : [];

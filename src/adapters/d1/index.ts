@@ -12,5 +12,6 @@ export { D1_PROJECTION_TEXT_PATTERN_MAX_BYTES } from "./projection-query.js";
 export * from "./projection-store.js";
 export * from "./schema-planner.js";
 export * from "./serde.js";
+export * from "./snapshot-store.js";
 export * from "./statistics.js";
 export * from "./tables.js";
