@@ -218,16 +218,25 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
-        // Held on this instance, which is correct precisely here: the namespace
-        // id is `${tenantId}:${doctype}:${name}` — the document's own stream —
-        // so one instance is the single writer for one document, and a snapshot
-        // in its memory cannot fall behind a competing writer.
+        // In-memory is enough here because losing a snapshot costs a cold fold
+        // and nothing else — issue #17's rule is that a snapshot may always be
+        // ignored. That is why this is one line rather than a table, a migration
+        // and a D1 adapter; those become worth adding only if snapshots need to
+        // outlive an instance.
         //
-        // Eviction costs one cold fold, which is exactly the state issue #17's
-        // safety rule permits: a snapshot may always be ignored. That is what
-        // makes this three lines instead of a table and a migration, and a D1
-        // adapter only worth adding if snapshots turn out to need to outlive an
-        // instance.
+        // Most commands address this Durable Object per document
+        // (`${tenantId}:${doctype}:${name}`, the document's own stream), so that
+        // instance is the single writer and its snapshot is normally current.
+        // But `create`, `duplicate` and `amend` all route to one shared
+        // `${tenantId}:${doctype}:_create` instance — see
+        // `durable-object-command-executor.ts`. Two consequences, and only one
+        // of them was free:
+        //
+        // - Staleness there is the safe direction: that instance's snapshot for
+        //   a document since edited elsewhere is *behind*, and a behind snapshot
+        //   just means a longer tail replay.
+        // - Growth was not free. It accumulates one entry per document it has
+        //   ever created, so the store is bounded and evicts least-recently-used.
         snapshots: new InMemorySnapshotStore(),
         doctypeResolver: effectiveDocType,
         documentShares: new DocumentShareService({ events }),

@@ -1729,9 +1729,8 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot> {
-    const resumed = await this.resumeDocumentFold(stream);
     return requireLiveDocumentSnapshot({
-      snapshot: resumed.snapshot,
+      snapshot: await this.resumeDocumentFold(stream),
       doctypeName: doctype.name,
       documentName: name
     });
@@ -1745,19 +1744,14 @@ export class DocumentService implements DocumentCommandExecutor {
    * whose whole contract is that ignoring it changes nothing, so a broken
    * snapshot store must degrade to today's behaviour rather than fail a write.
    */
-  private async resumeDocumentFold(
-    stream: string
-  ): Promise<{ readonly snapshot: DocumentSnapshot | null; readonly uptoSequence: number }> {
+  private async resumeDocumentFold(stream: string): Promise<DocumentSnapshot | null> {
     const base = this.snapshots === undefined ? null : await this.readDocumentSnapshot(stream);
     if (base === null) {
-      const events = await this.store.readStream(stream);
-      return { snapshot: foldDocument(events), uptoSequence: events.at(-1)?.sequence ?? 0 };
+      return foldDocument(await this.store.readStream(stream));
     }
-    const tail = await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 });
-    return {
-      snapshot: foldDocumentFrom(base.state, tail),
-      uptoSequence: tail.at(-1)?.sequence ?? base.uptoSequence
-    };
+    // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the last
+    // event it already folded, `+ 2` skips one.
+    return foldDocumentFrom(base.state, await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 }));
   }
 
   private async readDocumentSnapshot(stream: string): Promise<FoldSnapshot<DocumentSnapshot | null> | null> {
@@ -1782,7 +1776,19 @@ export class DocumentService implements DocumentCommandExecutor {
     if (this.snapshots === undefined) {
       return;
     }
-    const uptoSequence = commit.events.at(-1)?.sequence;
+    // Filtered by stream, because sequences are per-stream and a batch spans
+    // several. `documentAtomicCommitEntries` puts the document last, but the
+    // automation-run entries are appended after it, and each of those is a fresh
+    // stream at version 0 — so `commit.events.at(-1).sequence` was 1 or 2
+    // whenever a rule fired. Filed under the document's key that made the
+    // snapshot permanently stuck at 1 (the newest-wins guard then discarded
+    // every later write), and when the run stream ended *above* the document's
+    // own sequence the reader skipped a real event and the document became
+    // unwritable.
+    // `at(-1)` rather than `at(0)` is defensive: every commit path writes
+    // exactly one event to the document's own stream today, so the two agree,
+    // and a path that ever wrote two would want the last.
+    const uptoSequence = commit.events.filter((event) => event.stream === stream).at(-1)?.sequence;
     if (uptoSequence === undefined) {
       return;
     }
@@ -2268,7 +2274,7 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot | null> {
-    return (await this.resumeDocumentFold(documentStream(tenantId, doctype.name, name))).snapshot;
+    return this.resumeDocumentFold(documentStream(tenantId, doctype.name, name));
   }
 
   private async planUniqueValueReservationWrites(

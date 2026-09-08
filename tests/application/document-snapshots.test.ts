@@ -35,7 +35,7 @@ class CountingStore extends InMemoryDocumentStore {
 
   override async readStream(stream: StreamName, options?: ReadStreamOptions): Promise<readonly DomainEvent[]> {
     const events = await super.readStream(stream, options);
-    if (stream.includes(":Note:")) {
+    if (stream.includes(":Note:") || stream.includes(":Mirrored:")) {
       this.reads += 1;
       this.replayed += events.length;
     }
@@ -63,7 +63,105 @@ async function editRepeatedly(documents: DocumentService, edits: number) {
   return { name: created.name, seen };
 }
 
+/**
+ * A doctype whose update fires an automation rule, so every commit batch spans
+ * more than one stream.
+ *
+ * This fixture exists because its absence hid a real defect: with a single-entry
+ * batch, taking the last event of the batch and taking the document's last event
+ * are the same thing, so the snapshot's sequence looked right. With a rule
+ * firing, the batch ends on a fresh automation-run stream at sequence 1.
+ */
+const Mirrored = defineDocType({
+  name: "Mirrored",
+  fields: [
+    { name: "title", type: "text" },
+    { name: "target", type: "text" }
+  ],
+  automationRules: [
+    {
+      id: "mirror",
+      name: "Mirror",
+      trigger: { events: ["DocumentUpdated"] },
+      actions: [
+        {
+          id: "mirror-title",
+          kind: "updateDocument",
+          target: { doctype: "Note", name: { kind: "field", field: "target" } },
+          patch: { title: { kind: "field", field: "title" } }
+        }
+      ]
+    }
+  ]
+});
+
+function mirroredService(store: InMemoryDocumentStore, snapshots?: SnapshotStore) {
+  return new DocumentService({
+    registry: createRegistry({ doctypes: [Mirrored, Note] }),
+    store,
+    clock: fixedClock(NOW),
+    ids: deterministicIds(Array.from({ length: 4000 }, (_unused, index) => `evt_${index}`)),
+    ...(snapshots === undefined ? {} : { snapshots })
+  });
+}
+
 describe("document fold snapshots", () => {
+  it("records the document's own sequence when a commit spans several streams", async () => {
+    // Sequences are per-stream. A batch that fires an automation rule ends on a
+    // fresh run stream at sequence 1, so taking the batch's last event filed
+    // every snapshot at 1: the newest-wins guard then dropped each later write
+    // and the document replayed its whole history for ever. Asserted as the
+    // recorded sequence against the stream's real head, because the folded
+    // answers stayed correct throughout — `foldDocument` is idempotent under
+    // re-replay, so nothing else showed it.
+    const store = new InMemoryDocumentStore();
+    const filed: { readonly upto: number; readonly head: number }[] = [];
+    const watching: SnapshotStore = {
+      async read() {
+        return null;
+      },
+      async write(snapshot) {
+        filed.push({
+          upto: snapshot.uptoSequence,
+          head: (await store.readStream(snapshot.stream)).at(-1)?.sequence ?? 0
+        });
+      }
+    };
+    const documents = mirroredService(store, watching);
+    const created = await documents.create({
+      actor: ACTOR,
+      doctype: "Mirrored",
+      data: { title: "t0", target: "T1" }
+    });
+    for (let edit = 1; edit <= 4; edit += 1) {
+      await documents.update({ actor: ACTOR, doctype: "Mirrored", name: created.name, patch: { title: `t${edit}` } });
+    }
+
+    expect(filed.map((entry) => entry.upto)).toEqual(filed.map((entry) => entry.head));
+    // And it really did advance, so the assertion is not comparing two constants.
+    expect(filed.at(-1)?.upto).toBeGreaterThan(1);
+  });
+
+  it("still replays nothing per edit when a commit spans several streams", async () => {
+    const plain = new CountingStore();
+    const cached = new CountingStore();
+    const editFour = async (documents: DocumentService) => {
+      const created = await documents.create({
+        actor: ACTOR,
+        doctype: "Mirrored",
+        data: { title: "t0", target: "T1" }
+      });
+      for (let edit = 1; edit <= 8; edit += 1) {
+        await documents.update({ actor: ACTOR, doctype: "Mirrored", name: created.name, patch: { title: `t${edit}` } });
+      }
+    };
+    await editFour(mirroredService(plain));
+    await editFour(mirroredService(cached, new InMemorySnapshotStore()));
+
+    expect(plain.replayed).toBeGreaterThan(60);
+    expect(cached.replayed).toBe(0);
+  });
+
   it("gives byte-identical results whether or not a snapshot store is present", async () => {
     // The safety rule from issue #17, as a test: a snapshot may always be
     // ignored, and ignoring it must give exactly the same answer. Everything
@@ -196,6 +294,25 @@ describe("document fold snapshots", () => {
     await snapshots.write({ ...key, uptoSequence: 4, state: { title: "old" } });
 
     await expect(snapshots.read(key)).resolves.toMatchObject({ uptoSequence: 9, state: { title: "new" } });
+  });
+
+  it("evicts the least recently used snapshot instead of growing without limit", async () => {
+    // One of its callers is not per-document: `create`, `duplicate` and `amend`
+    // all route to a single shared Durable Object instance, which would
+    // otherwise keep a snapshot for every document it had ever created.
+    const snapshots = new InMemorySnapshotStore({ limit: 3 });
+    const key = (name: string) => ({ stream: `acme:Note:${name}` as StreamName, foldName: "document", foldVersion: 1 });
+    for (const name of ["a", "b", "c"]) {
+      await snapshots.write({ ...key(name), uptoSequence: 1, state: { name } });
+    }
+    // Reading "a" makes it the most recent, so "b" is the one that goes.
+    await snapshots.read(key("a"));
+    await snapshots.write({ ...key("d"), uptoSequence: 1, state: { name: "d" } });
+
+    await expect(snapshots.read(key("b"))).resolves.toBeNull();
+    await expect(snapshots.read(key("a"))).resolves.toMatchObject({ state: { name: "a" } });
+    await expect(snapshots.read(key("c"))).resolves.toMatchObject({ state: { name: "c" } });
+    await expect(snapshots.read(key("d"))).resolves.toMatchObject({ state: { name: "d" } });
   });
 
   it("does not hand out state a caller can mutate", async () => {
