@@ -7,6 +7,7 @@ import {
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService } from "../application/document-service.js";
+import { InMemorySnapshotStore } from "../adapters/in-memory/snapshot-store.js";
 import { bulkDocumentFailure, bulkFailureDocumentName } from "../application/document-bulk-policy.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
@@ -217,6 +218,17 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
+        // Held on this instance, which is correct precisely here: the namespace
+        // id is `${tenantId}:${doctype}:${name}` — the document's own stream —
+        // so one instance is the single writer for one document, and a snapshot
+        // in its memory cannot fall behind a competing writer.
+        //
+        // Eviction costs one cold fold, which is exactly the state issue #17's
+        // safety rule permits: a snapshot may always be ignored. That is what
+        // makes this three lines instead of a table and a migration, and a D1
+        // adapter only worth adding if snapshots turn out to need to outlive an
+        // instance.
+        snapshots: new InMemorySnapshotStore(),
         doctypeResolver: effectiveDocType,
         documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({
