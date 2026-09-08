@@ -1,5 +1,6 @@
 import { insertEventStatement, sequenceEvents } from "../../src/adapters/d1/event-writer";
 import type { NewDomainEvent } from "../../src";
+import { createRecordingD1 } from "../d1-engine.js";
 
 describe("D1 event writer", () => {
   const event: NewDomainEvent = {
@@ -23,14 +24,13 @@ describe("D1 event writer", () => {
   });
 
   it("builds one event insert statement with serialized payload and metadata", () => {
-    const db = new FakeD1Database();
+    const d1 = createRecordingD1();
     const [saved] = sequenceEvents(0, [event]);
 
-    const statement = insertEventStatement(db as unknown as D1Database, saved!);
+    insertEventStatement(d1.database, saved!);
 
-    expect(statement).toBe(db.statement);
-    expect(db.statement.sql).toContain("INSERT INTO cf_frappe_events");
-    expect(db.statement.params).toEqual([
+    expect(d1.only().sql).toContain("INSERT INTO cf_frappe_events");
+    expect(d1.only().params).toEqual([
       "evt1",
       "acme",
       "acme:Note:One",
@@ -45,22 +45,3 @@ describe("D1 event writer", () => {
     ]);
   });
 });
-
-class FakeD1Database {
-  readonly statement = new FakeD1PreparedStatement();
-
-  prepare(sql: string): FakeD1PreparedStatement {
-    this.statement.sql = sql;
-    return this.statement;
-  }
-}
-
-class FakeD1PreparedStatement {
-  sql = "";
-  params: unknown[] = [];
-
-  bind(...params: unknown[]): this {
-    this.params = params;
-    return this;
-  }
-}
