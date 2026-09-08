@@ -162,7 +162,8 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { DocumentCommit, DocumentStore } from "../ports/document-store.js";
-import type { FoldSnapshot, SnapshotStore } from "../ports/snapshot-store.js";
+import type { SnapshotStore } from "../ports/snapshot-store.js";
+import { DocumentFoldSnapshots } from "./document-fold-snapshots.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
@@ -198,15 +199,6 @@ export {
   normalizeBulkDeleteDocumentSelections,
   normalizeBulkDocumentSelections
 } from "./document-bulk-policy.js";
-
-/**
- * Snapshot key for `foldDocument`. Bump the version when what the fold computes
- * changes, so stored state from the old shape is simply not read rather than
- * being folded onto. `tests/application/document-snapshots.test.ts` pins the
- * folded state for a fixed fixture, so a change without a bump fails there.
- */
-const DOCUMENT_FOLD_NAME = "document";
-const DOCUMENT_FOLD_VERSION = 1;
 
 export interface DocumentServiceOptions {
   readonly registry: ModelRegistry;
@@ -580,7 +572,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly automationRuns: AutomationRunPlanner;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
   private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
-  private readonly snapshots: SnapshotStore | undefined;
+  private readonly foldSnapshots: DocumentFoldSnapshots;
 
   constructor(options: DocumentServiceOptions) {
     this.registry = options.registry;
@@ -592,7 +584,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.documentShares = options.documentShares;
     this.automationRuns = options.automationRuns ?? new AutomationRunPlanner({ ids: this.ids });
     this.onHookError = options.onHookError;
-    this.snapshots = options.snapshots;
+    this.foldSnapshots = new DocumentFoldSnapshots(this.store, options.snapshots);
     this.afterCommit = options.afterCommit;
   }
 
@@ -1730,80 +1722,12 @@ export class DocumentService implements DocumentCommandExecutor {
     name: string
   ): Promise<DocumentSnapshot> {
     return requireLiveDocumentSnapshot({
-      snapshot: await this.resumeDocumentFold(stream),
+      snapshot: await this.foldSnapshots.resume(stream),
       doctypeName: doctype.name,
       documentName: name
     });
   }
 
-  /**
-   * Folds a document forward from its snapshot, or from nothing if there is no
-   * usable snapshot.
-   *
-   * A snapshot read that throws is swallowed on purpose: the snapshot is a cache
-   * whose whole contract is that ignoring it changes nothing, so a broken
-   * snapshot store must degrade to today's behaviour rather than fail a write.
-   */
-  private async resumeDocumentFold(stream: string): Promise<DocumentSnapshot | null> {
-    const base = this.snapshots === undefined ? null : await this.readDocumentSnapshot(stream);
-    if (base === null) {
-      return foldDocument(await this.store.readStream(stream));
-    }
-    // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the last
-    // event it already folded, `+ 2` skips one.
-    return foldDocumentFrom(base.state, await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 }));
-  }
-
-  private async readDocumentSnapshot(stream: string): Promise<FoldSnapshot<DocumentSnapshot | null> | null> {
-    try {
-      return await this.snapshots!.read<DocumentSnapshot | null>({
-        stream,
-        foldName: DOCUMENT_FOLD_NAME,
-        foldVersion: DOCUMENT_FOLD_VERSION
-      });
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Records the state a commit just produced, ignoring any failure.
-   *
-   * The commit has already happened and the events are the truth; a snapshot
-   * that fails to save just means the next read replays a little more.
-   */
-  private async recordDocumentSnapshot(stream: string, commit: DocumentCommit): Promise<void> {
-    if (this.snapshots === undefined) {
-      return;
-    }
-    // Filtered by stream, because sequences are per-stream and a batch spans
-    // several. `documentAtomicCommitEntries` puts the document last, but the
-    // automation-run entries are appended after it, and each of those is a fresh
-    // stream at version 0 — so `commit.events.at(-1).sequence` was 1 or 2
-    // whenever a rule fired. Filed under the document's key that made the
-    // snapshot permanently stuck at 1 (the newest-wins guard then discarded
-    // every later write), and when the run stream ended *above* the document's
-    // own sequence the reader skipped a real event and the document became
-    // unwritable.
-    // `at(-1)` rather than `at(0)` is defensive: every commit path writes
-    // exactly one event to the document's own stream today, so the two agree,
-    // and a path that ever wrote two would want the last.
-    const uptoSequence = commit.events.filter((event) => event.stream === stream).at(-1)?.sequence;
-    if (uptoSequence === undefined) {
-      return;
-    }
-    try {
-      await this.snapshots.write<DocumentSnapshot | null>({
-        stream,
-        foldName: DOCUMENT_FOLD_NAME,
-        foldVersion: DOCUMENT_FOLD_VERSION,
-        uptoSequence,
-        state: commit.snapshot
-      });
-    } catch {
-      // Deliberately ignored — see the doc comment.
-    }
-  }
 
   private async requireExistingEventStream(
     stream: string,
@@ -2012,7 +1936,7 @@ export class DocumentService implements DocumentCommandExecutor {
     // `commit.events` gives the sequence it covers. Recorded before the
     // after-commit hooks run, since a hook may return a different snapshot to
     // *show* the caller while the folded state is what the stream says.
-    await this.recordDocumentSnapshot(saved.stream, commit);
+    await this.foldSnapshots.record(saved.stream, commit);
     const snapshot = await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     return this.redactDocumentForActor(actor, doctype, snapshot, relatedDocType);
   }
@@ -2274,7 +2198,7 @@ export class DocumentService implements DocumentCommandExecutor {
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot | null> {
-    return this.resumeDocumentFold(documentStream(tenantId, doctype.name, name));
+    return this.foldSnapshots.resume(documentStream(tenantId, doctype.name, name));
   }
 
   private async planUniqueValueReservationWrites(
