@@ -9,3 +9,4 @@ export * from "./job-queue.js";
 export * from "./list-filters.js";
 export * from "./projection-store.js";
 export * from "./realtime.js";
+export * from "./snapshot-store.js";

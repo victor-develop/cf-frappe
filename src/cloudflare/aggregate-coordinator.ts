@@ -7,6 +7,7 @@ import {
 import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService } from "../application/document-service.js";
+import { InMemorySnapshotStore } from "../adapters/in-memory/snapshot-store.js";
 import { bulkDocumentFailure, bulkFailureDocumentName } from "../application/document-bulk-policy.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
@@ -217,6 +218,26 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       this.service = new DocumentService({
         registry: options.registry,
         store: new D1DocumentStore(env.DB),
+        // In-memory is enough here because losing a snapshot costs a cold fold
+        // and nothing else — issue #17's rule is that a snapshot may always be
+        // ignored. That is why this is one line rather than a table, a migration
+        // and a D1 adapter; those become worth adding only if snapshots need to
+        // outlive an instance.
+        //
+        // Most commands address this Durable Object per document
+        // (`${tenantId}:${doctype}:${name}`, the document's own stream), so that
+        // instance is the single writer and its snapshot is normally current.
+        // But `create`, `duplicate` and `amend` all route to one shared
+        // `${tenantId}:${doctype}:_create` instance — see
+        // `durable-object-command-executor.ts`. Two consequences, and only one
+        // of them was free:
+        //
+        // - Staleness there is the safe direction: that instance's snapshot for
+        //   a document since edited elsewhere is *behind*, and a behind snapshot
+        //   just means a longer tail replay.
+        // - Growth was not free. It accumulates one entry per document it has
+        //   ever created, so the store is bounded and evicts least-recently-used.
+        snapshots: new InMemorySnapshotStore(),
         doctypeResolver: effectiveDocType,
         documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({

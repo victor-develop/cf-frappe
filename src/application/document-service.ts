@@ -1,6 +1,7 @@
 import {
   applyDocumentDataChange,
   foldDocument,
+  foldDocumentFrom,
   foldDocumentAssignments,
   foldDocumentFollowers,
   foldDocumentTags
@@ -161,6 +162,8 @@ import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import { systemClock } from "../ports/clock.js";
 import type { DocumentCommit, DocumentStore } from "../ports/document-store.js";
+import type { SnapshotStore } from "../ports/snapshot-store.js";
+import { DocumentFoldSnapshots } from "./document-fold-snapshots.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import { cryptoIdGenerator } from "../ports/id-generator.js";
 import {
@@ -208,6 +211,15 @@ export interface DocumentServiceOptions {
   readonly automationRuns?: AutomationRunPlanner;
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
   readonly afterCommit?: (context: AfterCommitContext) => void | Promise<void>;
+  /**
+   * Folded state cached so a write does not replay a document's whole history.
+   *
+   * Optional, and omitting it leaves every code path byte-identical to not
+   * having the feature — which is the safety rule from issue #17 held by
+   * construction rather than by care: a snapshot may always be ignored, and
+   * ignoring it must give the same answer as using it.
+   */
+  readonly snapshots?: SnapshotStore;
 }
 
 export type DocumentServiceDocTypeResolver = TenantDocTypeResolver;
@@ -560,6 +572,7 @@ export class DocumentService implements DocumentCommandExecutor {
   private readonly automationRuns: AutomationRunPlanner;
   private readonly onHookError: ((error: unknown, event: DomainEvent) => void | Promise<void>) | undefined;
   private readonly afterCommit: ((context: AfterCommitContext) => void | Promise<void>) | undefined;
+  private readonly foldSnapshots: DocumentFoldSnapshots;
 
   constructor(options: DocumentServiceOptions) {
     this.registry = options.registry;
@@ -571,6 +584,7 @@ export class DocumentService implements DocumentCommandExecutor {
     this.documentShares = options.documentShares;
     this.automationRuns = options.automationRuns ?? new AutomationRunPlanner({ ids: this.ids });
     this.onHookError = options.onHookError;
+    this.foldSnapshots = new DocumentFoldSnapshots(this.store, options.snapshots);
     this.afterCommit = options.afterCommit;
   }
 
@@ -1692,13 +1706,28 @@ export class DocumentService implements DocumentCommandExecutor {
     });
   }
 
+  /**
+   * The document as of now, folded from a snapshot plus the tail when one is
+   * available and from the whole stream when it is not.
+   *
+   * Kept separate from {@link requireExistingEventStream}, which also hands its
+   * caller the events for the assignment, tag and follower folds and therefore
+   * cannot skip the read. This path needs `foldDocument` alone, which is why it
+   * is the one that benefits: it is what every plain update goes through, and a
+   * document edited 200 times replayed 401 events on its 201st edit.
+   */
   private async requireExistingFromEvents(
     stream: string,
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot> {
-    return (await this.requireExistingEventStream(stream, doctype, name)).snapshot;
+    return requireLiveDocumentSnapshot({
+      snapshot: await this.foldSnapshots.resume(stream),
+      doctypeName: doctype.name,
+      documentName: name
+    });
   }
+
 
   private async requireExistingEventStream(
     stream: string,
@@ -1898,6 +1927,16 @@ export class DocumentService implements DocumentCommandExecutor {
     saved: DomainEvent,
     relatedDocType: RelatedDocTypeResolver
   ): Promise<DocumentSnapshot> {
+    // Every commit path funnels through here, which is why the snapshot write
+    // lives here and not at each of the eight `commit`/`commitBatch` calls —
+    // one of those would eventually be added without it.
+    //
+    // `commit.snapshot` is `foldDocument` over the stream including the events
+    // just written, so it is exactly the state a later reader would fold, and
+    // `commit.events` gives the sequence it covers. Recorded before the
+    // after-commit hooks run, since a hook may return a different snapshot to
+    // *show* the caller while the folded state is what the stream says.
+    await this.foldSnapshots.record(saved.stream, commit);
     const snapshot = await this.runAfterCommit(doctype, saved, commit.snapshot) ?? commit.snapshot;
     return this.redactDocumentForActor(actor, doctype, snapshot, relatedDocType);
   }
@@ -2145,12 +2184,21 @@ export class DocumentService implements DocumentCommandExecutor {
     return resolveTenantDocType(base, { actor, tenantId }, this.doctypeResolver);
   }
 
+  /**
+   * The document as the stream now says it is, or null if it never existed.
+   *
+   * Resumes from the snapshot like the write path does. This one is the second
+   * full replay every commit used to pay: `runAfterCommit` ends here to produce
+   * the post-hook state, so a plain update read the whole history twice. The
+   * snapshot for this stream is recorded before the hooks run, which is what
+   * makes this read incremental rather than merely cached.
+   */
   private async readDocumentFromEvents(
     tenantId: string,
     doctype: DocTypeDefinition,
     name: string
   ): Promise<DocumentSnapshot | null> {
-    return foldDocument(await this.store.readStream(documentStream(tenantId, doctype.name, name)));
+    return this.foldSnapshots.resume(documentStream(tenantId, doctype.name, name));
   }
 
   private async planUniqueValueReservationWrites(

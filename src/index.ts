@@ -187,6 +187,7 @@ export * from "./ports/automation-run-claim-store.js";
 export * from "./ports/clock.js";
 export * from "./ports/data-patch-log.js";
 export * from "./ports/document-store.js";
+export * from "./ports/snapshot-store.js";
 export * from "./ports/email.js";
 export * from "./ports/event-store.js";
 export * from "./ports/file-scanner.js";
