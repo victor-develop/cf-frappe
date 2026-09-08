@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   D1_AUTOMATION_RUNS_TABLE,
   D1_DATA_PATCHES_TABLE,
   D1_DOCUMENTS_TABLE,
   D1_EVENTS_TABLE,
   D1_JOB_EXECUTIONS_TABLE,
+  D1_FOLD_SNAPSHOTS_TABLE,
   D1_MIGRATIONS_TABLE,
   D1_QUERIED_TABLES,
   D1_STATISTICS_TARGETS,
@@ -13,15 +14,18 @@ import {
 } from "../../src";
 import { isMetadataName, isPlainIdentifier } from "../../src/core/identifiers.js";
 
-const MIGRATION_SQL = [
-  "0001_cf_frappe_core",
-  "0002_cf_frappe_job_executions",
-  "0003_cf_frappe_job_execution_messages",
-  "0004_cf_frappe_data_patches",
-  "0005_cf_frappe_data_patch_rollbacks",
-  "0006_cf_frappe_automation_runs"
-]
-  .map((id) => readFileSync(new URL(`../../migrations/${id}.sql`, import.meta.url), "utf8"))
+/**
+ * Every shipped migration, read from the directory rather than listed here.
+ *
+ * A hand-maintained list drifts silently: this one had gone stale at 0006 and
+ * missed 0007, which happened not to create a table — so the guard below was
+ * quietly checking less than it claimed.
+ */
+const MIGRATIONS_DIRECTORY = new URL("../../migrations/", import.meta.url);
+const MIGRATION_SQL = readdirSync(MIGRATIONS_DIRECTORY)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(new URL(name, MIGRATIONS_DIRECTORY), "utf8"))
   .join("\n");
 
 describe("D1 table constants", () => {
@@ -52,9 +56,12 @@ describe("D1 table constants", () => {
 
   it("derives the statistics targets from the queried tables", () => {
     expect(D1_STATISTICS_TARGETS).toEqual(D1_QUERIED_TABLES);
-    // Only the migration journal is excluded: it is read once per migrate.
+    // Two are excluded: the migration journal is read once per migrate, and the
+    // fold snapshots are only ever touched by full primary key, so there is no
+    // alternative plan for statistics to influence.
     expect(D1_TABLES.filter((table) => !D1_QUERIED_TABLES.includes(table))).toEqual([
-      D1_MIGRATIONS_TABLE
+      D1_MIGRATIONS_TABLE,
+      D1_FOLD_SNAPSHOTS_TABLE
     ]);
   });
 

@@ -62,7 +62,8 @@ import { RoleCatalogUserRoleValidator } from "../application/user-role-validator
 import type { DocumentCommandExecutor } from "../application/document-service.js";
 import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
-import { D1DataPatchLog, D1DocumentStore, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
+import {
+  D1SnapshotStore, D1DataPatchLog, D1DocumentStore, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
 import {
   cloudflareAccessAccountSyncActorResolver,
@@ -488,6 +489,12 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const notifications = new UserNotificationService({
     events,
     notificationRules,
+    // D1-backed rather than in-memory: a notification fold is written from
+    // whichever document's coordinator handled the event and read from
+    // whichever isolate serves the inbox, so an in-memory snapshot would be
+    // cold almost every time. Losing it is still only a cold fold — see
+    // `src/ports/snapshot-store.ts`.
+    snapshots: new D1SnapshotStore(env.DB),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
   const realtime = options.realtime
