@@ -188,6 +188,31 @@ describe("user notification fold snapshots", () => {
     expect(with_).toBeLessThan(without * 0.5);
   });
 
+  it("records the read flag in the snapshot that claims to cover it", async () => {
+    // The `markRead` / `dismiss` path records a snapshot too, and nothing tested
+    // it: recording the pre-append state instead — a snapshot claiming sequence
+    // N while missing the very event at N — passed every test. A later resume
+    // with an empty tail then reports the notification as unread.
+    //
+    // Read back through a second service so the answer comes from the snapshot
+    // rather than from the state this call already had in hand.
+    const events = new InMemoryEventStore();
+    const snapshots = new InMemorySnapshotStore();
+    const actor = { id: "support@example.com", roles: ["User"], tenantId: "acme" };
+    const notifications = service(events, snapshots);
+    const [recorded] = await notifications.recordFromDomainEvent(assignmentEvent(1));
+
+    await notifications.markRead(actor, recorded!.id);
+
+    const reader = service(events, snapshots);
+    const inbox = await reader.inbox(actor, { includeDismissed: true });
+    expect(inbox.notifications).toMatchObject([{ id: recorded!.id, read: true }]);
+
+    await notifications.dismiss(actor, recorded!.id);
+    const afterDismiss = await service(events, snapshots).inbox(actor, { includeDismissed: true });
+    expect(afterDismiss.notifications).toMatchObject([{ id: recorded!.id, dismissed: true }]);
+  });
+
   it("still answers correctly from a snapshot that has fallen behind", async () => {
     const events = new InMemoryEventStore();
     const snapshots = new InMemorySnapshotStore();
