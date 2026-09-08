@@ -55,6 +55,11 @@ jobs:
       - name: Browser journeys
         run: npm run test:browser
 
+      # `tail -200` was a poor filter here: wrangler embeds the whole bundled
+      # worker source inside an error report (2.8 MB in one observed log), so the
+      # window is mostly minified source. Grep the diagnosis lines instead — and
+      # upload the logs whole, which is the part that actually made the
+      # ERR_CONNECTION_REFUSED runs explainable. See issue #44.
       - name: Wrangler logs on failure
         if: failure()
         run: |
@@ -62,11 +67,36 @@ jobs:
           logs=(~/.config/.wrangler/logs/*.log .wrangler/logs/*.log)
           if [ ${#logs[@]} -eq 0 ]; then
             echo "no wrangler logs found"
+            exit 0
           fi
           for log in "${logs[@]}"; do
             echo "===== $log"
-            tail -200 "$log"
+            # Case-insensitive on purpose: the messages that matter are spelled
+            # `✘ [ERROR]`, `Error:`, `kj::Exception` and `Address already in
+            # use`, so a case-sensitive pattern silently drops the stack.
+            # `cut` before `head` because the dump this is filtering out can
+            # arrive as one enormous line, and `head -60` bounds lines, not bytes.
+            out=$(grep -inEA2 'error|exception|EADDRINUSE|ECONNREFUSED|failed to|Cannot find' "$log" \
+              | grep -vE "^[0-9]+[-:] *'" \
+              | cut -c1-500 \
+              | head -60)
+            if [ -z "$out" ]; then
+              echo "(no error lines matched; the uploaded artifact has the whole log)"
+            else
+              echo "$out"
+            fi
           done
+
+      - name: Wrangler logs as artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrangler-logs
+          path: |
+            ~/.config/.wrangler/logs/
+            .wrangler/logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Playwright artifacts on failure
         if: failure()

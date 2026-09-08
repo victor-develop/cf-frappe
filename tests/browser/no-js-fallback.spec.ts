@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { seedDemoFixtures } from "./demo";
 
 /**
  * Progressive-enhancement acceptance: core Desk pages stay usable with
@@ -13,11 +14,7 @@ const BOARD_PATH = "/desk/kanbans/Return%20Case%20Board";
 test("no-JS Desk journey: kanban fallback board, and list -> form -> native POST submit", async ({ page }) => {
   // The demo shell is script-free by design: persona selection and seeding
   // are native form POSTs guarded by CSP `default-src 'none'`.
-  await page.goto("/demo");
-  await page.getByRole("button", { name: "Demo Administrator", exact: true }).click();
-  await expect(page.getByText("Current persona: Demo Administrator", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Seed deterministic demo data", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fixtures are ready", exact: true })).toBeVisible();
+  await seedDemoFixtures(page);
 
   const returnName = await seededReturnNameForOrder(page, "ORD-1001");
   const encodedReturnName = encodeURIComponent(returnName);
