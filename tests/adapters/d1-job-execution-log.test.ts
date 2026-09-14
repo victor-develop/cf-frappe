@@ -1,12 +1,13 @@
 import { D1JobExecutionLog } from "../../src";
 import { d1JobExecutionListQuery } from "../../src/adapters/d1/job-execution-query.js";
-import type { DocumentData, JobExecutionRecord, JobMessage, JsonValue } from "../../src";
+import type { DocumentData, JobMessage, JsonValue } from "../../src";
+import { createTestD1, frameworkSchema, type TestD1 } from "../d1-engine.js";
 import { now } from "../helpers";
 
 describe("D1JobExecutionLog", () => {
   it("persists job execution transitions and reuses terminal records for duplicate protection", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("reports.daily", "job_001");
 
     await expect(log.begin(message, now)).resolves.toMatchObject({ status: "started" });
@@ -27,8 +28,8 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("snapshots D1 job execution records across writes and reads", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("reports.daily", "job_001", "acme", {
       payload: { report: "daily", nested: { count: 1 } },
       metadata: { source: "queue", nested: { attempt: 1 } }
@@ -66,8 +67,8 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("claims duplicate deliveries atomically without overwriting running records", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("reports.daily", "job_001", "acme");
 
     await expect(log.begin(message, now)).resolves.toMatchObject({ status: "started" });
@@ -80,14 +81,16 @@ describe("D1JobExecutionLog", () => {
         startedAt: now
       }
     });
-    const claim = db.statements.find((statement) => statement.sql.includes("RETURNING tenant_id"));
-    expect(claim?.sql).toContain("ON CONFLICT(tenant_id, idempotency_key)");
-    expect(claim?.sql).toContain("WHERE cf_frappe_job_executions.status = 'failed'");
+    const claim = d1.executed.find((sql) => sql.includes("RETURNING tenant_id"));
+    expect(claim).toBeDefined();
+    expect(claim).toContain("ON CONFLICT(tenant_id, idempotency_key)");
+    expect(claim).toContain("WHERE cf_frappe_job_executions.status = 'failed'");
   });
 
+
   it("scopes duplicate idempotency keys by tenant", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
 
     await expect(log.begin(jobMessage("reports.daily", "job_001", "acme"), now)).resolves.toMatchObject({
       status: "started"
@@ -99,8 +102,8 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("reclaims failed records for retry attempts", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("email.digest", "job_003", "acme", {
       payload: { account: "acme" },
       metadata: { source: "manual" }
@@ -122,8 +125,8 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("lists filtered executions with bound parameters in newest-first order", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const first = jobMessage("reports.daily", "job_001");
     const second = jobMessage("email.digest", "job_002");
 
@@ -140,7 +143,7 @@ describe("D1JobExecutionLog", () => {
         error: "mail service down"
       }
     ]);
-    const statement = db.statements.at(-1);
+    const statement = d1.statements.at(-1);
     expect(statement?.sql).toContain("tenant_id = ?");
     expect(statement?.sql).toContain("status = ?");
     expect(statement?.sql).toContain("ORDER BY started_at DESC, idempotency_key ASC LIMIT ?");
@@ -168,36 +171,34 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("rejects invalid stored D1 job execution JSON", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
-    const key = recordKey("default", "jobs.bad:run_001");
-    const row = corruptRow({ idempotency_key: "jobs.bad:run_001", payload_json: "[]" });
-    db.corruptRows.set(key, row);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
+    const key = "jobs.bad:run_001";
 
-    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+    seedRow(d1, { idempotency_key: key, payload_json: "[]" });
+    await expect(log.get(key, { tenantId: "default" })).rejects.toMatchObject({
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
 
-    db.corruptRows.set(key, { ...row, payload_json: "{}", metadata_json: "{" });
-    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+    seedRow(d1, { idempotency_key: key, payload_json: "{}", metadata_json: "{" });
+    await expect(log.get(key, { tenantId: "default" })).rejects.toMatchObject({
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
 
-    db.corruptRows.set(key, { ...row, payload_json: "{}", metadata_json: "{}", result_json: "{" });
-    await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
+    seedRow(d1, { idempotency_key: key, payload_json: "{}", metadata_json: "{}", result_json: "{" });
+    await expect(log.get(key, { tenantId: "default" })).rejects.toMatchObject({
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
   });
 
   it("rejects stored D1 job execution results with non-finite JSON numbers", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
-    const key = recordKey("default", "jobs.bad:run_001");
-    db.corruptRows.set(key, corruptRow({ result_json: "1e999" }));
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
 
+    seedRow(d1, { idempotency_key: "jobs.bad:run_001", result_json: "1e999" });
     await expect(log.get("jobs.bad:run_001", { tenantId: "default" })).rejects.toMatchObject({
       code: "JOB_EXECUTION_INVALID",
       status: 409
@@ -205,8 +206,8 @@ describe("D1JobExecutionLog", () => {
   });
 
   it("rejects non-JSON D1 job execution payloads before claiming", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("jobs.bad", "run_001", "default", {
       payload: { count: Number.POSITIVE_INFINITY } as never
     });
@@ -215,12 +216,12 @@ describe("D1JobExecutionLog", () => {
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
-    expect(db.records.size).toBe(0);
+    expect(rowCount(d1)).toBe(0);
   });
 
   it("rejects non-JSON D1 job execution metadata before claiming", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("jobs.bad", "run_001", "default", {
       metadata: { count: Number.POSITIVE_INFINITY } as never
     });
@@ -229,16 +230,18 @@ describe("D1JobExecutionLog", () => {
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
-    expect(db.records.size).toBe(0);
+    expect(rowCount(d1)).toBe(0);
   });
 
   it("rejects non-JSON D1 job execution results before completing", async () => {
-    const db = new FakeD1Database();
-    const log = new D1JobExecutionLog(db as unknown as D1Database);
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const log = new D1JobExecutionLog(d1.database);
     const message = jobMessage("jobs.bad", "run_001", "default");
 
     await log.begin(message, now);
-    await expect(log.complete(message, "2026-01-01T00:01:00.000Z", Number.POSITIVE_INFINITY as never)).rejects.toMatchObject({
+    await expect(
+      log.complete(message, "2026-01-01T00:01:00.000Z", Number.POSITIVE_INFINITY as never)
+    ).rejects.toMatchObject({
       code: "JOB_EXECUTION_INVALID",
       status: 409
     });
@@ -265,177 +268,44 @@ function jobMessage(
   };
 }
 
-class FakeD1Database {
-  readonly records = new Map<string, JobExecutionRecord>();
-  readonly corruptRows = new Map<string, JobExecutionRow>();
-  readonly statements: FakeD1PreparedStatement[] = [];
-
-  prepare(sql: string): FakeD1PreparedStatement {
-    const statement = new FakeD1PreparedStatement(this, sql);
-    this.statements.push(statement);
-    return statement;
+/**
+ * Inserts a row with the exact column values given, bypassing the adapter.
+ *
+ * These are rows real D1 could hold but the adapter's own writes never produce
+ * — the hand-rolled fake used to keep them in a side map that shadowed the
+ * table. Seeding the real table keeps the corrupt bytes where `get` reads them,
+ * with SQLite deciding what the SELECT returns.
+ */
+function seedRow(
+  d1: TestD1,
+  overrides: {
+    readonly idempotency_key: string;
+    readonly payload_json?: string | null;
+    readonly metadata_json?: string | null;
+    readonly result_json?: string | null;
   }
+): void {
+  d1.query(
+    `INSERT OR REPLACE INTO cf_frappe_job_executions
+       (tenant_id, idempotency_key, job_name, run_id, payload_json, metadata_json,
+        enqueued_at, status, started_at, finished_at, result_json, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    "default",
+    overrides.idempotency_key,
+    "jobs.bad",
+    "run_001",
+    overrides.payload_json ?? "{}",
+    overrides.metadata_json ?? "{}",
+    now,
+    "succeeded",
+    now,
+    now,
+    overrides.result_json ?? null,
+    null
+  );
 }
 
-class FakeD1PreparedStatement {
-  params: readonly unknown[] = [];
-
-  constructor(
-    private readonly db: FakeD1Database,
-    readonly sql: string
-  ) {}
-
-  bind(...params: readonly unknown[]): FakeD1PreparedStatement {
-    this.params = params;
-    return this;
-  }
-
-  async first(): Promise<JobExecutionRow | null> {
-    if (this.sql.includes("INSERT INTO cf_frappe_job_executions")) {
-      const [tenantId, idempotencyKey, jobName, runId, payloadJson, metadataJson, enqueuedAt, startedAt] = this.params;
-      const key = recordKey(String(tenantId), String(idempotencyKey));
-      const existing = this.db.records.get(key);
-      if (existing && existing.status !== "failed") {
-        return null;
-      }
-      const payload = JSON.parse(String(payloadJson)) as DocumentData;
-      const metadata = JSON.parse(String(metadataJson)) as DocumentData;
-      const record: JobExecutionRecord = {
-        tenantId: String(tenantId),
-        idempotencyKey: String(idempotencyKey),
-        jobName: String(jobName),
-        runId: String(runId),
-        payload,
-        metadata,
-        enqueuedAt: String(enqueuedAt),
-        status: "running",
-        startedAt: String(startedAt)
-      };
-      this.db.records.set(key, record);
-      return rowFromRecord(record);
-    }
-    const hasTenant = this.sql.includes("tenant_id = ? AND idempotency_key = ?");
-    const tenantId = hasTenant ? String(this.params[0]) : undefined;
-    const idempotencyKey = String(this.params[hasTenant ? 1 : 0]);
-    const corruptRow = tenantId === undefined
-      ? [...this.db.corruptRows.values()].find((item) => item.idempotency_key === idempotencyKey)
-      : this.db.corruptRows.get(recordKey(tenantId, idempotencyKey));
-    if (corruptRow !== undefined) {
-      return corruptRow;
-    }
-    const record = tenantId === undefined
-      ? [...this.db.records.values()].find((item) => item.idempotencyKey === idempotencyKey)
-      : this.db.records.get(recordKey(tenantId, idempotencyKey));
-    return record ? rowFromRecord(record) : null;
-  }
-
-  async all(): Promise<{ readonly results: readonly JobExecutionRow[] }> {
-    let index = 0;
-    const tenantId = this.sql.includes("tenant_id = ?") ? String(this.params[index++]) : undefined;
-    const jobName = this.sql.includes("job_name = ?") ? String(this.params[index++]) : undefined;
-    const status = this.sql.includes("status = ?") ? String(this.params[index++]) : undefined;
-    const runId = this.sql.includes("run_id = ?") ? String(this.params[index++]) : undefined;
-    const limit = Number(this.params.at(-1));
-    const results = [...this.db.records.values()]
-      .filter((record) => tenantId === undefined || record.tenantId === tenantId)
-      .filter((record) => jobName === undefined || record.jobName === jobName)
-      .filter((record) => status === undefined || record.status === status)
-      .filter((record) => runId === undefined || record.runId === runId)
-      .sort((left, right) => {
-        const started = right.startedAt.localeCompare(left.startedAt);
-        return started === 0 ? left.idempotencyKey.localeCompare(right.idempotencyKey) : started;
-      })
-      .slice(0, limit)
-      .map(rowFromRecord);
-    return { results };
-  }
-
-  async run(): Promise<{ readonly success: true }> {
-    const [
-      tenantId,
-      idempotencyKey,
-      jobName,
-      runId,
-      payloadJson,
-      metadataJson,
-      enqueuedAt,
-      status,
-      startedAt,
-      finishedAt,
-      resultJson,
-      error
-    ] = this.params;
-    const payload = payloadJson === null ? undefined : JSON.parse(String(payloadJson)) as JobExecutionRecord["payload"];
-    const metadata = metadataJson === null ? undefined : JSON.parse(String(metadataJson)) as JobExecutionRecord["metadata"];
-    const result = resultJson === null ? undefined : JSON.parse(String(resultJson)) as JsonValue;
-    this.db.records.set(recordKey(String(tenantId), String(idempotencyKey)), {
-      tenantId: String(tenantId),
-      idempotencyKey: String(idempotencyKey),
-      jobName: String(jobName),
-      runId: String(runId),
-      ...(payload === undefined ? {} : { payload }),
-      ...(metadata === undefined ? {} : { metadata }),
-      ...(enqueuedAt === null ? {} : { enqueuedAt: String(enqueuedAt) }),
-      status: status as JobExecutionRecord["status"],
-      startedAt: String(startedAt),
-      ...(finishedAt === null ? {} : { finishedAt: String(finishedAt) }),
-      ...(result === undefined ? {} : { result }),
-      ...(error === null ? {} : { error: String(error) })
-    });
-    return { success: true };
-  }
-}
-
-interface JobExecutionRow {
-  readonly tenant_id: string;
-  readonly idempotency_key: string;
-  readonly job_name: string;
-  readonly run_id: string;
-  readonly payload_json: string | null;
-  readonly metadata_json: string | null;
-  readonly enqueued_at: string | null;
-  readonly status: JobExecutionRecord["status"];
-  readonly started_at: string;
-  readonly finished_at: string | null;
-  readonly result_json: string | null;
-  readonly error: string | null;
-}
-
-function rowFromRecord(record: JobExecutionRecord): JobExecutionRow {
-  return {
-    tenant_id: record.tenantId,
-    idempotency_key: record.idempotencyKey,
-    job_name: record.jobName,
-    run_id: record.runId,
-    payload_json: record.payload === undefined ? null : JSON.stringify(record.payload),
-    metadata_json: record.metadata === undefined ? null : JSON.stringify(record.metadata),
-    enqueued_at: record.enqueuedAt ?? null,
-    status: record.status,
-    started_at: record.startedAt,
-    finished_at: record.finishedAt ?? null,
-    result_json: record.result === undefined ? null : JSON.stringify(record.result),
-    error: record.error ?? null
-  };
-}
-
-function corruptRow(overrides: Partial<JobExecutionRow>): JobExecutionRow {
-  return {
-    tenant_id: "default",
-    idempotency_key: "jobs.bad:run_001",
-    job_name: "jobs.bad",
-    run_id: "run_001",
-    payload_json: "{}",
-    metadata_json: "{}",
-    enqueued_at: now,
-    status: "succeeded",
-    started_at: now,
-    finished_at: now,
-    result_json: null,
-    error: null,
-    ...overrides
-  };
-}
-
-function recordKey(tenantId: string, idempotencyKey: string): string {
-  return `${tenantId}\0${idempotencyKey}`;
+function rowCount(d1: TestD1): number {
+  const [row] = d1.query("SELECT COUNT(*) AS n FROM cf_frappe_job_executions");
+  return Number(row?.n);
 }

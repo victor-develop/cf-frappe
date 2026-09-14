@@ -20,10 +20,10 @@ import { createProjectionEngine, type ProjectionEngine } from "../sqlite-engine"
 // operators evaluated in the Worker: the store pulled a bounded candidate set
 // and refused past 1000 rows, so text search did not work on a large doctype.
 //
-// Everything here runs against a real SQLite engine. The hand-written fake in
-// d1-projection-store.test.ts matches SQL by substring and passes every row for
-// a shape it does not recognise, so it cannot judge a `GLOB` condition at all —
-// it can only be trusted for the SQL text and the bound parameters.
+// Everything here runs against a real SQLite engine: a `GLOB` condition's
+// semantics cannot be judged from the SQL text and the bound parameters alone,
+// which is all the hand-written fake that predated this suite (collapsed in
+// issue #42) could offer.
 
 const Note = defineDocType({
   name: "Note",
