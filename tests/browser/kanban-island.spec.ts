@@ -1,11 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { seedDemoFixtures } from "./demo";
 
 const BOARD_PATH = "/desk/kanbans/Return%20Case%20Board";
 
 test("Kanban island: keyboard card moves persist, with a working no-JS style fallback boundary", async ({ page }) => {
-  await seedDemoFixtures(page);
-
   const draftReturn = await seededReturnNameForOrder(page, "ORD-1006");
 
   // Non-island pages ship zero island/React bytes (bundle isolation).
