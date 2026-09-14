@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { seedDemoFixtures } from "./demo";
 
 /**
  * Progressive-enhancement acceptance: core Desk pages stay usable with
@@ -12,10 +11,9 @@ test.use({ javaScriptEnabled: false });
 const BOARD_PATH = "/desk/kanbans/Return%20Case%20Board";
 
 test("no-JS Desk journey: kanban fallback board, and list -> form -> native POST submit", async ({ page }) => {
-  // The demo shell is script-free by design: persona selection and seeding
-  // are native form POSTs guarded by CSP `default-src 'none'`.
-  await seedDemoFixtures(page);
-
+  // Fixtures are already seeded (global-setup.ts did it over plain HTTP), so
+  // this journey never needs a script: every interaction below is a native
+  // link or form POST, guarded by CSP `default-src 'none'`.
   const returnName = await seededReturnNameForOrder(page, "ORD-1001");
   const encodedReturnName = encodeURIComponent(returnName);
 

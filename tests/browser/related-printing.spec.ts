@@ -1,9 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { seedDemoFixtures } from "./demo";
 
 test("ReturnsOS exposes permission-aware Related resources and Printing journeys", async ({ page }) => {
-  await seedDemoFixtures(page);
-
   const returnName = await seededReturnNameForOrder(page, "ORD-1001");
   const encodedReturnName = encodeURIComponent(returnName);
   await page.goto(`/desk/Return%20Request/${encodedReturnName}`);
