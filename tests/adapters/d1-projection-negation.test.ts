@@ -8,9 +8,10 @@ import { afterField, predicateGroup } from "../predicate-fixtures";
 import { createProjectionEngine, type ProjectionEngine } from "../sqlite-engine";
 
 // Parity between the D1 adapter and the in-memory adapter, asserted against a
-// real SQLite engine. The fake in d1-projection-store.test.ts interprets a
-// subset of SQL by hand, so it cannot judge whether a compiled predicate is
-// right — it can only judge whether it recognises the shape.
+// real SQLite engine. Until issue #42 collapsed the hand-written fakes onto it,
+// d1-projection-store.test.ts's fake interpreted a subset of SQL by hand, so it
+// could not judge whether a compiled predicate was right — it could only judge
+// whether it recognised the shape.
 //
 // The interesting rows are the ones where the field is absent or JSON null: the
 // in-memory evaluator treats a missing field as a failed match, so its negation

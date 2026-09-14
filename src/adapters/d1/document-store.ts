@@ -70,7 +70,9 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
       .prepare(`SELECT COALESCE(MAX(sequence), 0) AS version FROM ${D1_EVENTS_TABLE} WHERE stream = ?`)
       .bind(stream)
       .first<{ version: number }>();
-    return Number(row?.version ?? 0);
+    // A MAX aggregate returns exactly one row even for a stream that has no
+    // events, so the version is always present.
+    return Number(row!.version);
   }
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {

@@ -24,6 +24,17 @@ export interface TestD1Options {
    * by writing valid SQL.
    */
   readonly failSqlIncludes?: string;
+  /**
+   * Runs just before each attempted statement executes, after the binding
+   * check, and records nothing.
+   *
+   * The one arrangement real SQL cannot express from outside the call under
+   * test: a concurrent writer landing between an adapter's read and its
+   * guarded write. The hook mutates the table through {@link TestD1.query},
+   * so it is the statement's own WHERE guard — not a fake's in-memory check —
+   * that must notice the row moved. See the data-patch journal retry races.
+   */
+  readonly beforeSql?: (sql: string) => void;
   /** SQL run once at open — a schema, fixtures, whatever the test needs. */
   readonly schema?: readonly string[];
 }
@@ -38,6 +49,14 @@ export interface TestD1 {
    * rather than against this list.
    */
   readonly executed: readonly string[];
+  /**
+   * Every attempted statement with the parameters it actually ran with.
+   *
+   * Recorded at execution, not at `bind()`: what matters is what reached the
+   * engine, so a prepared-but-never-run statement and a re-`bind()` of an
+   * already-run one do not appear. `executed` is this list, flattened to SQL.
+   */
+  readonly statements: readonly { readonly sql: string; readonly params: readonly unknown[] }[];
   /** Escape hatch for arranging or inspecting state directly. */
   query(sql: string, ...params: readonly unknown[]): readonly Record<string, unknown>[];
   close(): void;
@@ -64,14 +83,15 @@ export function createTestD1(options: TestD1Options = {}): TestD1 {
   for (const statement of options.schema ?? []) {
     db.exec(statement);
   }
-  const executed: string[] = [];
+  const statements: { sql: string; params: readonly unknown[] }[] = [];
 
   const run = (sql: string, params: readonly unknown[]): number => {
     if (options.failSqlIncludes !== undefined && sql.includes(options.failSqlIncludes)) {
       throw new Error(`planned statement failed: ${sql}`);
     }
     assertBindingCount(sql, params);
-    executed.push(sql);
+    options.beforeSql?.(sql);
+    statements.push({ sql, params });
     return Number(db.prepare(sql).run(...(params as never[])).changes);
   };
 
@@ -80,7 +100,8 @@ export function createTestD1(options: TestD1Options = {}): TestD1 {
       throw new Error(`planned statement failed: ${sql}`);
     }
     assertBindingCount(sql, params);
-    executed.push(sql);
+    options.beforeSql?.(sql);
+    statements.push({ sql, params });
     return db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
   };
 
@@ -119,7 +140,12 @@ export function createTestD1(options: TestD1Options = {}): TestD1 {
 
   return {
     database,
-    executed,
+    // Live views, not snapshots: statements land as the test runs, so these
+    // must be read through getters, never destructured before acting.
+    get executed() {
+      return statements.map((entry) => entry.sql);
+    },
+    statements,
     query: (sql, ...params) => db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[],
     close: () => {
       db.close();

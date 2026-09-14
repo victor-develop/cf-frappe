@@ -10,6 +10,7 @@ import type {
   ListFilterExpression,
   PredicateExpression
 } from "../../src";
+import { createTestD1, frameworkSchema, type TestD1 } from "../d1-engine.js";
 
 describe("D1ProjectionStore", () => {
   it("preserves Predicate null semantics without binding SQL NULL comparisons", () => {
@@ -44,20 +45,21 @@ describe("D1ProjectionStore", () => {
   });
 
   it("lists projections with bound filter parameters for rows and counts", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } }),
       documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low" } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "priority", value: "High" }])
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 High" }], total: 1 });
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.priority') = ?");
     expect(rows?.sql).not.toContain("High");
     expect(rows?.params).toEqual(["acme", "Note", "High", 50, 0]);
@@ -67,35 +69,35 @@ describe("D1ProjectionStore", () => {
   });
 
   it("rejects invalid stored D1 projection JSON rows", async () => {
-    const db = new FakeD1Database([
-      { ...documentRow({ name: "D1 Bad", data: { title: "D1 Bad" } }), data_json: "[" }
-    ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = store();
+    seedRows(d1, [{ ...documentRow({ name: "D1 Bad", data: { title: "D1 Bad" } }), data_json: "[" }]);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    await expect(store.get("acme", "Note", "D1 Bad")).rejects.toMatchObject({
+    await expect(storeUnder.get("acme", "Note", "D1 Bad")).rejects.toMatchObject({
       code: "D1_DOCUMENT_INVALID",
       status: 409
     });
   });
 
   it("rejects stored D1 projection rows with non-finite JSON numbers", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       { ...documentRow({ name: "D1 Infinite", data: { title: "D1 Infinite" } }), data_json: '{"count":1e999}' }
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    await expect(store.get("acme", "Note", "D1 Infinite")).rejects.toMatchObject({
+    await expect(storeUnder.get("acme", "Note", "D1 Infinite")).rejects.toMatchObject({
       code: "D1_DOCUMENT_INVALID",
       status: 409
     });
   });
 
   it("rejects non-JSON D1 projection data before writing rows", async () => {
-    const db = new FakeD1Database([]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = store();
+    const storeUnder = new D1ProjectionStore(d1.database);
 
     await expect(
-      store.save({
+      storeUnder.save({
         tenantId: "acme",
         doctype: "Note",
         name: "D1 Bad",
@@ -109,12 +111,12 @@ describe("D1ProjectionStore", () => {
       code: "DOCUMENT_INVALID",
       status: 409
     });
-    expect(db.rows).toEqual([]);
+    expect(rowCount(d1)).toBe(0);
   });
 
   it("snapshots D1 projections by value on save, get, and list", async () => {
-    const db = new FakeD1Database([]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = store();
+    const storeUnder = new D1ProjectionStore(d1.database);
     const snapshot: DocumentSnapshot = {
       tenantId: "acme",
       doctype: "Note",
@@ -126,56 +128,54 @@ describe("D1ProjectionStore", () => {
       updatedAt: "2026-01-01T00:00:00.000Z"
     };
 
-    await store.save(snapshot);
+    await storeUnder.save(snapshot);
     (snapshot.data.nested as DocumentData).count = 2;
 
-    const saved = await store.get("acme", "Note", "D1 Snapshot");
+    const saved = await storeUnder.get("acme", "Note", "D1 Snapshot");
     expect(saved).toMatchObject({ data: { title: "One", nested: { count: 1 } } });
 
     (saved!.data.nested as DocumentData).count = 3;
-    await expect(store.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
+    await expect(storeUnder.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
       data: { title: "One", nested: { count: 1 } }
     });
 
-    const listed = await store.list({ tenantId: "acme", doctype: "Note" });
+    const listed = await storeUnder.list({ tenantId: "acme", doctype: "Note" });
     (listed.data[0]!.data.nested as DocumentData).count = 4;
-    await expect(store.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
+    await expect(storeUnder.get("acme", "Note", "D1 Snapshot")).resolves.toMatchObject({
       data: { title: "One", nested: { count: 1 } }
     });
   });
 
   it("pushes contains into SQL as a bound GLOB pattern, never as SQL text", async () => {
-    const db = new FakeD1Database([
-      documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })
-    ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = store();
+    seedRows(d1, [documentRow({ name: "D1 Sale", data: { title: "50%_Off", priority: "High" } })]);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "title", operator: "contains", value: "50%_Off" }])
     });
 
-    // Which rows come back is not asserted here: this fake matches SQL by
-    // substring and passes every row for a shape it does not recognise, so it
-    // cannot evaluate GLOB. Row-level parity lives in
-    // d1-projection-glob.test.ts against a real engine.
-    const [rows] = db.statements;
+    // The pattern reaches SQLite as a parameter, so this is an
+    // anti-interpolation guard; row-level GLOB parity (the `_`/`%` metacharacters
+    // really matching) lives in d1-projection-glob.test.ts.
+    const [rows] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.title') GLOB ?");
     expect(rows?.sql).not.toContain("LOWER(");
-    // The needle reaches SQLite as a parameter, so this is now an
-    // anti-interpolation guard rather than a "not pushed down" one.
     expect(rows?.sql).not.toContain("50%_Off");
     expect(rows?.params).toEqual(["acme", "Note", "*50%_[Oo][Ff][Ff]*", 50, 0]);
+    expect(result).toMatchObject({ data: [{ name: "D1 Sale" }], total: 1 });
   });
 
   it("renders advanced scalar operators with bound filter parameters", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High", count: 5 } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    await store.list({
+    await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([
@@ -185,7 +185,7 @@ describe("D1ProjectionStore", () => {
       ])
     });
 
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') != ?");
     expect(rows?.sql).toContain("json_extract(data_json, '$.count') > ?");
     expect(rows?.sql).toContain("json_extract(data_json, '$.count') < ?");
@@ -194,51 +194,54 @@ describe("D1ProjectionStore", () => {
   });
 
   it("renders membership operators with bound filter parameters", async () => {
-    const db = new FakeD1Database([
-      documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } }),
-      documentRow({ name: "D1 Medium", data: { title: "D1 Medium", priority: "Medium" } }),
-      documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low" } })
+    const d1 = store();
+    seedRows(d1, [
+      documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" }, updatedAt: "2026-01-03T00:00:00.000Z" }),
+      documentRow({ name: "D1 Medium", data: { title: "D1 Medium", priority: "Medium" }, updatedAt: "2026-01-02T00:00:00.000Z" }),
+      documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low" }, updatedAt: "2026-01-01T00:00:00.000Z" })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "priority", operator: "in", value: ["High", "Medium"] }])
     });
 
+    // Without an explicit `orderBy` the list falls back to newest-first, so
+    // with distinct `updatedAt` values the order is a contract and pinned here.
     expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Medium" }], total: 2 });
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.priority') IN (?, ?)");
     expect(rows?.sql).not.toContain("High");
     expect(rows?.params).toEqual(["acme", "Note", "High", "Medium", 50, 0]);
     expect(count?.sql).toContain("json_extract(data_json, '$.priority') IN (?, ?)");
     expect(count?.params).toEqual(["acme", "Note", "High", "Medium"]);
 
-    const notInDb = new FakeD1Database(db.rows);
-    const notInStore = new D1ProjectionStore(notInDb as unknown as D1Database);
-    const notInResult = await notInStore.list({
+    const notInResult = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "priority", operator: "not_in", value: ["Low", "Medium"] }])
     });
 
     expect(notInResult).toMatchObject({ data: [{ name: "D1 High" }], total: 1 });
-    expect(notInDb.statements[0]?.sql).toContain(
+    const notInRows = d1.statements[2];
+    expect(notInRows?.sql).toContain(
       "json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') NOT IN (?, ?)"
     );
-    expect(notInDb.statements[0]?.params).toEqual(["acme", "Note", "Low", "Medium", 50, 0]);
+    expect(notInRows?.params).toEqual(["acme", "Note", "Low", "Medium", 50, 0]);
   });
 
   it("renders nested compound filter expressions with bound parameters", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High", count: 10 } }),
       documentRow({ name: "D1 Count", data: { title: "D1 Count", priority: "Low", count: 3 } }),
       documentRow({ name: "D1 Miss", data: { title: "D1 Miss", priority: "Low", count: 9 } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate({
@@ -258,8 +261,9 @@ describe("D1ProjectionStore", () => {
       })
     });
 
-    expect(result).toMatchObject({ data: [{ name: "D1 High" }, { name: "D1 Count" }], total: 2 });
-    const [rows, count] = db.statements;
+    expect(names(result)).toEqual(["D1 Count", "D1 High"]);
+    expect(result.total).toBe(2);
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain(
       "(json_extract(data_json, '$.priority') = ? OR (json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?))"
     );
@@ -268,7 +272,8 @@ describe("D1ProjectionStore", () => {
   });
 
   it("filters system projection fields with bound parameters", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({
         name: "D1 Draft",
         version: 1,
@@ -284,9 +289,9 @@ describe("D1ProjectionStore", () => {
         data: { title: "D1 Submitted" }
       })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([
@@ -297,7 +302,7 @@ describe("D1ProjectionStore", () => {
     });
 
     expect(result).toMatchObject({ data: [{ name: "D1 Submitted" }], total: 1 });
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("docstatus = ?");
     expect(rows?.sql).toContain("updated_at >= ?");
     expect(rows?.sql).toContain("version > ?");
@@ -316,98 +321,98 @@ describe("D1ProjectionStore", () => {
   });
 
   it("filters JSON fields with bound between endpoints", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 Low", data: { title: "low", count: 1 } }),
       documentRow({ name: "D1 Mid", data: { title: "mid", count: 5 } }),
       documentRow({ name: "D1 High", data: { title: "high", count: 9 } }),
       documentRow({ name: "D1 Missing", data: { title: "missing" } }),
       documentRow({ name: "D1 Null", data: { title: "null", count: null } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "count", operator: "between", value: [2, 8] }])
     });
 
-    expect(result).toMatchObject({ data: [{ name: "D1 Mid" }], total: 1 });
-    const [rows, count] = db.statements;
+    expect(names(result)).toEqual(["D1 Mid"]);
+    expect(result.total).toBe(1);
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("(json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?)");
     expect(rows?.sql).not.toContain("2");
     expect(rows?.sql).not.toContain("8");
     expect(rows?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
     expect(count?.params).toEqual(["acme", "Note", 2, 8]);
 
-    const notBetweenDb = new FakeD1Database(db.rows);
-    const notBetweenStore = new D1ProjectionStore(notBetweenDb as unknown as D1Database);
-    const notBetween = await notBetweenStore.list({
+    const notBetween = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "count", operator: "not_between", value: [2, 8] }])
     });
 
-    expect(notBetween.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High"]);
+    expect(names(notBetween)).toEqual(["D1 High", "D1 Low"]);
     expect(notBetween.total).toBe(2);
-    expect(notBetweenDb.statements[0]?.sql).toContain(
+    const notBetweenRows = d1.statements[2];
+    expect(notBetweenRows?.sql).toContain(
       "json_extract(data_json, '$.count') IS NOT NULL AND (json_extract(data_json, '$.count') < ? OR json_extract(data_json, '$.count') > ?)"
     );
-    expect(notBetweenDb.statements[0]?.sql).not.toContain("D1 Missing");
-    expect(notBetweenDb.statements[0]?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
-    expect(notBetweenDb.statements[1]?.params).toEqual(["acme", "Note", 2, 8]);
+    expect(notBetweenRows?.sql).not.toContain("D1 Missing");
+    expect(notBetweenRows?.params).toEqual(["acme", "Note", 2, 8, 50, 0]);
+    expect(d1.statements[3]?.params).toEqual(["acme", "Note", 2, 8]);
   });
 
   it("renders presence operators without binding filter values", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 Body", data: { title: "body", body: "Body" } }),
       documentRow({ name: "D1 Empty Body", data: { title: "empty", body: "" } }),
       documentRow({ name: "D1 Null Body", data: { title: "null", body: null } }),
       documentRow({ name: "D1 Missing Body", data: { title: "missing" } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const missing = await store.list({
+    const missing = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "body", operator: "is", value: "not set" }])
     });
 
-    expect(missing.data.map((document) => document.name)).toEqual(["D1 Null Body", "D1 Missing Body"]);
+    expect(names(missing)).toEqual(["D1 Missing Body", "D1 Null Body"]);
     expect(missing.total).toBe(2);
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.body') IS NULL");
     expect(rows?.sql).not.toContain("not set");
     expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
     expect(count?.params).toEqual(["acme", "Note"]);
 
-    const setDb = new FakeD1Database(db.rows);
-    const setStore = new D1ProjectionStore(setDb as unknown as D1Database);
-    const set = await setStore.list({
+    const set = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "body", operator: "is", value: "set" }])
     });
 
-    expect(set.data.map((document) => document.name)).toEqual(["D1 Body", "D1 Empty Body"]);
+    expect(names(set)).toEqual(["D1 Body", "D1 Empty Body"]);
     expect(set.total).toBe(2);
-    expect(setDb.statements[0]?.sql).toContain("json_extract(data_json, '$.body') IS NOT NULL");
-    expect(setDb.statements[0]?.sql).not.toContain("set");
-    expect(setDb.statements[0]?.params).toEqual(["acme", "Note", 50, 0]);
+    const setRows = d1.statements[2];
+    expect(setRows?.sql).toContain("json_extract(data_json, '$.body') IS NOT NULL");
+    expect(setRows?.sql).not.toContain("set");
+    expect(setRows?.params).toEqual(["acme", "Note", 50, 0]);
   });
 
   it("pushes like and not_like into SQL, including the patterns that match nothing", async () => {
-    const db = new FakeD1Database([
-      documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } })
-    ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = store();
+    seedRows(d1, [documentRow({ name: "D1 Launch", data: { title: "Launch Plan" } })]);
+    const storeUnder = new D1ProjectionStore(d1.database);
     const compile = async (operator: "like" | "not_like", value: string) => {
-      const fake = new FakeD1Database(db.rows);
-      await new D1ProjectionStore(fake as unknown as D1Database).list({
+      await storeUnder.list({
         tenantId: "acme",
         doctype: "Note",
         predicate: filterPredicate([{ field: "title", operator, value }])
       });
-      return fake.statements[0]!;
+      // Each list issues the rows statement, then the count statement.
+      return d1.statements.at(-2)!;
     };
 
     const like = await compile("like", "launch%");
@@ -438,16 +443,17 @@ describe("D1ProjectionStore", () => {
   });
 
   it("orders rows by escaped JSON fields with deterministic fallbacks", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 High", data: { title: "apple", count: 5 } }),
       documentRow({ name: "D1 Missing", data: { title: "missing" } }),
       documentRow({ name: "D1 Low", data: { title: "Zebra", count: 1 } }),
       documentRow({ name: "a", data: { title: "same", count: 9 } }),
       documentRow({ name: "B", data: { title: "same", count: 9 } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       orderBy: "count",
@@ -455,15 +461,13 @@ describe("D1ProjectionStore", () => {
     });
 
     expect(result.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High", "B", "a", "D1 Missing"]);
-    const [rows] = db.statements;
+    const [rows] = d1.statements;
     expect(rows?.sql).toContain(
       "ORDER BY json_extract(data_json, '$.count') IS NULL ASC, json_extract(data_json, '$.count') COLLATE BINARY ASC, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC"
     );
     expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
 
-    const dbForTextOrder = new FakeD1Database(db.rows);
-    const textStore = new D1ProjectionStore(dbForTextOrder as unknown as D1Database);
-    const textResult = await textStore.list({
+    const textResult = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       orderBy: "title",
@@ -471,25 +475,26 @@ describe("D1ProjectionStore", () => {
     });
 
     expect(textResult.data.map((document) => document.name)).toEqual(["D1 Low", "D1 High", "D1 Missing", "B", "a"]);
-    expect(dbForTextOrder.statements[0]?.sql).toContain(
+    const titleRows = d1.statements[2];
+    expect(titleRows?.sql).toContain(
       "ORDER BY json_extract(data_json, '$.title') IS NULL ASC, json_extract(data_json, '$.title') COLLATE BINARY ASC, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC"
     );
 
-    const dbForNameOrder = new FakeD1Database(db.rows);
-    const nameStore = new D1ProjectionStore(dbForNameOrder as unknown as D1Database);
-    await nameStore.list({
+    await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       orderBy: "name",
       order: "asc"
     });
-    expect(dbForNameOrder.statements[0]?.sql).toContain(
+    const nameRows = d1.statements[4];
+    expect(nameRows?.sql).toContain(
       "ORDER BY name COLLATE BINARY ASC, updated_at COLLATE BINARY DESC"
     );
   });
 
   it("orders rows by system updatedAt without JSON path extraction", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({
         name: "D1 Old",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -501,9 +506,9 @@ describe("D1ProjectionStore", () => {
         data: { title: "new" }
       })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       orderBy: "updatedAt",
@@ -511,14 +516,15 @@ describe("D1ProjectionStore", () => {
     });
 
     expect(result.data.map((document) => document.name)).toEqual(["D1 New", "D1 Old"]);
-    const [rows] = db.statements;
+    const [rows] = d1.statements;
     expect(rows?.sql).toContain("ORDER BY updated_at COLLATE BINARY DESC");
     expect(rows?.sql).not.toContain("json_extract(data_json, '$.updatedAt')");
     expect(rows?.params).toEqual(["acme", "Note", 50, 0]);
   });
 
   it("applies advanced scalar operators to D1 rows and counts", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 Match", data: { title: "D1 Match", priority: "High", count: 5 } }),
       documentRow({ name: "D1 Low", data: { title: "D1 Low", priority: "Low", count: 5 } }),
       documentRow({ name: "D1 Boundary Low", data: { title: "D1 Boundary Low", priority: "High", count: 2 } }),
@@ -526,9 +532,9 @@ describe("D1ProjectionStore", () => {
       documentRow({ name: "D1 Missing Priority", data: { title: "D1 Missing Priority", count: 5 } }),
       documentRow({ name: "D1 Null Count", data: { title: "D1 Null Count", priority: "High", count: null } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    const result = await store.list({
+    const result = await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([
@@ -542,18 +548,19 @@ describe("D1ProjectionStore", () => {
   });
 
   it("escapes filter fields embedded in JSON path SQL literals", async () => {
-    const db = new FakeD1Database([
+    const d1 = store();
+    seedRows(d1, [
       documentRow({ name: "D1 High", data: { title: "D1 High", priority: "High" } })
     ]);
-    const store = new D1ProjectionStore(db as unknown as D1Database);
+    const storeUnder = new D1ProjectionStore(d1.database);
 
-    await store.list({
+    await storeUnder.list({
       tenantId: "acme",
       doctype: "Note",
       predicate: filterPredicate([{ field: "priority') OR 1=1 --", value: "High" }])
     });
 
-    const [rows, count] = db.statements;
+    const [rows, count] = d1.statements;
     expect(rows?.sql).toContain("json_extract(data_json, '$.priority'') OR 1=1 --') = ?");
     expect(rows?.sql).not.toContain("priority') OR 1=1 --') = ?");
     expect(rows?.params).toEqual(["acme", "Note", "High", 50, 0]);
@@ -561,6 +568,10 @@ describe("D1ProjectionStore", () => {
     expect(count?.params).toEqual(["acme", "Note", "High"]);
   });
 });
+
+function store(): TestD1 {
+  return createTestD1({ schema: frameworkSchema() });
+}
 
 function filterPredicate(
   input: ListFilterExpression | readonly ListDocumentsFilter[]
@@ -571,7 +582,7 @@ function filterPredicate(
   return predicateExpressionFromListFilterExpression(expression);
 }
 
-interface FakeDocumentRow {
+interface ProjectionRow {
   readonly tenant_id: string;
   readonly doctype: string;
   readonly name: string;
@@ -602,7 +613,7 @@ function documentSnapshot(input: {
   };
 }
 
-function rowFromSnapshot(snapshot: DocumentSnapshot): FakeDocumentRow {
+function rowFromSnapshot(snapshot: DocumentSnapshot): ProjectionRow {
   return {
     tenant_id: snapshot.tenantId,
     doctype: snapshot.doctype,
@@ -622,234 +633,51 @@ function documentRow(input: {
   readonly docstatus?: "draft" | "submitted" | "cancelled" | "deleted";
   readonly createdAt?: string;
   readonly updatedAt?: string;
-}): FakeDocumentRow {
+}): ProjectionRow {
   return rowFromSnapshot(documentSnapshot(input));
 }
 
-class FakeD1Database {
-  readonly statements: FakeD1PreparedStatement[] = [];
-  readonly rows: FakeDocumentRow[];
-
-  constructor(rows: readonly FakeDocumentRow[]) {
-    this.rows = [...rows];
-  }
-
-  prepare(sql: string): FakeD1PreparedStatement {
-    const statement = new FakeD1PreparedStatement(this, sql);
-    this.statements.push(statement);
-    return statement;
-  }
-
-  async batch(statements: readonly FakeD1PreparedStatement[]): Promise<readonly FakeD1Result[]> {
-    return Promise.all(statements.map((statement) => statement.all()));
-  }
-}
-
-interface FakeD1Result {
-  readonly results: readonly (FakeDocumentRow | { readonly total: number })[];
-}
-
-class FakeD1PreparedStatement {
-  params: readonly unknown[] = [];
-
-  constructor(
-    private readonly db: FakeD1Database,
-    readonly sql: string
-  ) {}
-
-  bind(...params: readonly unknown[]): FakeD1PreparedStatement {
-    this.params = params;
-    return this;
-  }
-
-  async first(): Promise<FakeDocumentRow | null> {
-    const [tenantId, doctype, name] = this.params;
-    return this.db.rows.find((row) => row.tenant_id === tenantId && row.doctype === doctype && row.name === name) ?? null;
-  }
-
-  async all(): Promise<FakeD1Result> {
-    const filtered = this.applyFilters(this.db.rows);
-    if (this.sql.includes("COUNT(*)")) {
-      return { results: [{ total: filtered.length }] };
-    }
-    return { results: this.applyOrdering(filtered) };
-  }
-
-  async run(): Promise<{ readonly success: boolean }> {
-    const [tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at] = this.params;
-    const row: FakeDocumentRow = {
-      tenant_id: String(tenant_id),
-      doctype: String(doctype),
-      name: String(name),
-      version: Number(version),
-      docstatus: docstatus as FakeDocumentRow["docstatus"],
-      data_json: String(data_json),
-      created_at: String(created_at),
-      updated_at: String(updated_at)
-    };
-    const index = this.db.rows.findIndex(
-      (item) => item.tenant_id === row.tenant_id && item.doctype === row.doctype && item.name === row.name
+/**
+ * Inserts fixture rows with the exact column values given, bypassing the
+ * store's own save path.
+ *
+ * The hand-written fake these replace kept the rows in an array and decided
+ * with ~150 lines of hand-parsed predicate logic which ones a query "should"
+ * return — it could not tell a wrong WHERE clause from an unfamiliar one. Here
+ * SQLite evaluates whatever the store compiles; `list` still issues the rows
+ * statement and then the count statement, in that order, so `d1.statements[N]`
+ * indexing below mirrors one `list` call per two entries.
+ */
+function seedRows(d1: TestD1, rows: readonly ProjectionRow[]): void {
+  for (const row of rows) {
+    d1.query(
+      `INSERT OR REPLACE INTO cf_frappe_documents
+         (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.tenant_id,
+      row.doctype,
+      row.name,
+      row.version,
+      row.docstatus,
+      row.data_json,
+      row.created_at,
+      row.updated_at
     );
-    if (index >= 0) {
-      this.db.rows[index] = row;
-    } else {
-      this.db.rows.push(row);
-    }
-    return { success: true };
-  }
-
-  private applyFilters(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
-    const [tenantId, doctype, ...rawFilterParams] = this.params;
-    const filterParams = this.sql.includes("LIMIT ? OFFSET ?") ? rawFilterParams.slice(0, -2) : rawFilterParams;
-    return rows.filter((row) => {
-      if (row.tenant_id !== tenantId || row.doctype !== doctype) {
-        return false;
-      }
-      const data = JSON.parse(row.data_json) as DocumentData;
-      if (
-        this.sql.includes(
-          "(json_extract(data_json, '$.priority') = ? OR (json_extract(data_json, '$.count') >= ? AND json_extract(data_json, '$.count') <= ?))"
-        )
-      ) {
-        return (
-          data.priority === filterParams[0] ||
-          (compares(data.count, filterParams[1], (actual, expected) => actual >= expected) &&
-            compares(data.count, filterParams[2], (actual, expected) => actual <= expected))
-        );
-      }
-      if (this.sql.includes("json_extract(data_json, '$.priority') = ?")) {
-        return data.priority === filterParams[0];
-      }
-      let paramIndex = 0;
-      if (this.sql.includes("docstatus = ?")) {
-        if (row.docstatus !== filterParams[paramIndex]) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("updated_at >= ?")) {
-        if (!(row.updated_at >= String(filterParams[paramIndex]))) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("version > ?")) {
-        if (!(row.version > Number(filterParams[paramIndex]))) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.priority') IN (?, ?)")) {
-        if (!filterParams.slice(paramIndex, paramIndex + 2).includes(data.priority)) {
-          return false;
-        }
-        paramIndex += 2;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') NOT IN (?, ?)")) {
-        if (data.priority === undefined || data.priority === null || filterParams.slice(paramIndex, paramIndex + 2).includes(data.priority)) {
-          return false;
-        }
-        paramIndex += 2;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.priority') IS NOT NULL AND json_extract(data_json, '$.priority') != ?")) {
-        if (data.priority === undefined || data.priority === null || data.priority === filterParams[paramIndex]) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.body') IS NOT NULL")) {
-        if (data.body === undefined || data.body === null) {
-          return false;
-        }
-      }
-      if (this.sql.includes("json_extract(data_json, '$.body') IS NULL")) {
-        if (data.body !== undefined && data.body !== null) {
-          return false;
-        }
-      }
-      const hasCountNotBetween = this.sql.includes(
-        "json_extract(data_json, '$.count') IS NOT NULL AND (json_extract(data_json, '$.count') < ? OR json_extract(data_json, '$.count') > ?)"
-      );
-      if (hasCountNotBetween) {
-        if (
-          !compares(data.count, filterParams[paramIndex], (actual, expected) => actual < expected) &&
-          !compares(data.count, filterParams[paramIndex + 1], (actual, expected) => actual > expected)
-        ) {
-          return false;
-        }
-        paramIndex += 2;
-      }
-      if (!hasCountNotBetween && this.sql.includes("json_extract(data_json, '$.count') > ?")) {
-        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual > expected)) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.count') >= ?")) {
-        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual >= expected)) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (!hasCountNotBetween && this.sql.includes("json_extract(data_json, '$.count') < ?")) {
-        if (!compares(data.count, filterParams[paramIndex], (actual, expected) => actual < expected)) {
-          return false;
-        }
-        paramIndex += 1;
-      }
-      if (this.sql.includes("json_extract(data_json, '$.count') <= ?")) {
-        return compares(data.count, filterParams[paramIndex], (actual, expected) => actual <= expected);
-      }
-      return true;
-    });
-  }
-
-  private applyOrdering(rows: readonly FakeDocumentRow[]): readonly FakeDocumentRow[] {
-    if (this.sql.includes("json_extract(data_json, '$.count') COLLATE BINARY ASC")) {
-      return [...rows].sort((left, right) => {
-        const leftData = JSON.parse(left.data_json) as DocumentData;
-        const rightData = JSON.parse(right.data_json) as DocumentData;
-        const count = Number(leftData.count ?? Number.POSITIVE_INFINITY) - Number(rightData.count ?? Number.POSITIVE_INFINITY);
-        if (count !== 0) {
-          return count;
-        }
-        const updated = binaryCompare(right.updated_at, left.updated_at);
-        return updated !== 0 ? updated : binaryCompare(left.name, right.name);
-      });
-    }
-    if (this.sql.includes("json_extract(data_json, '$.title') COLLATE BINARY ASC")) {
-      return [...rows].sort((left, right) => {
-        const leftData = JSON.parse(left.data_json) as DocumentData;
-        const rightData = JSON.parse(right.data_json) as DocumentData;
-        const title = binaryCompare(String(leftData.title ?? ""), String(rightData.title ?? ""));
-        if (title !== 0) {
-          return title;
-        }
-        const updated = binaryCompare(right.updated_at, left.updated_at);
-        return updated !== 0 ? updated : binaryCompare(left.name, right.name);
-      });
-    }
-    if (this.sql.includes("ORDER BY updated_at COLLATE BINARY DESC")) {
-      return [...rows].sort((left, right) => binaryCompare(right.updated_at, left.updated_at));
-    }
-    return rows;
   }
 }
 
-function binaryCompare(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
+function rowCount(d1: TestD1): number {
+  const [row] = d1.query("SELECT COUNT(*) AS n FROM cf_frappe_documents");
+  return Number(row?.n);
 }
 
-function compares(
-  actual: unknown,
-  expected: unknown,
-  predicate: (actual: number, expected: number) => boolean
-): boolean {
-  return typeof actual === "number" && typeof expected === "number" && predicate(actual, expected);
+/**
+ * Sorted projection names, for lists whose fixtures tie on the default order
+ * key (updated_at) with no further tie-breaker in the ORDER BY: which of the
+ * tied rows comes first is the engine's to choose, so only the set — not the
+ * order — is a contract. Lists whose rows differ on the order key are pinned
+ * exactly instead (see the membership test).
+ */
+function names(result: { readonly data: readonly { readonly name: string }[] }): readonly string[] {
+  return result.data.map((document) => document.name).sort();
 }

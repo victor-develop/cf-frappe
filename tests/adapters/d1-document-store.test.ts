@@ -1,5 +1,6 @@
 import { D1DocumentStore, D1EventStore, D1ProjectionStore } from "../../src";
 import type { DocumentData, DocumentEventPayload, DocumentSnapshot, JsonValue, NewDomainEvent } from "../../src";
+import { createTestD1, frameworkSchema, type TestD1 } from "../d1-engine.js";
 
 describe("D1DocumentStore", () => {
   const stream = "acme:Note:One";
@@ -17,19 +18,19 @@ describe("D1DocumentStore", () => {
   };
 
   it("commits event and projection in one batch", async () => {
-    const db = new FakeD1Database();
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1DocumentStore(d1.database);
 
     const commit = await store.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!));
 
     expect(commit.snapshot).toMatchObject({ name: "One", version: 1 });
     await expect(store.readStream(stream)).resolves.toMatchObject([{ id: "evt1", sequence: 1 }]);
-    expect(db.documents.get("acme:Note:One")).toMatchObject({ version: 1 });
+    expect(documentRow(d1, "Note", "One")).toMatchObject({ version: 1 });
   });
 
   it("commits multi-stream events and projections in one batch", async () => {
-    const db = new FakeD1Database();
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1DocumentStore(d1.database);
     const uniqueStream = "acme:__UniqueValues:Note%3Atitle%3As%3AOne";
     const uniqueEvent: NewDomainEvent = {
       ...event,
@@ -68,14 +69,14 @@ describe("D1DocumentStore", () => {
     expect(commit.snapshot).toMatchObject({ doctype: "Note", name: "One", version: 1 });
     await expect(store.readStream(uniqueStream)).resolves.toMatchObject([{ id: "unique1", sequence: 1 }]);
     await expect(store.readStream(stream)).resolves.toMatchObject([{ id: "evt1", sequence: 1 }]);
-    expect(db.documents.get("acme:__UniqueValues:Note:title:s:One")).toMatchObject({ version: 1 });
-    expect(db.documents.get("acme:Note:One")).toMatchObject({ version: 1 });
+    expect(documentRow(d1, "__UniqueValues", "Note:title:s:One")).toMatchObject({ version: 1 });
+    expect(documentRow(d1, "Note", "One")).toMatchObject({ version: 1 });
   });
 
   it("updates the D1 automation run claim index with automation run projections", async () => {
-    const db = new FakeD1Database();
-    const store = new D1DocumentStore(db as unknown as D1Database);
-    const projections = new D1ProjectionStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1DocumentStore(d1.database);
+    const projections = new D1ProjectionStore(d1.database);
     const source: NewDomainEvent = {
       ...event,
       id: "evt-source",
@@ -129,15 +130,15 @@ describe("D1DocumentStore", () => {
       })
     );
 
-    expect(db.automationRuns.get("acme:run-1")).toMatchObject({
+    expect(automationRunRow(d1, "run-1")).toMatchObject({
       status: "pending",
       available_at: "2026-01-01T00:00:00.000Z"
     });
-    expect(db.automationRuns.get("acme:run-2")).toMatchObject({
+    expect(automationRunRow(d1, "run-2")).toMatchObject({
       status: "failed",
       available_at: "2026-01-01T00:05:00.000Z"
     });
-    expect(db.automationRuns.get("acme:run-3")).toMatchObject({
+    expect(automationRunRow(d1, "run-3")).toMatchObject({
       status: "delivered",
       available_at: null
     });
@@ -149,46 +150,50 @@ describe("D1DocumentStore", () => {
   });
 
   it("rolls back event inserts when projection upsert fails", async () => {
-    const db = new FakeD1Database({ failDocumentUpsert: true });
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine({ failSqlIncludes: "INSERT INTO cf_frappe_documents" });
+    const store = new D1DocumentStore(d1.database);
 
     await expect(store.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!))).rejects.toThrow(
-      "projection failed"
+      "planned statement failed"
     );
     await expect(store.readStream(stream)).resolves.toEqual([]);
-    expect(db.documents.size).toBe(0);
+    expect(documentCount(d1)).toBe(0);
   });
 
   it("rejects stale document batches and translates D1 constraint races", async () => {
-    const db = new FakeD1Database();
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1DocumentStore(d1.database);
     await store.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!));
     await expect(store.commit(stream, 0, [{ ...event, id: "evt-stale" }], ([saved]) => snapshotFrom(saved!)))
       .rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
 
-    const racingStore = new D1DocumentStore(
-      new FakeD1Database({ failEventInsertAsConstraint: true }) as unknown as D1Database
-    );
-    await expect(racingStore.commit(stream, 0, [event], ([saved]) => snapshotFrom(saved!)))
-      .rejects.toMatchObject({
-        code: "DOCUMENT_CONFLICT",
-        message: "One or more streams changed while committing"
-      });
+    // A constraint race, for real: the same event id already committed under a
+    // different stream passes the version check but violates the events table's
+    // primary key mid-batch, which the adapter translates into a conflict.
+    seedEvent(d1, { ...event, id: "evt-race", stream: "acme:Note:Other", documentName: "Other" });
+    const racingStore = new D1DocumentStore(d1.database);
+    await expect(
+      racingStore.commit(
+        "acme:Note:Fresh",
+        0,
+        [{ ...event, id: "evt-race", stream: "acme:Note:Fresh" }],
+        ([saved]) => snapshotFrom(saved!)
+      )
+    ).rejects.toMatchObject({
+      code: "DOCUMENT_CONFLICT",
+      message: "One or more streams changed while committing"
+    });
   });
 
   it("treats a missing D1 version row as an empty stream", async () => {
-    const db = {
-      prepare: () => ({
-        bind: () => ({ first: () => Promise.resolve(undefined) })
-      })
-    };
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1DocumentStore(d1.database);
     await expect(store.currentVersion("missing")).resolves.toBe(0);
   });
 
   it("rolls back multi-stream event inserts when a batch projection upsert fails", async () => {
-    const db = new FakeD1Database({ failDocumentUpsert: true });
-    const store = new D1DocumentStore(db as unknown as D1Database);
+    const d1 = engine({ failSqlIncludes: "INSERT INTO cf_frappe_documents" });
+    const store = new D1DocumentStore(d1.database);
     const otherStream = "acme:Note:Two";
     const otherEvent = { ...event, id: "evt2", stream: otherStream, documentName: "Two" };
 
@@ -203,15 +208,15 @@ describe("D1DocumentStore", () => {
           auxiliarySnapshots: [snapshotFrom(second!)]
         })
       )
-    ).rejects.toThrow("projection failed");
+    ).rejects.toThrow("planned statement failed");
     await expect(store.readStream(stream)).resolves.toEqual([]);
     await expect(store.readStream(otherStream)).resolves.toEqual([]);
-    expect(db.documents.size).toBe(0);
+    expect(documentCount(d1)).toBe(0);
   });
 
   it("reads a bounded recent stream page with bound sequence and limit parameters", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -222,15 +227,15 @@ describe("D1DocumentStore", () => {
     const page = await store.readStream(stream, { maxSequence: 3, limit: 2 });
 
     expect(page.map((item) => item.sequence)).toEqual([2, 3]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("sequence <= ?");
     expect(read?.sql).toContain("ORDER BY sequence DESC LIMIT ?");
     expect(read?.params).toEqual([stream, 3, 2]);
   });
 
   it("reads the first forward stream page after a lower bound", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -241,15 +246,15 @@ describe("D1DocumentStore", () => {
     const page = await store.readStream(stream, { minSequence: 2, limit: 2 });
 
     expect(page.map((item) => item.sequence)).toEqual([2, 3]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("sequence >= ?");
     expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
     expect(read?.params).toEqual([stream, 2, 2]);
   });
 
   it("reads a continuation forward page with all stream filters", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -265,7 +270,7 @@ describe("D1DocumentStore", () => {
     });
 
     expect(page.map((item) => item.sequence)).toEqual([4]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("sequence >= ? AND sequence <= ?");
     expect(read?.sql).toContain("json_extract(payload_json, '$.kind') IN (?)");
     expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
@@ -273,8 +278,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("appends independent event streams in one D1 batch", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     const otherStream = "acme:__NamedWorkflowFields:Note%3Aworkflow_state";
     const saved = await store.appendBatch([
       { stream, expectedVersion: 0, events: [event] },
@@ -294,8 +299,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("does not partially append a D1 event batch when one expected version is stale", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     const otherStream = "acme:__NamedWorkflowFields:Note%3Aworkflow_state";
     await store.append(stream, 0, [event]);
 
@@ -312,8 +317,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("snapshots D1 event payloads and metadata across append and reads", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     const payload: Extract<DocumentEventPayload, { readonly kind: "DocumentUpdated" }> = {
       kind: "DocumentUpdated",
       patch: { title: "One", tags: ["first"] }
@@ -356,8 +361,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("filters stream reads by payload kind in SQL", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -371,14 +376,14 @@ describe("D1DocumentStore", () => {
     });
 
     expect(assignments.map((item) => item.payload.kind)).toEqual(["DocumentAssigned", "DocumentUnassigned"]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("json_extract(payload_json, '$.kind') IN (?, ?)");
     expect(read?.params).toEqual([stream, 4, "DocumentAssigned", "DocumentUnassigned"]);
   });
 
   it("filters D1 stream and audit reads from payload kind when event type names are misleading", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       {
@@ -405,8 +410,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("returns no D1 stream or audit events for empty payload kind filters", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two")
@@ -414,13 +419,13 @@ describe("D1DocumentStore", () => {
 
     await expect(store.readStream(stream, { payloadKinds: [] })).resolves.toEqual([]);
     await expect(store.searchEvents({ tenantId: "acme", payloadKinds: [] })).resolves.toEqual([]);
-    expect(db.statements.at(-2)?.sql).toContain("1 = 0");
-    expect(db.statements.at(-1)?.sql).toContain("1 = 0");
+    expect(d1.statements.at(-2)?.sql).toContain("1 = 0");
+    expect(d1.statements.at(-1)?.sql).toContain("1 = 0");
   });
 
   it("searches audit events with tenant, metadata, kind, and limit filters", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -440,7 +445,7 @@ describe("D1DocumentStore", () => {
     });
 
     expect(results.map((item) => item.id)).toEqual(["evt2"]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("tenant_id = ?");
     expect(read?.sql).toContain("doctype = ?");
     expect(read?.sql).toContain("document_name = ?");
@@ -462,8 +467,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("reads one audit document stream chronologically through the stream index", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [
       event,
       updateEvent("evt2", "Two"),
@@ -478,26 +483,24 @@ describe("D1DocumentStore", () => {
     });
 
     expect(results.map((item) => item.id)).toEqual(["evt1", "evt2"]);
-    const read = db.statements.at(-1);
+    const read = d1.statements.at(-1);
     expect(read?.sql).toContain("WHERE stream = ?");
     expect(read?.sql).toContain("ORDER BY sequence ASC LIMIT ?");
     expect(read?.params).toEqual([stream, 2]);
   });
 
   it("rejects invalid stored D1 event JSON rows", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [event]);
-    const row = db.events[0]!;
 
-    row.payload_json = "[]";
+    corruptEventRow(d1, "evt1", { payload_json: "[]" });
     await expect(store.readStream(stream)).rejects.toMatchObject({
       code: "D1_EVENT_INVALID",
       status: 409
     });
 
-    row.payload_json = JSON.stringify(event.payload);
-    row.metadata_json = "{";
+    corruptEventRow(d1, "evt1", { metadata_json: "{" });
     await expect(store.readStream(stream)).rejects.toMatchObject({
       code: "D1_EVENT_INVALID",
       status: 409
@@ -505,31 +508,34 @@ describe("D1DocumentStore", () => {
   });
 
   it("rejects pre-cutover workflow payloads and reads current workflow payloads", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [event]);
-    const row = db.events[0]!;
 
-    row.payload_json = JSON.stringify({
-      kind: "WorkflowTransitioned",
-      action: "close",
-      from: "Open",
-      to: "Closed",
-      patch: { workflow_state: "Closed" }
+    corruptEventRow(d1, "evt1", {
+      payload_json: JSON.stringify({
+        kind: "WorkflowTransitioned",
+        action: "close",
+        from: "Open",
+        to: "Closed",
+        patch: { workflow_state: "Closed" }
+      })
     });
     await expect(store.readStream(stream)).rejects.toMatchObject({
       code: "D1_EVENT_INVALID",
       status: 409
     });
 
-    row.payload_json = JSON.stringify({
-      kind: "WorkflowTransitioned",
-      workflow: "lifecycle",
-      stateField: "workflow_state",
-      action: "close",
-      from: "Open",
-      to: "Closed",
-      patch: { workflow_state: "Closed" }
+    corruptEventRow(d1, "evt1", {
+      payload_json: JSON.stringify({
+        kind: "WorkflowTransitioned",
+        workflow: "lifecycle",
+        stateField: "workflow_state",
+        action: "close",
+        from: "Open",
+        to: "Closed",
+        patch: { workflow_state: "Closed" }
+      })
     });
     await expect(store.readStream(stream)).resolves.toMatchObject([{
       payload: {
@@ -542,11 +548,10 @@ describe("D1DocumentStore", () => {
   });
 
   it("rejects stored D1 event payloads with non-finite JSON numbers", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
     await store.append(stream, 0, [event]);
-    const row = db.events[0]!;
-    row.payload_json = '{"kind":"DocumentUpdated","patch":{"count":1e999}}';
+    corruptEventRow(d1, "evt1", { payload_json: '{"kind":"DocumentUpdated","patch":{"count":1e999}}' });
 
     await expect(store.readStream(stream)).rejects.toMatchObject({
       code: "D1_EVENT_INVALID",
@@ -555,8 +560,8 @@ describe("D1DocumentStore", () => {
   });
 
   it("rejects non-JSON D1 event payloads before writing rows", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
 
     await expect(
       store.append(stream, 0, [
@@ -569,12 +574,12 @@ describe("D1DocumentStore", () => {
       code: "EVENT_INVALID",
       status: 409
     });
-    expect(db.events).toEqual([]);
+    expect(eventCount(d1)).toBe(0);
   });
 
   it("rejects non-JSON D1 event metadata before writing rows", async () => {
-    const db = new FakeD1Database();
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
 
     await expect(
       store.append(stream, 0, [{ ...event, metadata: { count: Number.POSITIVE_INFINITY } as never }])
@@ -582,12 +587,16 @@ describe("D1DocumentStore", () => {
       code: "EVENT_INVALID",
       status: 409
     });
-    expect(db.events).toEqual([]);
+    expect(eventCount(d1)).toBe(0);
   });
 
   it("translates event append constraint races into document conflicts", async () => {
-    const db = new FakeD1Database({ failEventInsertAsConstraint: true });
-    const store = new D1EventStore(db as unknown as D1Database);
+    const d1 = engine();
+    const store = new D1EventStore(d1.database);
+    // A constraint race, for real: the event id already exists under a
+    // different stream, so the version check passes and the insert violates
+    // the events table's primary key.
+    seedEvent(d1, { ...event, stream: "acme:Note:Other", documentName: "Other" });
 
     await expect(store.append(stream, 0, [event])).rejects.toMatchObject({
       code: "DOCUMENT_CONFLICT",
@@ -614,6 +623,10 @@ describe("D1DocumentStore", () => {
   }
 });
 
+function engine(options: { readonly failSqlIncludes?: string } = {}): TestD1 {
+  return createTestD1({ schema: frameworkSchema(), ...options });
+}
+
 function snapshotFrom(event: { tenantId: string; doctype: string; documentName: string; sequence: number; occurredAt: string; payload: any }): DocumentSnapshot {
   return {
     tenantId: event.tenantId,
@@ -625,6 +638,82 @@ function snapshotFrom(event: { tenantId: string; doctype: string; documentName: 
     createdAt: event.occurredAt,
     updatedAt: event.occurredAt
   };
+}
+
+/**
+ * Inserts an event row with the exact column values given, bypassing the
+ * store's own append path — the seed for the constraint-race tests, which need
+ * a conflicting row that no valid append would produce.
+ */
+function seedEvent(d1: TestD1, event: NewDomainEvent): void {
+  d1.query(
+    `INSERT INTO cf_frappe_events
+       (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    event.id,
+    event.tenantId,
+    event.stream,
+    1,
+    event.type,
+    event.doctype,
+    event.documentName,
+    event.actorId,
+    event.occurredAt,
+    JSON.stringify(event.payload),
+    JSON.stringify(event.metadata)
+  );
+}
+
+/**
+ * Rewrites stored JSON columns after an append, for rows real D1 could hold
+ * but the adapter never writes — corrupt bytes that the serde layer must
+ * reject where the reads happen, in the table itself.
+ */
+function corruptEventRow(
+  d1: TestD1,
+  id: string,
+  columns: { readonly payload_json?: string; readonly metadata_json?: string }
+): void {
+  const assignments: string[] = [];
+  const params: string[] = [];
+  if (columns.payload_json !== undefined) {
+    assignments.push("payload_json = ?");
+    params.push(columns.payload_json);
+  }
+  if (columns.metadata_json !== undefined) {
+    assignments.push("metadata_json = ?");
+    params.push(columns.metadata_json);
+  }
+  d1.query(`UPDATE cf_frappe_events SET ${assignments.join(", ")} WHERE id = ?`, ...params, id);
+}
+
+function documentRow(d1: TestD1, doctype: string, name: string): Record<string, unknown> | undefined {
+  const [row] = d1.query(
+    "SELECT * FROM cf_frappe_documents WHERE tenant_id = ? AND doctype = ? AND name = ?",
+    "acme",
+    doctype,
+    name
+  );
+  return row;
+}
+
+function documentCount(d1: TestD1): number {
+  const [row] = d1.query("SELECT COUNT(*) AS n FROM cf_frappe_documents");
+  return Number(row?.n);
+}
+
+function automationRunRow(d1: TestD1, runId: string): Record<string, unknown> | undefined {
+  const [row] = d1.query(
+    "SELECT * FROM cf_frappe_automation_runs WHERE tenant_id = ? AND run_id = ?",
+    "acme",
+    runId
+  );
+  return row;
+}
+
+function eventCount(d1: TestD1): number {
+  const [row] = d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events");
+  return Number(row?.n);
 }
 
 function automationRunEvent(
@@ -701,252 +790,4 @@ function automationRunSnapshot(
     createdAt: data.enqueuedAt,
     updatedAt: data.deliveredAt ?? data.retryAt ?? data.enqueuedAt
   };
-}
-
-class FakeD1Database {
-  readonly events: any[] = [];
-  readonly documents = new Map<string, any>();
-  readonly automationRuns = new Map<string, any>();
-  readonly statements: FakeD1PreparedStatement[] = [];
-  readonly failDocumentUpsert: boolean;
-  readonly failEventInsertAsConstraint: boolean;
-
-  constructor(options: { readonly failDocumentUpsert?: boolean; readonly failEventInsertAsConstraint?: boolean } = {}) {
-    this.failDocumentUpsert = options.failDocumentUpsert ?? false;
-    this.failEventInsertAsConstraint = options.failEventInsertAsConstraint ?? false;
-  }
-
-  prepare(sql: string) {
-    const statement = new FakeD1PreparedStatement(this, sql);
-    this.statements.push(statement);
-    return statement;
-  }
-
-  async batch(statements: FakeD1PreparedStatement[]) {
-    const events = [...this.events];
-    const documents = new Map(this.documents);
-    const automationRuns = new Map(this.automationRuns);
-    try {
-      const results = [];
-      for (const statement of statements) {
-        results.push(await statement.run());
-      }
-      return results;
-    } catch (error) {
-      this.events.length = 0;
-      this.events.push(...events);
-      this.documents.clear();
-      for (const [key, value] of documents) {
-        this.documents.set(key, value);
-      }
-      this.automationRuns.clear();
-      for (const [key, value] of automationRuns) {
-        this.automationRuns.set(key, value);
-      }
-      throw error;
-    }
-  }
-}
-
-class FakeD1PreparedStatement {
-  params: unknown[] = [];
-
-  constructor(
-    private readonly db: FakeD1Database,
-    readonly sql: string
-  ) {}
-
-  bind(...params: unknown[]) {
-    this.params = params;
-    return this;
-  }
-
-  async first() {
-    if (this.sql.includes("COALESCE(MAX(sequence)")) {
-      const stream = String(this.params[0]);
-      const version = this.db.events
-        .filter((event) => event.stream === stream)
-        .reduce((max, event) => Math.max(max, event.sequence), 0);
-      return { version };
-    }
-    return null;
-  }
-
-  async all() {
-    if (this.sql.includes("FROM cf_frappe_automation_runs")) {
-      const tenantId = String(this.params[0]);
-      const now = String(this.params[1]);
-      const limit = Number(this.params[2]);
-      const indexed = [...this.db.automationRuns.values()]
-        .filter((run) => run.tenant_id === tenantId)
-        .filter((run) => ["pending", "failed", "claimed"].includes(String(run.status)))
-        .filter((run) => run.available_at !== null && String(run.available_at) <= now)
-        .sort((left, right) =>
-          String(left.enqueued_at).localeCompare(String(right.enqueued_at)) ||
-          String(left.run_id).localeCompare(String(right.run_id))
-        )
-        .slice(0, limit);
-      return {
-        results: indexed
-          .map((run) => this.db.documents.get(`${run.tenant_id}:__AutomationRuns:${run.run_id}`))
-          .filter((document) => document !== undefined)
-      };
-    }
-    if (
-      this.sql.includes("FROM cf_frappe_events") &&
-      this.sql.includes("stream = ?") &&
-      // The stream-qualified document lookup also ends in `stream = ?` but binds
-      // `(tenant_id, doctype, document_name, stream)`. Reaching this branch with
-      // it would read `params[0]` as the stream and silently return []; reaching
-      // the `tenant_id = ?` branch below would ignore the stream and order by
-      // time instead of sequence. This fake implements neither, so it has to
-      // reach the throw at the end.
-      !this.sql.includes("document_name = ?")
-    ) {
-      if (this.sql.includes("1 = 0")) {
-        return { results: [] };
-      }
-      const stream = String(this.params[0]);
-      let index = 1;
-      const minSequence = this.sql.includes("sequence >= ?") ? Number(this.params[index++]) : undefined;
-      const maxSequence = this.sql.includes("sequence <= ?") ? Number(this.params[index++]) : undefined;
-      const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
-      const kindParams = this.sql.includes("json_extract(payload_json, '$.kind')")
-        ? this.params
-            .slice(index, limit === undefined ? undefined : -1)
-            .map(String)
-        : undefined;
-      const sortDescending = this.sql.includes("ORDER BY sequence DESC");
-      const filtered = this.db.events
-        .filter((event) => event.stream === stream)
-        .filter((event) => minSequence === undefined || event.sequence >= minSequence)
-        .filter((event) => maxSequence === undefined || event.sequence <= maxSequence)
-        .filter((event) => kindParams === undefined || kindParams.includes(JSON.parse(String(event.payload_json)).kind))
-        .sort((left, right) => sortDescending ? right.sequence - left.sequence : left.sequence - right.sequence);
-      return {
-        results: limit === undefined ? filtered : filtered.slice(0, limit)
-      };
-    }
-    if (
-      this.sql.includes("FROM cf_frappe_events") &&
-      this.sql.includes("tenant_id = ?") &&
-      !this.sql.includes("stream = ?")
-    ) {
-      if (this.sql.includes("1 = 0")) {
-        return { results: [] };
-      }
-      let index = 0;
-      const tenantId = String(this.params[index++]);
-      const doctype = this.sql.includes("doctype = ?") ? String(this.params[index++]) : undefined;
-      const documentName = this.sql.includes("document_name = ?") ? String(this.params[index++]) : undefined;
-      const actorId = this.sql.includes("actor_id = ?") ? String(this.params[index++]) : undefined;
-      const since = this.sql.includes("occurred_at >= ?") ? String(this.params[index++]) : undefined;
-      const until = this.sql.includes("occurred_at <= ?") ? String(this.params[index++]) : undefined;
-      const kindParams = this.sql.includes("json_extract(payload_json, '$.kind')")
-        ? this.params
-            .slice(index, this.sql.includes("LIMIT ?") ? -1 : undefined)
-            .map(String)
-        : undefined;
-      const limit = this.sql.includes("LIMIT ?") ? Number(this.params.at(-1)) : undefined;
-      const filtered = this.db.events
-        .filter((event) => event.tenant_id === tenantId)
-        .filter((event) => doctype === undefined || event.doctype === doctype)
-        .filter((event) => documentName === undefined || event.document_name === documentName)
-        .filter((event) => actorId === undefined || event.actor_id === actorId)
-        .filter((event) => since === undefined || event.occurred_at >= since)
-        .filter((event) => until === undefined || event.occurred_at <= until)
-        .filter((event) => kindParams === undefined || kindParams.includes(JSON.parse(String(event.payload_json)).kind))
-        .sort((left, right) => {
-          const time = String(right.occurred_at).localeCompare(String(left.occurred_at));
-          if (time !== 0) {
-            return time;
-          }
-          const stream = String(left.stream).localeCompare(String(right.stream));
-          if (stream !== 0) {
-            return stream;
-          }
-          return Number(right.sequence) - Number(left.sequence);
-        });
-      return {
-        results: limit === undefined ? filtered : filtered.slice(0, limit)
-      };
-    }
-    if (this.sql.includes("FROM cf_frappe_events")) {
-      // Fail loudly on an event query this fake has never been taught. Returning
-      // [] instead made a real adapter change look like a behaviour change in
-      // the code under test — the stream-qualified document lookup landed in the
-      // stream branch, had its tenant id read as a stream, and came back empty.
-      // See issue #42, which is about collapsing these hand-written fakes.
-      throw new Error(`FakeD1Database cannot answer this cf_frappe_events query: ${this.sql}`);
-    }
-    return { results: [] };
-  }
-
-  async run() {
-    if (this.sql.includes("INSERT INTO cf_frappe_events")) {
-      if (this.db.failEventInsertAsConstraint) {
-        throw new Error("UNIQUE constraint failed");
-      }
-      const [
-        id,
-        tenant_id,
-        stream,
-        sequence,
-        type,
-        doctype,
-        document_name,
-        actor_id,
-        occurred_at,
-        payload_json,
-        metadata_json
-      ] = this.params;
-      if (this.db.events.some((event) => event.stream === stream && event.sequence === sequence)) {
-        throw new Error("UNIQUE constraint failed");
-      }
-      this.db.events.push({
-        id,
-        tenant_id,
-        stream,
-        sequence,
-        type,
-        doctype,
-        document_name,
-        actor_id,
-        occurred_at,
-        payload_json,
-        metadata_json
-      });
-      return { success: true };
-    }
-    if (this.sql.includes("INSERT INTO cf_frappe_documents")) {
-      if (this.db.failDocumentUpsert) {
-        throw new Error("projection failed");
-      }
-      const [tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at] = this.params;
-      this.db.documents.set(`${tenant_id}:${doctype}:${name}`, {
-        tenant_id,
-        doctype,
-        name,
-        version,
-        docstatus,
-        data_json,
-        created_at,
-        updated_at
-      });
-      return { success: true };
-    }
-    if (this.sql.includes("INSERT INTO cf_frappe_automation_runs")) {
-      const [tenant_id, run_id, status, available_at, enqueued_at, updated_at] = this.params;
-      this.db.automationRuns.set(`${tenant_id}:${run_id}`, {
-        tenant_id,
-        run_id,
-        status,
-        available_at,
-        enqueued_at,
-        updated_at
-      });
-      return { success: true };
-    }
-    return { success: true };
-  }
 }

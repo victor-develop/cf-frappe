@@ -21,10 +21,10 @@ const now = "2026-01-01T00:00:00.000Z";
  *
  * The in-memory tests decide whether compaction is *correct*; this decides
  * whether it is correct against real SQL. Issue #42 is the reason: the
- * hand-written `FakeD1Database` interpreters elsewhere parse SQL by substring
- * and return `[]` for shapes they do not recognise, so a new query shape — the
- * newest-first checkpoint lookup here — can "pass" against a fake that never
- * executed it.
+ * hand-written `FakeD1Database` interpreters that used to sit behind the
+ * adapter suites parsed SQL by substring and returned `[]` for shapes they did
+ * not recognise, so a new query shape — the newest-first checkpoint lookup
+ * here — could "pass" against a fake that never executed it.
  */
 function sqliteEventStore(): { readonly events: D1EventStore; readonly close: () => void } {
   const db = new DatabaseSync(":memory:");
