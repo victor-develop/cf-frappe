@@ -1,0 +1,3611 @@
+{
+  "fixture": "returns-refund-journey",
+  "description": "One return driven end to end: intake, accept, shipment, receipt, inspection, refund approval, and resolution, across all four named workflows, three actors on the return, and a manager providing the master data.",
+  "documents": {
+    "Customer/CUST-GOLD": {
+      "tenantId": "default",
+      "doctype": "Customer",
+      "name": "CUST-GOLD",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "customer_id": "CUST-GOLD",
+        "display_name": "Golden Customer",
+        "email": "cust-gold@example.test",
+        "segment": "Plus",
+        "latest_return_state": "Resolved",
+        "last_refunded_amount": 280,
+        "latest_return": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:34:00.000Z"
+    },
+    "Order/ORD-GOLD": {
+      "tenantId": "default",
+      "doctype": "Order",
+      "name": "ORD-GOLD",
+      "version": 8,
+      "docstatus": "draft",
+      "data": {
+        "order_id": "ORD-GOLD",
+        "customer": "CUST-GOLD",
+        "item_summary": "Golden item",
+        "order_total": 500,
+        "order_status": "Fulfilled",
+        "has_open_return": false,
+        "latest_return_state": "Resolved",
+        "latest_refund_state": "Refunded",
+        "returned_amount": 280,
+        "latest_return": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:32:00.000Z"
+    },
+    "Return Request/RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "Return Request",
+      "name": "RMA-2026-000001",
+      "version": 17,
+      "docstatus": "draft",
+      "data": {
+        "customer": "CUST-GOLD",
+        "order": "ORD-GOLD",
+        "reason": "Damaged",
+        "details": "Golden journey fixture",
+        "requested_amount": 280,
+        "risk_score": 3,
+        "approved_amount": 280,
+        "high_risk": false,
+        "case_state": "Resolved",
+        "logistics_state": "Received",
+        "inspection_state": "Passed",
+        "refund_state": "Refunded",
+        "deduction_amount": 0,
+        "submitted_by": "returns.agent@demo.local",
+        "return_id": "RMA-2026-000001",
+        "tracking_number": "TRACK-GOLD",
+        "received_at": "2026-08-05T08:00:00.000Z",
+        "inspection_notes": "Item received",
+        "scheduled_refund_at": "2026-08-06T03:00:00.000Z",
+        "refund_reference": "REF-GOLD"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:18:00.000Z"
+    },
+    "__AutomationRuns/evt_0008:open-order-return:mark-order-open": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0008:open-order-return:mark-order-open",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0008",
+        "sourceEventType": "Return RequestCreated",
+        "sourcePayloadKind": "DocumentCreated",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "ruleId": "open-order-return",
+        "ruleName": "Link a new return to its order",
+        "actionId": "mark-order-open",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0008",
+        "correlationId": "evt_0008",
+        "automationDepth": 1,
+        "automationPath": [
+          "open-order-return:mark-order-open"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:02:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:21:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:21:00.000Z"
+    },
+    "__AutomationRuns/evt_0010:sync-case-state-to-order:sync-case-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0010:sync-case-state-to-order:sync-case-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0010",
+        "sourceEventType": "ReturnAccepted",
+        "sourcePayloadKind": "DomainCommandApplied",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "workflowTransitions": [
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "submit",
+            "from": "Draft",
+            "to": "Submitted"
+          },
+          {
+            "workflow": "logistics",
+            "stateField": "logistics_state",
+            "action": "prepareShipment",
+            "from": "Not Started",
+            "to": "Awaiting Shipment"
+          }
+        ],
+        "ruleId": "sync-case-state-to-order",
+        "ruleName": "Sync case state to the linked order",
+        "actionId": "sync-case-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_return_state": "Submitted"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0010",
+        "correlationId": "evt_0010",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-case-state-to-order:sync-case-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:03:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:23:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:03:00.000Z",
+      "updatedAt": "2026-08-05T00:23:00.000Z"
+    },
+    "__AutomationRuns/evt_0014:sync-case-state-to-order:sync-case-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0014:sync-case-state-to-order:sync-case-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0014",
+        "sourceEventType": "Return RequestCaseStartProcessing",
+        "sourcePayloadKind": "WorkflowTransitioned",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "workflowName": "case",
+        "workflowAction": "startProcessing",
+        "workflowTransitions": [
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "startProcessing",
+            "from": "Submitted",
+            "to": "Processing"
+          }
+        ],
+        "ruleId": "sync-case-state-to-order",
+        "ruleName": "Sync case state to the linked order",
+        "actionId": "sync-case-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_return_state": "Processing"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0014",
+        "correlationId": "evt_0014",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-case-state-to-order:sync-case-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:06:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:25:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:06:00.000Z",
+      "updatedAt": "2026-08-05T00:25:00.000Z"
+    },
+    "__AutomationRuns/evt_0021:sync-refund-state-to-order:sync-refund-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0021",
+        "sourceEventType": "Return RequestRefundRequestApproval",
+        "sourcePayloadKind": "WorkflowTransitioned",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "workflowName": "refund",
+        "workflowAction": "requestApproval",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "requestApproval",
+            "from": "Not Eligible",
+            "to": "Pending Approval"
+          }
+        ],
+        "ruleId": "sync-refund-state-to-order",
+        "ruleName": "Sync refund state to the linked order",
+        "actionId": "sync-refund-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_refund_state": "Pending Approval"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0021",
+        "correlationId": "evt_0021",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-refund-state-to-order:sync-refund-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:12:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:27:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:12:00.000Z",
+      "updatedAt": "2026-08-05T00:27:00.000Z"
+    },
+    "__AutomationRuns/evt_0024:sync-refund-state-to-order:sync-refund-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0024",
+        "sourceEventType": "Return RequestRefundApprove",
+        "sourcePayloadKind": "WorkflowTransitioned",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowName": "refund",
+        "workflowAction": "approve",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "approve",
+            "from": "Pending Approval",
+            "to": "Approved"
+          }
+        ],
+        "ruleId": "sync-refund-state-to-order",
+        "ruleName": "Sync refund state to the linked order",
+        "actionId": "sync-refund-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_refund_state": "Approved"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0024",
+        "correlationId": "evt_0024",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-refund-state-to-order:sync-refund-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:14:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:29:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:14:00.000Z",
+      "updatedAt": "2026-08-05T00:29:00.000Z"
+    },
+    "__AutomationRuns/evt_0026:sync-refund-state-to-order:sync-refund-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0026",
+        "sourceEventType": "Return RequestRefundBeginProcessing",
+        "sourcePayloadKind": "WorkflowTransitioned",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowName": "refund",
+        "workflowAction": "beginProcessing",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "beginProcessing",
+            "from": "Approved",
+            "to": "Processing"
+          }
+        ],
+        "ruleId": "sync-refund-state-to-order",
+        "ruleName": "Sync refund state to the linked order",
+        "actionId": "sync-refund-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_refund_state": "Processing"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0026",
+        "correlationId": "evt_0026",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-refund-state-to-order:sync-refund-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:15:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:31:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:15:00.000Z",
+      "updatedAt": "2026-08-05T00:31:00.000Z"
+    },
+    "__AutomationRuns/evt_0030:record-completed-refund:close-order-return": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0030:record-completed-refund:close-order-return",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0030",
+        "sourceEventType": "ReturnRefundedAndResolved",
+        "sourcePayloadKind": "DomainCommandApplied",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "markRefunded",
+            "from": "Processing",
+            "to": "Refunded"
+          },
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "resolve",
+            "from": "Processing",
+            "to": "Resolved"
+          }
+        ],
+        "ruleId": "record-completed-refund",
+        "ruleName": "Record a completed refund on customer and order",
+        "actionId": "close-order-return",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "has_open_return": false,
+            "returned_amount": 280,
+            "latest_return_state": "Resolved",
+            "latest_refund_state": "Refunded"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0030",
+        "correlationId": "evt_0030",
+        "automationDepth": 1,
+        "automationPath": [
+          "record-completed-refund:close-order-return"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:18:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:33:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:18:00.000Z",
+      "updatedAt": "2026-08-05T00:33:00.000Z"
+    },
+    "__AutomationRuns/evt_0030:record-completed-refund:record-customer-refund": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0030:record-completed-refund:record-customer-refund",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0030",
+        "sourceEventType": "ReturnRefundedAndResolved",
+        "sourcePayloadKind": "DomainCommandApplied",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "markRefunded",
+            "from": "Processing",
+            "to": "Refunded"
+          },
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "resolve",
+            "from": "Processing",
+            "to": "Resolved"
+          }
+        ],
+        "ruleId": "record-completed-refund",
+        "ruleName": "Record a completed refund on customer and order",
+        "actionId": "record-customer-refund",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Customer",
+            "name": "CUST-GOLD"
+          },
+          "patch": {
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Resolved",
+            "last_refunded_amount": 280
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0030",
+        "correlationId": "evt_0030",
+        "automationDepth": 1,
+        "automationPath": [
+          "record-completed-refund:record-customer-refund"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:18:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:35:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:18:00.000Z",
+      "updatedAt": "2026-08-05T00:35:00.000Z"
+    },
+    "__AutomationRuns/evt_0030:sync-case-state-to-order:sync-case-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0030:sync-case-state-to-order:sync-case-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0030",
+        "sourceEventType": "ReturnRefundedAndResolved",
+        "sourcePayloadKind": "DomainCommandApplied",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "markRefunded",
+            "from": "Processing",
+            "to": "Refunded"
+          },
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "resolve",
+            "from": "Processing",
+            "to": "Resolved"
+          }
+        ],
+        "ruleId": "sync-case-state-to-order",
+        "ruleName": "Sync case state to the linked order",
+        "actionId": "sync-case-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_return_state": "Resolved"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0030",
+        "correlationId": "evt_0030",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-case-state-to-order:sync-case-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:18:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:36:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:18:00.000Z",
+      "updatedAt": "2026-08-05T00:36:00.000Z"
+    },
+    "__AutomationRuns/evt_0030:sync-refund-state-to-order:sync-refund-state": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0030",
+        "sourceEventType": "ReturnRefundedAndResolved",
+        "sourcePayloadKind": "DomainCommandApplied",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "finance.approver@demo.local",
+        "workflowTransitions": [
+          {
+            "workflow": "refund",
+            "stateField": "refund_state",
+            "action": "markRefunded",
+            "from": "Processing",
+            "to": "Refunded"
+          },
+          {
+            "workflow": "case",
+            "stateField": "case_state",
+            "action": "resolve",
+            "from": "Processing",
+            "to": "Resolved"
+          }
+        ],
+        "ruleId": "sync-refund-state-to-order",
+        "ruleName": "Sync refund state to the linked order",
+        "actionId": "sync-refund-state",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-GOLD"
+          },
+          "patch": {
+            "latest_refund_state": "Refunded"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0030",
+        "correlationId": "evt_0030",
+        "automationDepth": 1,
+        "automationPath": [
+          "sync-refund-state-to-order:sync-refund-state"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:18:00.000Z",
+        "claimedAt": "2026-08-05T00:19:00.000Z",
+        "claimId": "claim-journey-final",
+        "deliveredAt": "2026-08-05T00:37:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:18:00.000Z",
+      "updatedAt": "2026-08-05T00:37:00.000Z"
+    },
+    "__NamingSeries/Return Request:returns:date=2026": {
+      "tenantId": "default",
+      "doctype": "__NamingSeries",
+      "name": "Return Request:returns:date=2026",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "pattern": "RMA-{YYYY}-{sequence:6}",
+        "counter": "returns",
+        "scope": "date=2026",
+        "current": 1
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Customer:customer_id:s:CUST-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Customer:customer_id:s:CUST-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Customer",
+        "field": "customer_id",
+        "value": "CUST-GOLD",
+        "valueKey": "s:CUST-GOLD",
+        "documentName": "CUST-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:00:00.000Z"
+    },
+    "__UniqueValues/Order:order_id:s:ORD-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Order:order_id:s:ORD-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Order",
+        "field": "order_id",
+        "value": "ORD-GOLD",
+        "valueKey": "s:ORD-GOLD",
+        "documentName": "ORD-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:01:00.000Z"
+    },
+    "__UniqueValues/Return Request:order:s:ORD-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:order:s:ORD-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "order",
+        "value": "ORD-GOLD",
+        "valueKey": "s:ORD-GOLD",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Return Request:return_id:s:RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:return_id:s:RMA-2026-000001",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "return_id",
+        "value": "RMA-2026-000001",
+        "valueKey": "s:RMA-2026-000001",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    }
+  },
+  "streams": {
+    "default:Customer:CUST-GOLD": [
+      {
+        "id": "evt_0002",
+        "tenantId": "default",
+        "stream": "default:Customer:CUST-GOLD",
+        "sequence": 1,
+        "type": "CustomerCreated",
+        "doctype": "Customer",
+        "documentName": "CUST-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer_id": "CUST-GOLD",
+            "display_name": "Golden Customer",
+            "email": "cust-gold@example.test",
+            "segment": "Plus",
+            "latest_return_state": "No Return",
+            "last_refunded_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0059",
+        "tenantId": "default",
+        "stream": "default:Customer:CUST-GOLD",
+        "sequence": 2,
+        "type": "CustomerUpdated",
+        "doctype": "Customer",
+        "documentName": "CUST-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:34:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Resolved",
+            "last_refunded_amount": 280
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0030:record-completed-refund:record-customer-refund",
+          "automationRunId": "evt_0030:record-completed-refund:record-customer-refund",
+          "causationId": "evt_0030:record-completed-refund:record-customer-refund",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:record-customer-refund"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "record-customer-refund",
+          "sourceEventId": "evt_0030",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      }
+    ],
+    "default:Order:ORD-GOLD": [
+      {
+        "id": "evt_0004",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 1,
+        "type": "OrderCreated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "order_id": "ORD-GOLD",
+            "customer": "CUST-GOLD",
+            "item_summary": "Golden item",
+            "order_total": 500,
+            "order_status": "Fulfilled",
+            "has_open_return": false,
+            "latest_return_state": "No Return",
+            "latest_refund_state": "Not Eligible",
+            "returned_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0045",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 2,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:20:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0008:open-order-return:mark-order-open",
+          "automationRunId": "evt_0008:open-order-return:mark-order-open",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0047",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 3,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:22:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_return_state": "Submitted"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "automationRunId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "causationId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "correlationId": "evt_0010",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "sourceEventId": "evt_0010",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0049",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 4,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:24:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_return_state": "Processing"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "automationRunId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "causationId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "correlationId": "evt_0014",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "sourceEventId": "evt_0014",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0051",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 5,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:26:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_refund_state": "Pending Approval"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "automationRunId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "causationId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0021",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "sourceEventId": "evt_0021",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0053",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 6,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:28:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_refund_state": "Approved"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "automationRunId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "causationId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0024",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "sourceEventId": "evt_0024",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0055",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 7,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:30:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "latest_refund_state": "Processing"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "automationRunId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "causationId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0026",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "sourceEventId": "evt_0026",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      },
+      {
+        "id": "evt_0057",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-GOLD",
+        "sequence": 8,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:32:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "has_open_return": false,
+            "returned_amount": 280,
+            "latest_return_state": "Resolved",
+            "latest_refund_state": "Refunded"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0030:record-completed-refund:close-order-return",
+          "automationRunId": "evt_0030:record-completed-refund:close-order-return",
+          "causationId": "evt_0030:record-completed-refund:close-order-return",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:close-order-return"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "close-order-return",
+          "sourceEventId": "evt_0030",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      }
+    ],
+    "default:Return%20Request:RMA-2026-000001": [
+      {
+        "id": "evt_0008",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 1,
+        "type": "Return RequestCreated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer": "CUST-GOLD",
+            "order": "ORD-GOLD",
+            "reason": "Damaged",
+            "details": "Golden journey fixture",
+            "requested_amount": 280,
+            "risk_score": 3,
+            "approved_amount": 0,
+            "high_risk": false,
+            "case_state": "Draft",
+            "logistics_state": "Not Started",
+            "inspection_state": "Pending",
+            "refund_state": "Not Eligible",
+            "deduction_amount": 0,
+            "submitted_by": "returns.agent@demo.local",
+            "return_id": "RMA-2026-000001"
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0010",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 2,
+        "type": "ReturnAccepted",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:03:00.000Z",
+        "payload": {
+          "kind": "DomainCommandApplied",
+          "command": "acceptReturn",
+          "input": {},
+          "patch": {
+            "case_state": "Submitted",
+            "logistics_state": "Awaiting Shipment"
+          },
+          "transitions": [
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "submit",
+              "from": "Draft",
+              "to": "Submitted"
+            },
+            {
+              "workflow": "logistics",
+              "stateField": "logistics_state",
+              "action": "prepareShipment",
+              "from": "Not Started",
+              "to": "Awaiting Shipment"
+            }
+          ]
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0012",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 3,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:04:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "tracking_number": "TRACK-GOLD"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0013",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 4,
+        "type": "Return RequestLogisticsMarkInTransit",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:05:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "logistics",
+          "stateField": "logistics_state",
+          "action": "markInTransit",
+          "from": "Awaiting Shipment",
+          "to": "In Transit",
+          "patch": {
+            "logistics_state": "In Transit"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0014",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 5,
+        "type": "Return RequestCaseStartProcessing",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:06:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "startProcessing",
+          "from": "Submitted",
+          "to": "Processing",
+          "patch": {
+            "case_state": "Processing"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0016",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 6,
+        "type": "Return RequestCommentAdded",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "warehouse.inspector@demo.local",
+        "occurredAt": "2026-08-05T00:07:00.000Z",
+        "payload": {
+          "kind": "DocumentCommentAdded",
+          "text": "Parcel arrived; scheduling inspection."
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0017",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 7,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "warehouse.inspector@demo.local",
+        "occurredAt": "2026-08-05T00:08:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "received_at": "2026-08-05T08:00:00.000Z",
+            "inspection_notes": "Item received"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0018",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 8,
+        "type": "Return RequestLogisticsReceive",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "warehouse.inspector@demo.local",
+        "occurredAt": "2026-08-05T00:09:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "logistics",
+          "stateField": "logistics_state",
+          "action": "receive",
+          "from": "In Transit",
+          "to": "Received",
+          "patch": {
+            "logistics_state": "Received"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0019",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 9,
+        "type": "Return RequestInspectionPass",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "warehouse.inspector@demo.local",
+        "occurredAt": "2026-08-05T00:10:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "inspection",
+          "stateField": "inspection_state",
+          "action": "pass",
+          "from": "Pending",
+          "to": "Passed",
+          "patch": {
+            "inspection_state": "Passed"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0020",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 10,
+        "type": "Return RequestAssigned",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:11:00.000Z",
+        "payload": {
+          "kind": "DocumentAssigned",
+          "assigneeId": "finance.approver@demo.local"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0021",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 11,
+        "type": "Return RequestRefundRequestApproval",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:12:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "requestApproval",
+          "from": "Not Eligible",
+          "to": "Pending Approval",
+          "patch": {
+            "refund_state": "Pending Approval"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0023",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 12,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:13:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "approved_amount": 280,
+            "scheduled_refund_at": "2026-08-06T03:00:00.000Z"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0024",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 13,
+        "type": "Return RequestRefundApprove",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:14:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "approve",
+          "from": "Pending Approval",
+          "to": "Approved",
+          "patch": {
+            "refund_state": "Approved"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0026",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 14,
+        "type": "Return RequestRefundBeginProcessing",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "WorkflowTransitioned",
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "beginProcessing",
+          "from": "Approved",
+          "to": "Processing",
+          "patch": {
+            "refund_state": "Processing"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0028",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 15,
+        "type": "Return RequestTagged",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:16:00.000Z",
+        "payload": {
+          "kind": "DocumentTagged",
+          "tag": "refund-approved"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0029",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 16,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:17:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "refund_reference": "REF-GOLD"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0030",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 17,
+        "type": "ReturnRefundedAndResolved",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "DomainCommandApplied",
+          "command": "completeRefundAndResolve",
+          "input": {},
+          "patch": {
+            "refund_reference": "REF-GOLD",
+            "refund_state": "Refunded",
+            "case_state": "Resolved"
+          },
+          "transitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ]
+        },
+        "metadata": {}
+      }
+    ],
+    "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open": [
+      {
+        "id": "evt_0009",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceEventType": "Return RequestCreated",
+          "sourcePayloadKind": "DocumentCreated",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "ruleId": "open-order-return",
+          "ruleName": "Link a new return to its order",
+          "actionId": "mark-order-open",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "has_open_return": true,
+              "latest_return": "RMA-2026-000001",
+              "latest_return_state": "Draft",
+              "latest_refund_state": "Not Eligible"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open"
+        }
+      },
+      {
+        "id": "evt_0035",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0046",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:21:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "automationActionId": "evt_0008:open-order-return:mark-order-open"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0010%3Async-case-state-to-order%3Async-case-state": [
+      {
+        "id": "evt_0011",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0010%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0010:sync-case-state-to-order:sync-case-state",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:03:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "sourceEventId": "evt_0010",
+          "sourceEventType": "ReturnAccepted",
+          "sourcePayloadKind": "DomainCommandApplied",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "workflowTransitions": [
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "submit",
+              "from": "Draft",
+              "to": "Submitted"
+            },
+            {
+              "workflow": "logistics",
+              "stateField": "logistics_state",
+              "action": "prepareShipment",
+              "from": "Not Started",
+              "to": "Awaiting Shipment"
+            }
+          ],
+          "ruleId": "sync-case-state-to-order",
+          "ruleName": "Sync case state to the linked order",
+          "actionId": "sync-case-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_return_state": "Submitted"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0010",
+          "correlationId": "evt_0010",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0010",
+          "causationId": "evt_0010",
+          "correlationId": "evt_0010",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "workflowTransitions": [
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "submit",
+              "from": "Draft",
+              "to": "Submitted"
+            },
+            {
+              "workflow": "logistics",
+              "stateField": "logistics_state",
+              "action": "prepareShipment",
+              "from": "Not Started",
+              "to": "Awaiting Shipment"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0036",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0010%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0010:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0048",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0010%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0010:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:23:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0010",
+          "causationId": "evt_0010:sync-case-state-to-order:sync-case-state",
+          "correlationId": "evt_0010",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "automationActionId": "evt_0010:sync-case-state-to-order:sync-case-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0014%3Async-case-state-to-order%3Async-case-state": [
+      {
+        "id": "evt_0015",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0014%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0014:sync-case-state-to-order:sync-case-state",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:06:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "sourceEventId": "evt_0014",
+          "sourceEventType": "Return RequestCaseStartProcessing",
+          "sourcePayloadKind": "WorkflowTransitioned",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "workflowName": "case",
+          "workflowAction": "startProcessing",
+          "workflowTransitions": [
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "startProcessing",
+              "from": "Submitted",
+              "to": "Processing"
+            }
+          ],
+          "ruleId": "sync-case-state-to-order",
+          "ruleName": "Sync case state to the linked order",
+          "actionId": "sync-case-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_return_state": "Processing"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0014",
+          "correlationId": "evt_0014",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0014",
+          "causationId": "evt_0014",
+          "correlationId": "evt_0014",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "workflowName": "case",
+          "workflowAction": "startProcessing",
+          "workflowTransitions": [
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "startProcessing",
+              "from": "Submitted",
+              "to": "Processing"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0037",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0014%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0014:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0050",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0014%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0014:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:25:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0014",
+          "causationId": "evt_0014:sync-case-state-to-order:sync-case-state",
+          "correlationId": "evt_0014",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "automationActionId": "evt_0014:sync-case-state-to-order:sync-case-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0021%3Async-refund-state-to-order%3Async-refund-state": [
+      {
+        "id": "evt_0022",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0021%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:12:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "sourceEventId": "evt_0021",
+          "sourceEventType": "Return RequestRefundRequestApproval",
+          "sourcePayloadKind": "WorkflowTransitioned",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "workflowName": "refund",
+          "workflowAction": "requestApproval",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "requestApproval",
+              "from": "Not Eligible",
+              "to": "Pending Approval"
+            }
+          ],
+          "ruleId": "sync-refund-state-to-order",
+          "ruleName": "Sync refund state to the linked order",
+          "actionId": "sync-refund-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_refund_state": "Pending Approval"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0021",
+          "correlationId": "evt_0021",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0021",
+          "causationId": "evt_0021",
+          "correlationId": "evt_0021",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "workflowName": "refund",
+          "workflowAction": "requestApproval",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "requestApproval",
+              "from": "Not Eligible",
+              "to": "Pending Approval"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0038",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0021%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0052",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0021%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:27:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0021",
+          "causationId": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0021",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "automationActionId": "evt_0021:sync-refund-state-to-order:sync-refund-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0024%3Async-refund-state-to-order%3Async-refund-state": [
+      {
+        "id": "evt_0025",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0024%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:14:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "sourceEventId": "evt_0024",
+          "sourceEventType": "Return RequestRefundApprove",
+          "sourcePayloadKind": "WorkflowTransitioned",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowName": "refund",
+          "workflowAction": "approve",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "approve",
+              "from": "Pending Approval",
+              "to": "Approved"
+            }
+          ],
+          "ruleId": "sync-refund-state-to-order",
+          "ruleName": "Sync refund state to the linked order",
+          "actionId": "sync-refund-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_refund_state": "Approved"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0024",
+          "correlationId": "evt_0024",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0024",
+          "causationId": "evt_0024",
+          "correlationId": "evt_0024",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "workflowName": "refund",
+          "workflowAction": "approve",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "approve",
+              "from": "Pending Approval",
+              "to": "Approved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0039",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0024%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0054",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0024%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:29:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0024",
+          "causationId": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0024",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "automationActionId": "evt_0024:sync-refund-state-to-order:sync-refund-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0026%3Async-refund-state-to-order%3Async-refund-state": [
+      {
+        "id": "evt_0027",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0026%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "sourceEventId": "evt_0026",
+          "sourceEventType": "Return RequestRefundBeginProcessing",
+          "sourcePayloadKind": "WorkflowTransitioned",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowName": "refund",
+          "workflowAction": "beginProcessing",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "beginProcessing",
+              "from": "Approved",
+              "to": "Processing"
+            }
+          ],
+          "ruleId": "sync-refund-state-to-order",
+          "ruleName": "Sync refund state to the linked order",
+          "actionId": "sync-refund-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_refund_state": "Processing"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0026",
+          "correlationId": "evt_0026",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0026",
+          "causationId": "evt_0026",
+          "correlationId": "evt_0026",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "workflowName": "refund",
+          "workflowAction": "beginProcessing",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "beginProcessing",
+              "from": "Approved",
+              "to": "Processing"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0040",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0026%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0056",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0026%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:31:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0026",
+          "causationId": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0026",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "automationActionId": "evt_0026:sync-refund-state-to-order:sync-refund-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Aclose-order-return": [
+      {
+        "id": "evt_0033",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Aclose-order-return",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:close-order-return",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0030:record-completed-refund:close-order-return",
+          "sourceEventId": "evt_0030",
+          "sourceEventType": "ReturnRefundedAndResolved",
+          "sourcePayloadKind": "DomainCommandApplied",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ],
+          "ruleId": "record-completed-refund",
+          "ruleName": "Record a completed refund on customer and order",
+          "actionId": "close-order-return",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "has_open_return": false,
+              "returned_amount": 280,
+              "latest_return_state": "Resolved",
+              "latest_refund_state": "Refunded"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:close-order-return"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:close-order-return"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "close-order-return",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0041",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Aclose-order-return",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:close-order-return",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0030:record-completed-refund:close-order-return",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0058",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Aclose-order-return",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:close-order-return",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:33:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0030:record-completed-refund:close-order-return",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030:record-completed-refund:close-order-return",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:close-order-return"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "close-order-return",
+          "automationActionId": "evt_0030:record-completed-refund:close-order-return"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Arecord-customer-refund": [
+      {
+        "id": "evt_0034",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Arecord-customer-refund",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:record-customer-refund",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0030:record-completed-refund:record-customer-refund",
+          "sourceEventId": "evt_0030",
+          "sourceEventType": "ReturnRefundedAndResolved",
+          "sourcePayloadKind": "DomainCommandApplied",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ],
+          "ruleId": "record-completed-refund",
+          "ruleName": "Record a completed refund on customer and order",
+          "actionId": "record-customer-refund",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Customer",
+              "name": "CUST-GOLD"
+            },
+            "patch": {
+              "latest_return": "RMA-2026-000001",
+              "latest_return_state": "Resolved",
+              "last_refunded_amount": 280
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:record-customer-refund"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:record-customer-refund"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "record-customer-refund",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0042",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Arecord-customer-refund",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:record-customer-refund",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0030:record-completed-refund:record-customer-refund",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0060",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Arecord-completed-refund%3Arecord-customer-refund",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:record-completed-refund:record-customer-refund",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:35:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0030:record-completed-refund:record-customer-refund",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030:record-completed-refund:record-customer-refund",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "record-completed-refund:record-customer-refund"
+          ],
+          "automationRuleId": "record-completed-refund",
+          "automationRuleName": "Record a completed refund on customer and order",
+          "automationActionDefinitionId": "record-customer-refund",
+          "automationActionId": "evt_0030:record-completed-refund:record-customer-refund"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0030%3Async-case-state-to-order%3Async-case-state": [
+      {
+        "id": "evt_0031",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-case-state-to-order:sync-case-state",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0030:sync-case-state-to-order:sync-case-state",
+          "sourceEventId": "evt_0030",
+          "sourceEventType": "ReturnRefundedAndResolved",
+          "sourcePayloadKind": "DomainCommandApplied",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ],
+          "ruleId": "sync-case-state-to-order",
+          "ruleName": "Sync case state to the linked order",
+          "actionId": "sync-case-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_return_state": "Resolved"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0043",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0030:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0061",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-case-state-to-order%3Async-case-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-case-state-to-order:sync-case-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:36:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0030:sync-case-state-to-order:sync-case-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030:sync-case-state-to-order:sync-case-state",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-case-state-to-order:sync-case-state"
+          ],
+          "automationRuleId": "sync-case-state-to-order",
+          "automationRuleName": "Sync case state to the linked order",
+          "automationActionDefinitionId": "sync-case-state",
+          "automationActionId": "evt_0030:sync-case-state-to-order:sync-case-state"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0030%3Async-refund-state-to-order%3Async-refund-state": [
+      {
+        "id": "evt_0032",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "finance.approver@demo.local",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+          "sourceEventId": "evt_0030",
+          "sourceEventType": "ReturnRefundedAndResolved",
+          "sourcePayloadKind": "DomainCommandApplied",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "finance.approver@demo.local",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ],
+          "ruleId": "sync-refund-state-to-order",
+          "ruleName": "Sync refund state to the linked order",
+          "actionId": "sync-refund-state",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-GOLD"
+            },
+            "patch": {
+              "latest_refund_state": "Refunded"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "workflowTransitions": [
+            {
+              "workflow": "refund",
+              "stateField": "refund_state",
+              "action": "markRefunded",
+              "from": "Processing",
+              "to": "Refunded"
+            },
+            {
+              "workflow": "case",
+              "stateField": "case_state",
+              "action": "resolve",
+              "from": "Processing",
+              "to": "Resolved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "evt_0044",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final",
+          "claimExpiresAt": "2026-08-05T00:24:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0062",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0030%3Async-refund-state-to-order%3Async-refund-state",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:37:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+          "claimId": "claim-journey-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0030",
+          "causationId": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+          "correlationId": "evt_0030",
+          "automationDepth": 1,
+          "automationPath": [
+            "sync-refund-state-to-order:sync-refund-state"
+          ],
+          "automationRuleId": "sync-refund-state-to-order",
+          "automationRuleName": "Sync refund state to the linked order",
+          "automationActionDefinitionId": "sync-refund-state",
+          "automationActionId": "evt_0030:sync-refund-state-to-order:sync-refund-state"
+        }
+      }
+    ],
+    "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026": [
+      {
+        "id": "evt_0005",
+        "tenantId": "default",
+        "stream": "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026",
+        "sequence": 1,
+        "type": "NamingSeriesStarted",
+        "doctype": "__NamingSeries",
+        "documentName": "Return Request:returns:date=2026",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "pattern": "RMA-{YYYY}-{sequence:6}",
+            "counter": "returns",
+            "scope": "date=2026",
+            "current": 1
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "counter": "returns",
+          "scope": "date=2026"
+        }
+      }
+    ],
+    "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-GOLD": [
+      {
+        "id": "evt_0001",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Customer:customer_id:s:CUST-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Customer",
+            "field": "customer_id",
+            "value": "CUST-GOLD",
+            "valueKey": "s:CUST-GOLD",
+            "documentName": "CUST-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Customer",
+          "target_field": "customer_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-GOLD": [
+      {
+        "id": "evt_0003",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Order:order_id:s:ORD-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Order",
+            "field": "order_id",
+            "value": "ORD-GOLD",
+            "valueKey": "s:ORD-GOLD",
+            "documentName": "ORD-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Order",
+          "target_field": "order_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-GOLD": [
+      {
+        "id": "evt_0007",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:order:s:ORD-GOLD",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "order",
+            "value": "ORD-GOLD",
+            "valueKey": "s:ORD-GOLD",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "order"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001": [
+      {
+        "id": "evt_0006",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:return_id:s:RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "return_id",
+            "value": "RMA-2026-000001",
+            "valueKey": "s:RMA-2026-000001",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "return_id"
+        }
+      }
+    ]
+  },
+  "listings": {
+    "Customer": [
+      {
+        "name": "CUST-GOLD",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:34:00.000Z"
+      }
+    ],
+    "Order": [
+      {
+        "name": "ORD-GOLD",
+        "version": 8,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:32:00.000Z"
+      }
+    ],
+    "Return Request": [
+      {
+        "name": "RMA-2026-000001",
+        "version": 17,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:18:00.000Z"
+      }
+    ],
+    "__AutomationRuns": [
+      {
+        "name": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:37:00.000Z"
+      },
+      {
+        "name": "evt_0030:sync-case-state-to-order:sync-case-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:36:00.000Z"
+      },
+      {
+        "name": "evt_0030:record-completed-refund:record-customer-refund",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:35:00.000Z"
+      },
+      {
+        "name": "evt_0030:record-completed-refund:close-order-return",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:33:00.000Z"
+      },
+      {
+        "name": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:31:00.000Z"
+      },
+      {
+        "name": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:29:00.000Z"
+      },
+      {
+        "name": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:27:00.000Z"
+      },
+      {
+        "name": "evt_0014:sync-case-state-to-order:sync-case-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:25:00.000Z"
+      },
+      {
+        "name": "evt_0010:sync-case-state-to-order:sync-case-state",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:23:00.000Z"
+      },
+      {
+        "name": "evt_0008:open-order-return:mark-order-open",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:21:00.000Z"
+      }
+    ],
+    "__NamingSeries": [
+      {
+        "name": "Return Request:returns:date=2026",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      }
+    ],
+    "__UniqueValues": [
+      {
+        "name": "Return Request:order:s:ORD-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Return Request:return_id:s:RMA-2026-000001",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Order:order_id:s:ORD-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:01:00.000Z"
+      },
+      {
+        "name": "Customer:customer_id:s:CUST-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:00:00.000Z"
+      }
+    ]
+  },
+  "automationRuns": [
+    {
+      "id": "evt_0008:open-order-return:mark-order-open",
+      "tenantId": "default",
+      "sourceEventId": "evt_0008",
+      "sourceEventType": "Return RequestCreated",
+      "sourcePayloadKind": "DocumentCreated",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "ruleId": "open-order-return",
+      "ruleName": "Link a new return to its order",
+      "actionId": "mark-order-open",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "has_open_return": true,
+          "latest_return": "RMA-2026-000001",
+          "latest_return_state": "Draft",
+          "latest_refund_state": "Not Eligible"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0008",
+      "correlationId": "evt_0008",
+      "automationDepth": 1,
+      "automationPath": [
+        "open-order-return:mark-order-open"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:02:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:21:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0010:sync-case-state-to-order:sync-case-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0010",
+      "sourceEventType": "ReturnAccepted",
+      "sourcePayloadKind": "DomainCommandApplied",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "workflowTransitions": [
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "submit",
+          "from": "Draft",
+          "to": "Submitted"
+        },
+        {
+          "workflow": "logistics",
+          "stateField": "logistics_state",
+          "action": "prepareShipment",
+          "from": "Not Started",
+          "to": "Awaiting Shipment"
+        }
+      ],
+      "ruleId": "sync-case-state-to-order",
+      "ruleName": "Sync case state to the linked order",
+      "actionId": "sync-case-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_return_state": "Submitted"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0010",
+      "correlationId": "evt_0010",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-case-state-to-order:sync-case-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:03:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:23:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0014:sync-case-state-to-order:sync-case-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0014",
+      "sourceEventType": "Return RequestCaseStartProcessing",
+      "sourcePayloadKind": "WorkflowTransitioned",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "workflowName": "case",
+      "workflowAction": "startProcessing",
+      "workflowTransitions": [
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "startProcessing",
+          "from": "Submitted",
+          "to": "Processing"
+        }
+      ],
+      "ruleId": "sync-case-state-to-order",
+      "ruleName": "Sync case state to the linked order",
+      "actionId": "sync-case-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_return_state": "Processing"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0014",
+      "correlationId": "evt_0014",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-case-state-to-order:sync-case-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:06:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:25:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0021:sync-refund-state-to-order:sync-refund-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0021",
+      "sourceEventType": "Return RequestRefundRequestApproval",
+      "sourcePayloadKind": "WorkflowTransitioned",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "workflowName": "refund",
+      "workflowAction": "requestApproval",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "requestApproval",
+          "from": "Not Eligible",
+          "to": "Pending Approval"
+        }
+      ],
+      "ruleId": "sync-refund-state-to-order",
+      "ruleName": "Sync refund state to the linked order",
+      "actionId": "sync-refund-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_refund_state": "Pending Approval"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0021",
+      "correlationId": "evt_0021",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-refund-state-to-order:sync-refund-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:12:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:27:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0024:sync-refund-state-to-order:sync-refund-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0024",
+      "sourceEventType": "Return RequestRefundApprove",
+      "sourcePayloadKind": "WorkflowTransitioned",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowName": "refund",
+      "workflowAction": "approve",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "approve",
+          "from": "Pending Approval",
+          "to": "Approved"
+        }
+      ],
+      "ruleId": "sync-refund-state-to-order",
+      "ruleName": "Sync refund state to the linked order",
+      "actionId": "sync-refund-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_refund_state": "Approved"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0024",
+      "correlationId": "evt_0024",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-refund-state-to-order:sync-refund-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:14:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:29:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0026:sync-refund-state-to-order:sync-refund-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0026",
+      "sourceEventType": "Return RequestRefundBeginProcessing",
+      "sourcePayloadKind": "WorkflowTransitioned",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowName": "refund",
+      "workflowAction": "beginProcessing",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "beginProcessing",
+          "from": "Approved",
+          "to": "Processing"
+        }
+      ],
+      "ruleId": "sync-refund-state-to-order",
+      "ruleName": "Sync refund state to the linked order",
+      "actionId": "sync-refund-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_refund_state": "Processing"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0026",
+      "correlationId": "evt_0026",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-refund-state-to-order:sync-refund-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:15:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:31:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0030:record-completed-refund:close-order-return",
+      "tenantId": "default",
+      "sourceEventId": "evt_0030",
+      "sourceEventType": "ReturnRefundedAndResolved",
+      "sourcePayloadKind": "DomainCommandApplied",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "markRefunded",
+          "from": "Processing",
+          "to": "Refunded"
+        },
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "resolve",
+          "from": "Processing",
+          "to": "Resolved"
+        }
+      ],
+      "ruleId": "record-completed-refund",
+      "ruleName": "Record a completed refund on customer and order",
+      "actionId": "close-order-return",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "has_open_return": false,
+          "returned_amount": 280,
+          "latest_return_state": "Resolved",
+          "latest_refund_state": "Refunded"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0030",
+      "correlationId": "evt_0030",
+      "automationDepth": 1,
+      "automationPath": [
+        "record-completed-refund:close-order-return"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:18:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:33:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0030:record-completed-refund:record-customer-refund",
+      "tenantId": "default",
+      "sourceEventId": "evt_0030",
+      "sourceEventType": "ReturnRefundedAndResolved",
+      "sourcePayloadKind": "DomainCommandApplied",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "markRefunded",
+          "from": "Processing",
+          "to": "Refunded"
+        },
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "resolve",
+          "from": "Processing",
+          "to": "Resolved"
+        }
+      ],
+      "ruleId": "record-completed-refund",
+      "ruleName": "Record a completed refund on customer and order",
+      "actionId": "record-customer-refund",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Customer",
+          "name": "CUST-GOLD"
+        },
+        "patch": {
+          "latest_return": "RMA-2026-000001",
+          "latest_return_state": "Resolved",
+          "last_refunded_amount": 280
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0030",
+      "correlationId": "evt_0030",
+      "automationDepth": 1,
+      "automationPath": [
+        "record-completed-refund:record-customer-refund"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:18:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:35:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0030:sync-case-state-to-order:sync-case-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0030",
+      "sourceEventType": "ReturnRefundedAndResolved",
+      "sourcePayloadKind": "DomainCommandApplied",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "markRefunded",
+          "from": "Processing",
+          "to": "Refunded"
+        },
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "resolve",
+          "from": "Processing",
+          "to": "Resolved"
+        }
+      ],
+      "ruleId": "sync-case-state-to-order",
+      "ruleName": "Sync case state to the linked order",
+      "actionId": "sync-case-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_return_state": "Resolved"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0030",
+      "correlationId": "evt_0030",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-case-state-to-order:sync-case-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:18:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:36:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0030:sync-refund-state-to-order:sync-refund-state",
+      "tenantId": "default",
+      "sourceEventId": "evt_0030",
+      "sourceEventType": "ReturnRefundedAndResolved",
+      "sourcePayloadKind": "DomainCommandApplied",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "finance.approver@demo.local",
+      "workflowTransitions": [
+        {
+          "workflow": "refund",
+          "stateField": "refund_state",
+          "action": "markRefunded",
+          "from": "Processing",
+          "to": "Refunded"
+        },
+        {
+          "workflow": "case",
+          "stateField": "case_state",
+          "action": "resolve",
+          "from": "Processing",
+          "to": "Resolved"
+        }
+      ],
+      "ruleId": "sync-refund-state-to-order",
+      "ruleName": "Sync refund state to the linked order",
+      "actionId": "sync-refund-state",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-GOLD"
+        },
+        "patch": {
+          "latest_refund_state": "Refunded"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0030",
+      "correlationId": "evt_0030",
+      "automationDepth": 1,
+      "automationPath": [
+        "sync-refund-state-to-order:sync-refund-state"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:18:00.000Z",
+      "claimedAt": "2026-08-05T00:19:00.000Z",
+      "claimId": "claim-journey-final",
+      "deliveredAt": "2026-08-05T00:37:00.000Z",
+      "version": 3
+    }
+  ]
+}

@@ -1,0 +1,933 @@
+{
+  "fixture": "returns-automation-exactly-once",
+  "description": "A high-risk intake plans automation from the registry rules; one drain delivers both runs, a second drain proves exactly-once by claiming nothing.",
+  "documents": {
+    "Customer/CUST-AUTO-GOLD": {
+      "tenantId": "default",
+      "doctype": "Customer",
+      "name": "CUST-AUTO-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "customer_id": "CUST-AUTO-GOLD",
+        "display_name": "Golden Customer",
+        "email": "cust-auto-gold@example.test",
+        "segment": "Plus",
+        "latest_return_state": "No Return",
+        "last_refunded_amount": 0
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:00:00.000Z"
+    },
+    "Order/ORD-AUTO-GOLD": {
+      "tenantId": "default",
+      "doctype": "Order",
+      "name": "ORD-AUTO-GOLD",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "order_id": "ORD-AUTO-GOLD",
+        "customer": "CUST-AUTO-GOLD",
+        "item_summary": "Golden item",
+        "order_total": 500,
+        "order_status": "Fulfilled",
+        "has_open_return": true,
+        "latest_return_state": "Draft",
+        "latest_refund_state": "Not Eligible",
+        "returned_amount": 0,
+        "latest_return": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:06:00.000Z"
+    },
+    "Return Request/RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "Return Request",
+      "name": "RMA-2026-000001",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "customer": "CUST-AUTO-GOLD",
+        "order": "ORD-AUTO-GOLD",
+        "reason": "Other",
+        "details": "Risk automation golden fixture",
+        "requested_amount": 410,
+        "risk_score": 9,
+        "approved_amount": 0,
+        "high_risk": true,
+        "case_state": "Draft",
+        "logistics_state": "Not Started",
+        "inspection_state": "Pending",
+        "refund_state": "Not Eligible",
+        "deduction_amount": 0,
+        "submitted_by": "returns.agent@demo.local",
+        "return_id": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:04:00.000Z"
+    },
+    "__AutomationRuns/evt_0008:flag-high-risk:set-high-risk": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0008:flag-high-risk:set-high-risk",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0008",
+        "sourceEventType": "Return RequestCreated",
+        "sourcePayloadKind": "DocumentCreated",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "ruleId": "flag-high-risk",
+        "ruleName": "Flag high-risk returns",
+        "actionId": "set-high-risk",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Return Request",
+            "name": "RMA-2026-000001"
+          },
+          "patch": {
+            "high_risk": true
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0008",
+        "correlationId": "evt_0008",
+        "automationDepth": 1,
+        "automationPath": [
+          "flag-high-risk:set-high-risk"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:02:00.000Z",
+        "claimedAt": "2026-08-05T00:03:00.000Z",
+        "claimId": "claim-gold-first",
+        "deliveredAt": "2026-08-05T00:05:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:05:00.000Z"
+    },
+    "__AutomationRuns/evt_0008:open-order-return:mark-order-open": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0008:open-order-return:mark-order-open",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0008",
+        "sourceEventType": "Return RequestCreated",
+        "sourcePayloadKind": "DocumentCreated",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "ruleId": "open-order-return",
+        "ruleName": "Link a new return to its order",
+        "actionId": "mark-order-open",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-AUTO-GOLD"
+          },
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0008",
+        "correlationId": "evt_0008",
+        "automationDepth": 1,
+        "automationPath": [
+          "open-order-return:mark-order-open"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:02:00.000Z",
+        "claimedAt": "2026-08-05T00:03:00.000Z",
+        "claimId": "claim-gold-first",
+        "deliveredAt": "2026-08-05T00:07:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:07:00.000Z"
+    },
+    "__NamingSeries/Return Request:returns:date=2026": {
+      "tenantId": "default",
+      "doctype": "__NamingSeries",
+      "name": "Return Request:returns:date=2026",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "pattern": "RMA-{YYYY}-{sequence:6}",
+        "counter": "returns",
+        "scope": "date=2026",
+        "current": 1
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Customer:customer_id:s:CUST-AUTO-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Customer:customer_id:s:CUST-AUTO-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Customer",
+        "field": "customer_id",
+        "value": "CUST-AUTO-GOLD",
+        "valueKey": "s:CUST-AUTO-GOLD",
+        "documentName": "CUST-AUTO-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:00:00.000Z"
+    },
+    "__UniqueValues/Order:order_id:s:ORD-AUTO-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Order:order_id:s:ORD-AUTO-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Order",
+        "field": "order_id",
+        "value": "ORD-AUTO-GOLD",
+        "valueKey": "s:ORD-AUTO-GOLD",
+        "documentName": "ORD-AUTO-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:01:00.000Z"
+    },
+    "__UniqueValues/Return Request:order:s:ORD-AUTO-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:order:s:ORD-AUTO-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "order",
+        "value": "ORD-AUTO-GOLD",
+        "valueKey": "s:ORD-AUTO-GOLD",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Return Request:return_id:s:RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:return_id:s:RMA-2026-000001",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "return_id",
+        "value": "RMA-2026-000001",
+        "valueKey": "s:RMA-2026-000001",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    }
+  },
+  "streams": {
+    "default:Customer:CUST-AUTO-GOLD": [
+      {
+        "id": "evt_0002",
+        "tenantId": "default",
+        "stream": "default:Customer:CUST-AUTO-GOLD",
+        "sequence": 1,
+        "type": "CustomerCreated",
+        "doctype": "Customer",
+        "documentName": "CUST-AUTO-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer_id": "CUST-AUTO-GOLD",
+            "display_name": "Golden Customer",
+            "email": "cust-auto-gold@example.test",
+            "segment": "Plus",
+            "latest_return_state": "No Return",
+            "last_refunded_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      }
+    ],
+    "default:Order:ORD-AUTO-GOLD": [
+      {
+        "id": "evt_0004",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AUTO-GOLD",
+        "sequence": 1,
+        "type": "OrderCreated",
+        "doctype": "Order",
+        "documentName": "ORD-AUTO-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "order_id": "ORD-AUTO-GOLD",
+            "customer": "CUST-AUTO-GOLD",
+            "item_summary": "Golden item",
+            "order_total": 500,
+            "order_status": "Fulfilled",
+            "has_open_return": false,
+            "latest_return_state": "No Return",
+            "latest_refund_state": "Not Eligible",
+            "returned_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0015",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AUTO-GOLD",
+        "sequence": 2,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-AUTO-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:06:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0008:open-order-return:mark-order-open",
+          "automationRunId": "evt_0008:open-order-return:mark-order-open",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      }
+    ],
+    "default:Return%20Request:RMA-2026-000001": [
+      {
+        "id": "evt_0008",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 1,
+        "type": "Return RequestCreated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer": "CUST-AUTO-GOLD",
+            "order": "ORD-AUTO-GOLD",
+            "reason": "Other",
+            "details": "Risk automation golden fixture",
+            "requested_amount": 410,
+            "risk_score": 9,
+            "approved_amount": 0,
+            "high_risk": false,
+            "case_state": "Draft",
+            "logistics_state": "Not Started",
+            "inspection_state": "Pending",
+            "refund_state": "Not Eligible",
+            "deduction_amount": 0,
+            "submitted_by": "returns.agent@demo.local",
+            "return_id": "RMA-2026-000001"
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0013",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 2,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:04:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "high_risk": true
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0008:flag-high-risk:set-high-risk",
+          "automationRunId": "evt_0008:flag-high-risk:set-high-risk",
+          "causationId": "evt_0008:flag-high-risk:set-high-risk",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "flag-high-risk:set-high-risk"
+          ],
+          "automationRuleId": "flag-high-risk",
+          "automationRuleName": "Flag high-risk returns",
+          "automationActionDefinitionId": "set-high-risk",
+          "sourceEventId": "evt_0008",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0008%3Aflag-high-risk%3Aset-high-risk": [
+      {
+        "id": "evt_0009",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aflag-high-risk%3Aset-high-risk",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:flag-high-risk:set-high-risk",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0008:flag-high-risk:set-high-risk",
+          "sourceEventId": "evt_0008",
+          "sourceEventType": "Return RequestCreated",
+          "sourcePayloadKind": "DocumentCreated",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "ruleId": "flag-high-risk",
+          "ruleName": "Flag high-risk returns",
+          "actionId": "set-high-risk",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Return Request",
+              "name": "RMA-2026-000001"
+            },
+            "patch": {
+              "high_risk": true
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "flag-high-risk:set-high-risk"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "flag-high-risk:set-high-risk"
+          ],
+          "automationRuleId": "flag-high-risk",
+          "automationRuleName": "Flag high-risk returns",
+          "automationActionDefinitionId": "set-high-risk"
+        }
+      },
+      {
+        "id": "evt_0011",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aflag-high-risk%3Aset-high-risk",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:flag-high-risk:set-high-risk",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:03:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0008:flag-high-risk:set-high-risk",
+          "claimId": "claim-gold-first",
+          "claimExpiresAt": "2026-08-05T00:08:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0014",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aflag-high-risk%3Aset-high-risk",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:flag-high-risk:set-high-risk",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:05:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0008:flag-high-risk:set-high-risk",
+          "claimId": "claim-gold-first"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008:flag-high-risk:set-high-risk",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "flag-high-risk:set-high-risk"
+          ],
+          "automationRuleId": "flag-high-risk",
+          "automationRuleName": "Flag high-risk returns",
+          "automationActionDefinitionId": "set-high-risk",
+          "automationActionId": "evt_0008:flag-high-risk:set-high-risk"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open": [
+      {
+        "id": "evt_0010",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceEventType": "Return RequestCreated",
+          "sourcePayloadKind": "DocumentCreated",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "ruleId": "open-order-return",
+          "ruleName": "Link a new return to its order",
+          "actionId": "mark-order-open",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-AUTO-GOLD"
+            },
+            "patch": {
+              "has_open_return": true,
+              "latest_return": "RMA-2026-000001",
+              "latest_return_state": "Draft",
+              "latest_refund_state": "Not Eligible"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open"
+        }
+      },
+      {
+        "id": "evt_0012",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:03:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-gold-first",
+          "claimExpiresAt": "2026-08-05T00:08:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0016",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:07:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-gold-first"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "automationActionId": "evt_0008:open-order-return:mark-order-open"
+        }
+      }
+    ],
+    "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026": [
+      {
+        "id": "evt_0005",
+        "tenantId": "default",
+        "stream": "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026",
+        "sequence": 1,
+        "type": "NamingSeriesStarted",
+        "doctype": "__NamingSeries",
+        "documentName": "Return Request:returns:date=2026",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "pattern": "RMA-{YYYY}-{sequence:6}",
+            "counter": "returns",
+            "scope": "date=2026",
+            "current": 1
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "counter": "returns",
+          "scope": "date=2026"
+        }
+      }
+    ],
+    "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-AUTO-GOLD": [
+      {
+        "id": "evt_0001",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-AUTO-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Customer:customer_id:s:CUST-AUTO-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Customer",
+            "field": "customer_id",
+            "value": "CUST-AUTO-GOLD",
+            "valueKey": "s:CUST-AUTO-GOLD",
+            "documentName": "CUST-AUTO-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Customer",
+          "target_field": "customer_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AUTO-GOLD": [
+      {
+        "id": "evt_0003",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AUTO-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Order:order_id:s:ORD-AUTO-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Order",
+            "field": "order_id",
+            "value": "ORD-AUTO-GOLD",
+            "valueKey": "s:ORD-AUTO-GOLD",
+            "documentName": "ORD-AUTO-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Order",
+          "target_field": "order_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AUTO-GOLD": [
+      {
+        "id": "evt_0007",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AUTO-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:order:s:ORD-AUTO-GOLD",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "order",
+            "value": "ORD-AUTO-GOLD",
+            "valueKey": "s:ORD-AUTO-GOLD",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "order"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001": [
+      {
+        "id": "evt_0006",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:return_id:s:RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "return_id",
+            "value": "RMA-2026-000001",
+            "valueKey": "s:RMA-2026-000001",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "return_id"
+        }
+      }
+    ]
+  },
+  "listings": {
+    "Customer": [
+      {
+        "name": "CUST-AUTO-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:00:00.000Z"
+      }
+    ],
+    "Order": [
+      {
+        "name": "ORD-AUTO-GOLD",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:06:00.000Z"
+      }
+    ],
+    "Return Request": [
+      {
+        "name": "RMA-2026-000001",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:04:00.000Z"
+      }
+    ],
+    "__AutomationRuns": [
+      {
+        "name": "evt_0008:open-order-return:mark-order-open",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:07:00.000Z"
+      },
+      {
+        "name": "evt_0008:flag-high-risk:set-high-risk",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:05:00.000Z"
+      }
+    ],
+    "__NamingSeries": [
+      {
+        "name": "Return Request:returns:date=2026",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      }
+    ],
+    "__UniqueValues": [
+      {
+        "name": "Return Request:order:s:ORD-AUTO-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Return Request:return_id:s:RMA-2026-000001",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Order:order_id:s:ORD-AUTO-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:01:00.000Z"
+      },
+      {
+        "name": "Customer:customer_id:s:CUST-AUTO-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:00:00.000Z"
+      }
+    ]
+  },
+  "automationRuns": [
+    {
+      "id": "evt_0008:flag-high-risk:set-high-risk",
+      "tenantId": "default",
+      "sourceEventId": "evt_0008",
+      "sourceEventType": "Return RequestCreated",
+      "sourcePayloadKind": "DocumentCreated",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "ruleId": "flag-high-risk",
+      "ruleName": "Flag high-risk returns",
+      "actionId": "set-high-risk",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Return Request",
+          "name": "RMA-2026-000001"
+        },
+        "patch": {
+          "high_risk": true
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0008",
+      "correlationId": "evt_0008",
+      "automationDepth": 1,
+      "automationPath": [
+        "flag-high-risk:set-high-risk"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:02:00.000Z",
+      "claimedAt": "2026-08-05T00:03:00.000Z",
+      "claimId": "claim-gold-first",
+      "deliveredAt": "2026-08-05T00:05:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0008:open-order-return:mark-order-open",
+      "tenantId": "default",
+      "sourceEventId": "evt_0008",
+      "sourceEventType": "Return RequestCreated",
+      "sourcePayloadKind": "DocumentCreated",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "ruleId": "open-order-return",
+      "ruleName": "Link a new return to its order",
+      "actionId": "mark-order-open",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-AUTO-GOLD"
+        },
+        "patch": {
+          "has_open_return": true,
+          "latest_return": "RMA-2026-000001",
+          "latest_return_state": "Draft",
+          "latest_refund_state": "Not Eligible"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0008",
+      "correlationId": "evt_0008",
+      "automationDepth": 1,
+      "automationPath": [
+        "open-order-return:mark-order-open"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:02:00.000Z",
+      "claimedAt": "2026-08-05T00:03:00.000Z",
+      "claimId": "claim-gold-first",
+      "deliveredAt": "2026-08-05T00:07:00.000Z",
+      "version": 3
+    }
+  ]
+}
