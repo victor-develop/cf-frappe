@@ -1,0 +1,1397 @@
+{
+  "fixture": "returns-cancel-amend-collab",
+  "description": "The collaborative surface around one return: comments, assignment, tags, follow, submission, cancellation, amendment back to draft, and resubmission.",
+  "documents": {
+    "Customer/CUST-AMEND-GOLD": {
+      "tenantId": "default",
+      "doctype": "Customer",
+      "name": "CUST-AMEND-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "customer_id": "CUST-AMEND-GOLD",
+        "display_name": "Golden Customer",
+        "email": "cust-amend-gold@example.test",
+        "segment": "Plus",
+        "latest_return_state": "No Return",
+        "last_refunded_amount": 0
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:00:00.000Z"
+    },
+    "Order/ORD-AMEND-GOLD": {
+      "tenantId": "default",
+      "doctype": "Order",
+      "name": "ORD-AMEND-GOLD",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "order_id": "ORD-AMEND-GOLD",
+        "customer": "CUST-AMEND-GOLD",
+        "item_summary": "Golden item",
+        "order_total": 500,
+        "order_status": "Fulfilled",
+        "has_open_return": true,
+        "latest_return_state": "Draft",
+        "latest_refund_state": "Not Eligible",
+        "returned_amount": 0,
+        "latest_return": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:10:00.000Z"
+    },
+    "Order/ORD-AMEND-GOLD-2": {
+      "tenantId": "default",
+      "doctype": "Order",
+      "name": "ORD-AMEND-GOLD-2",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "order_id": "ORD-AMEND-GOLD-2",
+        "customer": "CUST-AMEND-GOLD",
+        "item_summary": "Replacement item",
+        "order_total": 95,
+        "order_status": "Fulfilled",
+        "has_open_return": true,
+        "latest_return_state": "Draft",
+        "latest_refund_state": "Not Eligible",
+        "returned_amount": 0,
+        "latest_return": "RMA-2026-000002"
+      },
+      "createdAt": "2026-08-05T00:13:00.000Z",
+      "updatedAt": "2026-08-05T00:19:00.000Z"
+    },
+    "Return Request/RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "Return Request",
+      "name": "RMA-2026-000001",
+      "version": 8,
+      "docstatus": "cancelled",
+      "data": {
+        "customer": "CUST-AMEND-GOLD",
+        "order": "ORD-AMEND-GOLD",
+        "reason": "Changed Mind",
+        "details": "Amended details before submission",
+        "requested_amount": 120,
+        "risk_score": 1,
+        "approved_amount": 0,
+        "high_risk": false,
+        "case_state": "Draft",
+        "logistics_state": "Not Started",
+        "inspection_state": "Pending",
+        "refund_state": "Not Eligible",
+        "deduction_amount": 0,
+        "submitted_by": "returns.agent@demo.local",
+        "return_id": "RMA-2026-000001"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:14:00.000Z"
+    },
+    "Return Request/RMA-2026-000002": {
+      "tenantId": "default",
+      "doctype": "Return Request",
+      "name": "RMA-2026-000002",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "customer": "CUST-AMEND-GOLD",
+        "order": "ORD-AMEND-GOLD-2",
+        "reason": "Wrong Item",
+        "details": "Resubmitted after amendment",
+        "requested_amount": 95,
+        "approved_amount": 0,
+        "risk_score": 1,
+        "high_risk": false,
+        "deduction_amount": 0,
+        "case_state": "Draft",
+        "logistics_state": "Not Started",
+        "inspection_state": "Pending",
+        "refund_state": "Not Eligible",
+        "submitted_by": "admin@demo.local",
+        "return_id": "RMA-2026-000002"
+      },
+      "createdAt": "2026-08-05T00:15:00.000Z",
+      "updatedAt": "2026-08-05T00:17:00.000Z"
+    },
+    "__AutomationRuns/evt_0008:open-order-return:mark-order-open": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0008:open-order-return:mark-order-open",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0008",
+        "sourceEventType": "Return RequestCreated",
+        "sourcePayloadKind": "DocumentCreated",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000001",
+        "sourceActorId": "returns.agent@demo.local",
+        "ruleId": "open-order-return",
+        "ruleName": "Link a new return to its order",
+        "actionId": "mark-order-open",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-AMEND-GOLD"
+          },
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0008",
+        "correlationId": "evt_0008",
+        "automationDepth": 1,
+        "automationPath": [
+          "open-order-return:mark-order-open"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:02:00.000Z",
+        "claimedAt": "2026-08-05T00:09:00.000Z",
+        "claimId": "claim-amend-mid",
+        "deliveredAt": "2026-08-05T00:11:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:11:00.000Z"
+    },
+    "__AutomationRuns/evt_0025:open-order-return:mark-order-open": {
+      "tenantId": "default",
+      "doctype": "__AutomationRuns",
+      "name": "evt_0025:open-order-return:mark-order-open",
+      "version": 3,
+      "docstatus": "submitted",
+      "data": {
+        "sourceEventId": "evt_0025",
+        "sourceEventType": "Return RequestCreated",
+        "sourcePayloadKind": "DocumentCreated",
+        "sourceDoctype": "Return Request",
+        "sourceDocumentName": "RMA-2026-000002",
+        "sourceActorId": "admin@demo.local",
+        "ruleId": "open-order-return",
+        "ruleName": "Link a new return to its order",
+        "actionId": "mark-order-open",
+        "action": {
+          "kind": "updateDocument",
+          "target": {
+            "doctype": "Order",
+            "name": "ORD-AMEND-GOLD-2"
+          },
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000002",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "retry": {
+          "maxAttempts": 10,
+          "baseDelaySeconds": 30,
+          "maxDelaySeconds": 1800
+        },
+        "causationId": "evt_0025",
+        "correlationId": "evt_0025",
+        "automationDepth": 1,
+        "automationPath": [
+          "open-order-return:mark-order-open"
+        ],
+        "status": "delivered",
+        "attempts": 1,
+        "enqueuedAt": "2026-08-05T00:15:00.000Z",
+        "claimedAt": "2026-08-05T00:18:00.000Z",
+        "claimId": "claim-amend-final",
+        "deliveredAt": "2026-08-05T00:20:00.000Z"
+      },
+      "createdAt": "2026-08-05T00:15:00.000Z",
+      "updatedAt": "2026-08-05T00:20:00.000Z"
+    },
+    "__NamingSeries/Return Request:returns:date=2026": {
+      "tenantId": "default",
+      "doctype": "__NamingSeries",
+      "name": "Return Request:returns:date=2026",
+      "version": 2,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "pattern": "RMA-{YYYY}-{sequence:6}",
+        "counter": "returns",
+        "scope": "date=2026",
+        "current": 2
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:15:00.000Z"
+    },
+    "__UniqueValues/Customer:customer_id:s:CUST-AMEND-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Customer:customer_id:s:CUST-AMEND-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Customer",
+        "field": "customer_id",
+        "value": "CUST-AMEND-GOLD",
+        "valueKey": "s:CUST-AMEND-GOLD",
+        "documentName": "CUST-AMEND-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:00:00.000Z",
+      "updatedAt": "2026-08-05T00:00:00.000Z"
+    },
+    "__UniqueValues/Order:order_id:s:ORD-AMEND-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Order:order_id:s:ORD-AMEND-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Order",
+        "field": "order_id",
+        "value": "ORD-AMEND-GOLD",
+        "valueKey": "s:ORD-AMEND-GOLD",
+        "documentName": "ORD-AMEND-GOLD",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:01:00.000Z",
+      "updatedAt": "2026-08-05T00:01:00.000Z"
+    },
+    "__UniqueValues/Order:order_id:s:ORD-AMEND-GOLD-2": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Order:order_id:s:ORD-AMEND-GOLD-2",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Order",
+        "field": "order_id",
+        "value": "ORD-AMEND-GOLD-2",
+        "valueKey": "s:ORD-AMEND-GOLD-2",
+        "documentName": "ORD-AMEND-GOLD-2",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:13:00.000Z",
+      "updatedAt": "2026-08-05T00:13:00.000Z"
+    },
+    "__UniqueValues/Return Request:order:s:ORD-AMEND-GOLD": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:order:s:ORD-AMEND-GOLD",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "order",
+        "value": "ORD-AMEND-GOLD",
+        "valueKey": "s:ORD-AMEND-GOLD",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Return Request:order:s:ORD-AMEND-GOLD-2": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:order:s:ORD-AMEND-GOLD-2",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "order",
+        "value": "ORD-AMEND-GOLD-2",
+        "valueKey": "s:ORD-AMEND-GOLD-2",
+        "documentName": "RMA-2026-000002",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:15:00.000Z",
+      "updatedAt": "2026-08-05T00:15:00.000Z"
+    },
+    "__UniqueValues/Return Request:return_id:s:RMA-2026-000001": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:return_id:s:RMA-2026-000001",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "return_id",
+        "value": "RMA-2026-000001",
+        "valueKey": "s:RMA-2026-000001",
+        "documentName": "RMA-2026-000001",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:02:00.000Z",
+      "updatedAt": "2026-08-05T00:02:00.000Z"
+    },
+    "__UniqueValues/Return Request:return_id:s:RMA-2026-000002": {
+      "tenantId": "default",
+      "doctype": "__UniqueValues",
+      "name": "Return Request:return_id:s:RMA-2026-000002",
+      "version": 1,
+      "docstatus": "draft",
+      "data": {
+        "doctype": "Return Request",
+        "field": "return_id",
+        "value": "RMA-2026-000002",
+        "valueKey": "s:RMA-2026-000002",
+        "documentName": "RMA-2026-000002",
+        "active": true
+      },
+      "createdAt": "2026-08-05T00:15:00.000Z",
+      "updatedAt": "2026-08-05T00:15:00.000Z"
+    }
+  },
+  "streams": {
+    "default:Customer:CUST-AMEND-GOLD": [
+      {
+        "id": "evt_0002",
+        "tenantId": "default",
+        "stream": "default:Customer:CUST-AMEND-GOLD",
+        "sequence": 1,
+        "type": "CustomerCreated",
+        "doctype": "Customer",
+        "documentName": "CUST-AMEND-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer_id": "CUST-AMEND-GOLD",
+            "display_name": "Golden Customer",
+            "email": "cust-amend-gold@example.test",
+            "segment": "Plus",
+            "latest_return_state": "No Return",
+            "last_refunded_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      }
+    ],
+    "default:Order:ORD-AMEND-GOLD": [
+      {
+        "id": "evt_0004",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AMEND-GOLD",
+        "sequence": 1,
+        "type": "OrderCreated",
+        "doctype": "Order",
+        "documentName": "ORD-AMEND-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "order_id": "ORD-AMEND-GOLD",
+            "customer": "CUST-AMEND-GOLD",
+            "item_summary": "Golden item",
+            "order_total": 500,
+            "order_status": "Fulfilled",
+            "has_open_return": false,
+            "latest_return_state": "No Return",
+            "latest_refund_state": "Not Eligible",
+            "returned_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0017",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AMEND-GOLD",
+        "sequence": 2,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-AMEND-GOLD",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:10:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000001",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0008:open-order-return:mark-order-open",
+          "automationRunId": "evt_0008:open-order-return:mark-order-open",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001"
+        }
+      }
+    ],
+    "default:Order:ORD-AMEND-GOLD-2": [
+      {
+        "id": "evt_0020",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AMEND-GOLD-2",
+        "sequence": 1,
+        "type": "OrderCreated",
+        "doctype": "Order",
+        "documentName": "ORD-AMEND-GOLD-2",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:13:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "order_id": "ORD-AMEND-GOLD-2",
+            "customer": "CUST-AMEND-GOLD",
+            "item_summary": "Replacement item",
+            "order_total": 95,
+            "order_status": "Fulfilled",
+            "has_open_return": false,
+            "latest_return_state": "No Return",
+            "latest_refund_state": "Not Eligible",
+            "returned_amount": 0
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0030",
+        "tenantId": "default",
+        "stream": "default:Order:ORD-AMEND-GOLD-2",
+        "sequence": 2,
+        "type": "OrderUpdated",
+        "doctype": "Order",
+        "documentName": "ORD-AMEND-GOLD-2",
+        "actorId": "__automation__",
+        "occurredAt": "2026-08-05T00:19:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "has_open_return": true,
+            "latest_return": "RMA-2026-000002",
+            "latest_return_state": "Draft",
+            "latest_refund_state": "Not Eligible"
+          }
+        },
+        "metadata": {
+          "automationActionId": "evt_0025:open-order-return:mark-order-open",
+          "automationRunId": "evt_0025:open-order-return:mark-order-open",
+          "causationId": "evt_0025:open-order-return:mark-order-open",
+          "correlationId": "evt_0025",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "sourceEventId": "evt_0025",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000002"
+        }
+      }
+    ],
+    "default:Return%20Request:RMA-2026-000001": [
+      {
+        "id": "evt_0008",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 1,
+        "type": "Return RequestCreated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer": "CUST-AMEND-GOLD",
+            "order": "ORD-AMEND-GOLD",
+            "reason": "Changed Mind",
+            "details": "Amendment golden fixture",
+            "requested_amount": 120,
+            "risk_score": 1,
+            "approved_amount": 0,
+            "high_risk": false,
+            "case_state": "Draft",
+            "logistics_state": "Not Started",
+            "inspection_state": "Pending",
+            "refund_state": "Not Eligible",
+            "deduction_amount": 0,
+            "submitted_by": "returns.agent@demo.local",
+            "return_id": "RMA-2026-000001"
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0010",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 2,
+        "type": "Return RequestCommentAdded",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:03:00.000Z",
+        "payload": {
+          "kind": "DocumentCommentAdded",
+          "text": "Customer confirmed the change of mind in writing."
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0011",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 3,
+        "type": "Return RequestAssigned",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:04:00.000Z",
+        "payload": {
+          "kind": "DocumentAssigned",
+          "assigneeId": "returns.agent@demo.local"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0012",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 4,
+        "type": "Return RequestTagged",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:05:00.000Z",
+        "payload": {
+          "kind": "DocumentTagged",
+          "tag": "low-risk"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0013",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 5,
+        "type": "Return RequestFollowed",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "warehouse.inspector@demo.local",
+        "occurredAt": "2026-08-05T00:06:00.000Z",
+        "payload": {
+          "kind": "DocumentFollowed",
+          "followerId": "warehouse.inspector@demo.local"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0014",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 6,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:07:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "details": "Amended details before submission"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0015",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 7,
+        "type": "Return RequestSubmitted",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:08:00.000Z",
+        "payload": {
+          "kind": "DocumentSubmitted"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0021",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000001",
+        "sequence": 8,
+        "type": "Return RequestCancelled",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000001",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:14:00.000Z",
+        "payload": {
+          "kind": "DocumentCancelled"
+        },
+        "metadata": {}
+      }
+    ],
+    "default:Return%20Request:RMA-2026-000002": [
+      {
+        "id": "evt_0025",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000002",
+        "sequence": 1,
+        "type": "Return RequestCreated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000002",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "customer": "CUST-AMEND-GOLD",
+            "order": "ORD-AMEND-GOLD-2",
+            "reason": "Wrong Item",
+            "details": "Amended details before submission",
+            "requested_amount": 95,
+            "approved_amount": 0,
+            "risk_score": 1,
+            "high_risk": false,
+            "deduction_amount": 0,
+            "case_state": "Draft",
+            "logistics_state": "Not Started",
+            "inspection_state": "Pending",
+            "refund_state": "Not Eligible",
+            "submitted_by": "admin@demo.local",
+            "return_id": "RMA-2026-000002"
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "amendedFrom": "RMA-2026-000001",
+          "amendedFromVersion": 8
+        }
+      },
+      {
+        "id": "evt_0027",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000002",
+        "sequence": 2,
+        "type": "Return RequestUpdated",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000002",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:16:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "details": "Resubmitted after amendment"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0028",
+        "tenantId": "default",
+        "stream": "default:Return%20Request:RMA-2026-000002",
+        "sequence": 3,
+        "type": "Return RequestSubmitted",
+        "doctype": "Return Request",
+        "documentName": "RMA-2026-000002",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:17:00.000Z",
+        "payload": {
+          "kind": "DocumentSubmitted"
+        },
+        "metadata": {}
+      }
+    ],
+    "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open": [
+      {
+        "id": "evt_0009",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "sourceEventId": "evt_0008",
+          "sourceEventType": "Return RequestCreated",
+          "sourcePayloadKind": "DocumentCreated",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000001",
+          "sourceActorId": "returns.agent@demo.local",
+          "ruleId": "open-order-return",
+          "ruleName": "Link a new return to its order",
+          "actionId": "mark-order-open",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-AMEND-GOLD"
+            },
+            "patch": {
+              "has_open_return": true,
+              "latest_return": "RMA-2026-000001",
+              "latest_return_state": "Draft",
+              "latest_refund_state": "Not Eligible"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open"
+        }
+      },
+      {
+        "id": "evt_0016",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:09:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-amend-mid",
+          "claimExpiresAt": "2026-08-05T00:14:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0018",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0008%3Aopen-order-return%3Amark-order-open",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0008:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:11:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0008:open-order-return:mark-order-open",
+          "claimId": "claim-amend-mid"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0008",
+          "causationId": "evt_0008:open-order-return:mark-order-open",
+          "correlationId": "evt_0008",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "automationActionId": "evt_0008:open-order-return:mark-order-open"
+        }
+      }
+    ],
+    "default:__AutomationRuns:evt_0025%3Aopen-order-return%3Amark-order-open": [
+      {
+        "id": "evt_0026",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0025%3Aopen-order-return%3Amark-order-open",
+        "sequence": 1,
+        "type": "AutomationRunEnqueued",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0025:open-order-return:mark-order-open",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "AutomationRunEnqueued",
+          "runId": "evt_0025:open-order-return:mark-order-open",
+          "sourceEventId": "evt_0025",
+          "sourceEventType": "Return RequestCreated",
+          "sourcePayloadKind": "DocumentCreated",
+          "sourceDoctype": "Return Request",
+          "sourceDocumentName": "RMA-2026-000002",
+          "sourceActorId": "admin@demo.local",
+          "ruleId": "open-order-return",
+          "ruleName": "Link a new return to its order",
+          "actionId": "mark-order-open",
+          "action": {
+            "kind": "updateDocument",
+            "target": {
+              "doctype": "Order",
+              "name": "ORD-AMEND-GOLD-2"
+            },
+            "patch": {
+              "has_open_return": true,
+              "latest_return": "RMA-2026-000002",
+              "latest_return_state": "Draft",
+              "latest_refund_state": "Not Eligible"
+            }
+          },
+          "retry": {
+            "maxAttempts": 10,
+            "baseDelaySeconds": 30,
+            "maxDelaySeconds": 1800
+          },
+          "causationId": "evt_0025",
+          "correlationId": "evt_0025",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ]
+        },
+        "metadata": {
+          "sourceEventId": "evt_0025",
+          "causationId": "evt_0025",
+          "correlationId": "evt_0025",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open"
+        }
+      },
+      {
+        "id": "evt_0029",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0025%3Aopen-order-return%3Amark-order-open",
+        "sequence": 2,
+        "type": "AutomationRunClaimed",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0025:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:18:00.000Z",
+        "payload": {
+          "kind": "AutomationRunClaimed",
+          "runId": "evt_0025:open-order-return:mark-order-open",
+          "claimId": "claim-amend-final",
+          "claimExpiresAt": "2026-08-05T00:23:00.000Z"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "evt_0031",
+        "tenantId": "default",
+        "stream": "default:__AutomationRuns:evt_0025%3Aopen-order-return%3Amark-order-open",
+        "sequence": 3,
+        "type": "AutomationRunDelivered",
+        "doctype": "__AutomationRuns",
+        "documentName": "evt_0025:open-order-return:mark-order-open",
+        "actorId": "system",
+        "occurredAt": "2026-08-05T00:20:00.000Z",
+        "payload": {
+          "kind": "AutomationRunDelivered",
+          "runId": "evt_0025:open-order-return:mark-order-open",
+          "claimId": "claim-amend-final"
+        },
+        "metadata": {
+          "sourceEventId": "evt_0025",
+          "causationId": "evt_0025:open-order-return:mark-order-open",
+          "correlationId": "evt_0025",
+          "automationDepth": 1,
+          "automationPath": [
+            "open-order-return:mark-order-open"
+          ],
+          "automationRuleId": "open-order-return",
+          "automationRuleName": "Link a new return to its order",
+          "automationActionDefinitionId": "mark-order-open",
+          "automationActionId": "evt_0025:open-order-return:mark-order-open"
+        }
+      }
+    ],
+    "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026": [
+      {
+        "id": "evt_0005",
+        "tenantId": "default",
+        "stream": "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026",
+        "sequence": 1,
+        "type": "NamingSeriesStarted",
+        "doctype": "__NamingSeries",
+        "documentName": "Return Request:returns:date=2026",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "pattern": "RMA-{YYYY}-{sequence:6}",
+            "counter": "returns",
+            "scope": "date=2026",
+            "current": 1
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "counter": "returns",
+          "scope": "date=2026"
+        }
+      },
+      {
+        "id": "evt_0022",
+        "tenantId": "default",
+        "stream": "default:__NamingSeries:Return%20Request%3Areturns%3Adate%3D2026",
+        "sequence": 2,
+        "type": "NamingSeriesAdvanced",
+        "doctype": "__NamingSeries",
+        "documentName": "Return Request:returns:date=2026",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "DocumentUpdated",
+          "patch": {
+            "current": 2,
+            "pattern": "RMA-{YYYY}-{sequence:6}",
+            "counter": "returns",
+            "scope": "date=2026"
+          }
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "counter": "returns",
+          "scope": "date=2026"
+        }
+      }
+    ],
+    "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-AMEND-GOLD": [
+      {
+        "id": "evt_0001",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Customer%3Acustomer_id%3As%3ACUST-AMEND-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Customer:customer_id:s:CUST-AMEND-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:00:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Customer",
+            "field": "customer_id",
+            "value": "CUST-AMEND-GOLD",
+            "valueKey": "s:CUST-AMEND-GOLD",
+            "documentName": "CUST-AMEND-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Customer",
+          "target_field": "customer_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AMEND-GOLD": [
+      {
+        "id": "evt_0003",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AMEND-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Order:order_id:s:ORD-AMEND-GOLD",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:01:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Order",
+            "field": "order_id",
+            "value": "ORD-AMEND-GOLD",
+            "valueKey": "s:ORD-AMEND-GOLD",
+            "documentName": "ORD-AMEND-GOLD",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Order",
+          "target_field": "order_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AMEND-GOLD-2": [
+      {
+        "id": "evt_0019",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Order%3Aorder_id%3As%3AORD-AMEND-GOLD-2",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Order:order_id:s:ORD-AMEND-GOLD-2",
+        "actorId": "returns.manager@demo.local",
+        "occurredAt": "2026-08-05T00:13:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Order",
+            "field": "order_id",
+            "value": "ORD-AMEND-GOLD-2",
+            "valueKey": "s:ORD-AMEND-GOLD-2",
+            "documentName": "ORD-AMEND-GOLD-2",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Order",
+          "target_field": "order_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AMEND-GOLD": [
+      {
+        "id": "evt_0007",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AMEND-GOLD",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:order:s:ORD-AMEND-GOLD",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "order",
+            "value": "ORD-AMEND-GOLD",
+            "valueKey": "s:ORD-AMEND-GOLD",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "order"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AMEND-GOLD-2": [
+      {
+        "id": "evt_0024",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Aorder%3As%3AORD-AMEND-GOLD-2",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:order:s:ORD-AMEND-GOLD-2",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "order",
+            "value": "ORD-AMEND-GOLD-2",
+            "valueKey": "s:ORD-AMEND-GOLD-2",
+            "documentName": "RMA-2026-000002",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "order"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001": [
+      {
+        "id": "evt_0006",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000001",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:return_id:s:RMA-2026-000001",
+        "actorId": "returns.agent@demo.local",
+        "occurredAt": "2026-08-05T00:02:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "return_id",
+            "value": "RMA-2026-000001",
+            "valueKey": "s:RMA-2026-000001",
+            "documentName": "RMA-2026-000001",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "return_id"
+        }
+      }
+    ],
+    "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000002": [
+      {
+        "id": "evt_0023",
+        "tenantId": "default",
+        "stream": "default:__UniqueValues:Return%20Request%3Areturn_id%3As%3ARMA-2026-000002",
+        "sequence": 1,
+        "type": "UniqueValueStarted",
+        "doctype": "__UniqueValues",
+        "documentName": "Return Request:return_id:s:RMA-2026-000002",
+        "actorId": "admin@demo.local",
+        "occurredAt": "2026-08-05T00:15:00.000Z",
+        "payload": {
+          "kind": "DocumentCreated",
+          "data": {
+            "doctype": "Return Request",
+            "field": "return_id",
+            "value": "RMA-2026-000002",
+            "valueKey": "s:RMA-2026-000002",
+            "documentName": "RMA-2026-000002",
+            "active": true
+          },
+          "docstatus": "draft"
+        },
+        "metadata": {
+          "target_doctype": "Return Request",
+          "target_field": "return_id"
+        }
+      }
+    ]
+  },
+  "listings": {
+    "Customer": [
+      {
+        "name": "CUST-AMEND-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:00:00.000Z"
+      }
+    ],
+    "Order": [
+      {
+        "name": "ORD-AMEND-GOLD-2",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:19:00.000Z"
+      },
+      {
+        "name": "ORD-AMEND-GOLD",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:10:00.000Z"
+      }
+    ],
+    "Return Request": [
+      {
+        "name": "RMA-2026-000002",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:17:00.000Z"
+      },
+      {
+        "name": "RMA-2026-000001",
+        "version": 8,
+        "docstatus": "cancelled",
+        "updatedAt": "2026-08-05T00:14:00.000Z"
+      }
+    ],
+    "__AutomationRuns": [
+      {
+        "name": "evt_0025:open-order-return:mark-order-open",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:20:00.000Z"
+      },
+      {
+        "name": "evt_0008:open-order-return:mark-order-open",
+        "version": 3,
+        "docstatus": "submitted",
+        "updatedAt": "2026-08-05T00:11:00.000Z"
+      }
+    ],
+    "__NamingSeries": [
+      {
+        "name": "Return Request:returns:date=2026",
+        "version": 2,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:15:00.000Z"
+      }
+    ],
+    "__UniqueValues": [
+      {
+        "name": "Return Request:order:s:ORD-AMEND-GOLD-2",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:15:00.000Z"
+      },
+      {
+        "name": "Return Request:return_id:s:RMA-2026-000002",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:15:00.000Z"
+      },
+      {
+        "name": "Order:order_id:s:ORD-AMEND-GOLD-2",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:13:00.000Z"
+      },
+      {
+        "name": "Return Request:order:s:ORD-AMEND-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Return Request:return_id:s:RMA-2026-000001",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:02:00.000Z"
+      },
+      {
+        "name": "Order:order_id:s:ORD-AMEND-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:01:00.000Z"
+      },
+      {
+        "name": "Customer:customer_id:s:CUST-AMEND-GOLD",
+        "version": 1,
+        "docstatus": "draft",
+        "updatedAt": "2026-08-05T00:00:00.000Z"
+      }
+    ]
+  },
+  "automationRuns": [
+    {
+      "id": "evt_0008:open-order-return:mark-order-open",
+      "tenantId": "default",
+      "sourceEventId": "evt_0008",
+      "sourceEventType": "Return RequestCreated",
+      "sourcePayloadKind": "DocumentCreated",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000001",
+      "sourceActorId": "returns.agent@demo.local",
+      "ruleId": "open-order-return",
+      "ruleName": "Link a new return to its order",
+      "actionId": "mark-order-open",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-AMEND-GOLD"
+        },
+        "patch": {
+          "has_open_return": true,
+          "latest_return": "RMA-2026-000001",
+          "latest_return_state": "Draft",
+          "latest_refund_state": "Not Eligible"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0008",
+      "correlationId": "evt_0008",
+      "automationDepth": 1,
+      "automationPath": [
+        "open-order-return:mark-order-open"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:02:00.000Z",
+      "claimedAt": "2026-08-05T00:09:00.000Z",
+      "claimId": "claim-amend-mid",
+      "deliveredAt": "2026-08-05T00:11:00.000Z",
+      "version": 3
+    },
+    {
+      "id": "evt_0025:open-order-return:mark-order-open",
+      "tenantId": "default",
+      "sourceEventId": "evt_0025",
+      "sourceEventType": "Return RequestCreated",
+      "sourcePayloadKind": "DocumentCreated",
+      "sourceDoctype": "Return Request",
+      "sourceDocumentName": "RMA-2026-000002",
+      "sourceActorId": "admin@demo.local",
+      "ruleId": "open-order-return",
+      "ruleName": "Link a new return to its order",
+      "actionId": "mark-order-open",
+      "action": {
+        "kind": "updateDocument",
+        "target": {
+          "doctype": "Order",
+          "name": "ORD-AMEND-GOLD-2"
+        },
+        "patch": {
+          "has_open_return": true,
+          "latest_return": "RMA-2026-000002",
+          "latest_return_state": "Draft",
+          "latest_refund_state": "Not Eligible"
+        }
+      },
+      "retry": {
+        "maxAttempts": 10,
+        "baseDelaySeconds": 30,
+        "maxDelaySeconds": 1800
+      },
+      "causationId": "evt_0025",
+      "correlationId": "evt_0025",
+      "automationDepth": 1,
+      "automationPath": [
+        "open-order-return:mark-order-open"
+      ],
+      "status": "delivered",
+      "attempts": 1,
+      "enqueuedAt": "2026-08-05T00:15:00.000Z",
+      "claimedAt": "2026-08-05T00:18:00.000Z",
+      "claimId": "claim-amend-final",
+      "deliveredAt": "2026-08-05T00:20:00.000Z",
+      "version": 3
+    }
+  ]
+}
