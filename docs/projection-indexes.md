@@ -304,13 +304,15 @@ const router = new RoutedProjectionStore({
 const documents = withProjectionFollowers(new D1DocumentStore(env.DB), router);
 ```
 
-A target moves `building` → `caught-up` → `active`, and the one it replaces becomes `retired`. `building` and `caught-up` receive writes but are not read from; `retired` receives nothing. Reads switch at runtime with `router.readFrom("v2")`, which is how a candidate projection is compared against the live one before it is promoted.
+A target moves `building` → `caught-up` → `active`, and the one it replaces becomes `retired`. `building` receives writes but cannot serve reads; `caught-up` may serve comparison reads but is not promoted until parity is proven. `retired` receives nothing. Use `router.compare(...)` for a runtime row-by-row diff and `router.promote(...)` only after `router.markCaughtUp(...)`; promotion changes the active target and retires the previous one as one in-memory state transition.
 
 `core` and `application` never see any of this. The router satisfies `ProjectionStore`, and the read source is chosen here rather than threaded through queries — so a projection version is a deployment concern, not part of the query contract.
 
 **Followers are written outside the commit's atomic boundary, deliberately.** The active projection is written inside `commitBatch`'s batch together with the events; a projection that is still being built must not be able to fail a document write, and widening the transaction to cover it would do exactly that. So follower writes happen after the commit succeeds, each failure isolated and handed to `onFollowerFailure`. Without wiring that callback the router drifts silently, which is the one way to use it wrong.
 
 `withProjectionFollowers` also forwards the auxiliary snapshots that `commitBatch` produces — naming counters and unique-value reservations — because a follower missing those is not a usable projection.
+
+Follower failures are retained as retryable writes (`router.retryFailedFollowers()`). A promotion attempt retries them under the same write barrier before checking parity, and a target with an unresolved follower failure cannot be promoted.
 
 ## Rebuilding a projection from the event stream
 
@@ -328,9 +330,11 @@ const { state, more } = await rebuild.advance(tenantId, run.runId);
 
 Three properties make it safe to run against live traffic:
 
-- **It never writes the projection that is serving reads.** `start` and `advance` both refuse a target equal to the router's current read source, so live reads keep answering from the projection that was already correct. Rebuild into a `building` target, compare, then promote it with `router.readFrom(...)`.
+- **It never writes the projection that is serving reads.** `start` and `advance` both refuse a target equal to the router's current read source, so live reads keep answering from the projection that was already correct. Rebuild into a `building` target, compare, then promote it with `router.markCaughtUp(...)` followed by `router.promote(...)`.
 - **It is resumable and idempotent.** Progress is a cursor over the lexicographically ordered stream list, so a stream created mid-rebuild sorts into place instead of shifting everything after it, and `ProjectionStore.save` upserts — replaying a batch rewrites the same rows rather than duplicating them. Zero-pad document names if you want that order to match the numeric one.
 - **It is externally paced.** `advance` does one batch and returns. Batch size times call frequency is the rate limit, which matters because a rebuild competes with live writes for the same single-writer database.
+
+`advance` reaching `completed` means the historical scan is finished, not that the candidate is safe to serve. Before cutover, `promote` enters the router's write barrier, folds the current stream heads again, removes candidate rows for deleted documents, retries failed follower writes, and compares candidate rows with the active target. Only an empty difference set and no pending follower failure can move the target to `caught-up` and then `active`. The barrier prevents a live commit from landing between the final reconcile and the promotion decision.
 
 A stream that fails to rebuild is recorded and skipped rather than stalling the run, and a stream that folds to `null` (a deleted document) advances the cursor with nothing written.
 

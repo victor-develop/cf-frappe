@@ -26,6 +26,10 @@ export class InMemoryProjectionStore implements ProjectionStore {
     this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), cloneDocumentSnapshot(snapshot));
   }
 
+  async remove(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void> {
+    this.documents.delete(key(tenantId, doctype, name));
+  }
+
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;

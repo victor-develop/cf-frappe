@@ -41,6 +41,18 @@ export interface ProjectionFollowerFailure {
   readonly reason: string;
 }
 
+export interface ProjectionParityDifference {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  readonly name: DocumentName;
+  readonly reason: "missing" | "stale" | "unexpected";
+}
+
+export interface ProjectionParityResult {
+  readonly target: string;
+  readonly differences: readonly ProjectionParityDifference[];
+}
+
 export interface ProjectionRouterOptions {
   readonly targets: readonly ProjectionTarget[];
   /**
@@ -63,12 +75,14 @@ export interface ProjectionRouterOptions {
  * that is still being built must not be able to break the write path.
  */
 export class RoutedProjectionStore implements ProjectionStore {
-  private readonly targets: readonly ProjectionTarget[];
+  private targets: ProjectionTarget[];
   private readonly onFollowerFailure: (failure: ProjectionFollowerFailure) => void;
   private readTarget: string;
+  private writeTail: Promise<void> = Promise.resolve();
+  private readonly failedFollowerWrites = new Map<string, { readonly target: string; readonly snapshot: DocumentSnapshot }>();
 
   constructor(options: ProjectionRouterOptions) {
-    this.targets = assertProjectionTargets(options.targets);
+    this.targets = [...assertProjectionTargets(options.targets)];
     this.onFollowerFailure = options.onFollowerFailure ?? (() => undefined);
     this.readTarget = activeTarget(this.targets).name;
   }
@@ -81,6 +95,101 @@ export class RoutedProjectionStore implements ProjectionStore {
   /** The target reads currently go to. */
   readingFrom(): string {
     return this.readTarget;
+  }
+
+  targetState(name: string): ProjectionTargetState {
+    return this.requireTarget(name).state;
+  }
+
+  targetStore(name: string): ProjectionStore {
+    return this.requireTarget(name).store;
+  }
+
+  async compare(
+    targetName: string,
+    tenantId: TenantId,
+    doctype: DocTypeName
+  ): Promise<ProjectionParityResult> {
+    const target = this.requireTarget(targetName).store;
+    const active = activeTarget(this.targets).store;
+    const [expected, actual] = await Promise.all([
+      listAll(active, tenantId, doctype),
+      listAll(target, tenantId, doctype)
+    ]);
+    const differences: ProjectionParityDifference[] = [];
+    const expectedByName = new Map(expected.map((snapshot) => [snapshot.name, snapshot]));
+    const actualByName = new Map(actual.map((snapshot) => [snapshot.name, snapshot]));
+    for (const snapshot of expected) {
+      const candidate = actualByName.get(snapshot.name);
+      if (candidate === undefined) {
+        differences.push({ tenantId, doctype, name: snapshot.name, reason: "missing" });
+      } else if (!sameSnapshot(snapshot, candidate)) {
+        differences.push({ tenantId, doctype, name: snapshot.name, reason: "stale" });
+      }
+    }
+    for (const snapshot of actual) {
+      if (!expectedByName.has(snapshot.name)) {
+        differences.push({ tenantId, doctype, name: snapshot.name, reason: "unexpected" });
+      }
+    }
+    return { target: targetName, differences };
+  }
+
+  /** Serializes a cutover with commits performed through withProjectionFollowers. */
+  async withWriteBarrier<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.writeTail;
+    let release!: () => void;
+    this.writeTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  markCaughtUp(name: string): void {
+    const target = this.requireTarget(name);
+    if (target.state !== "building") {
+      throw new FrameworkError(
+        "PROJECTION_TARGET_STATE_INVALID",
+        `Projection target '${name}' must be building before it can be caught up`,
+        { status: 409 }
+      );
+    }
+    this.replaceTarget({ ...target, state: "caught-up" });
+  }
+
+  promote(name: string): void {
+    const target = this.requireTarget(name);
+    if (target.state !== "caught-up") {
+      throw new FrameworkError(
+        "PROJECTION_TARGET_STATE_INVALID",
+        `Projection target '${name}' must be caught-up before promotion`,
+        { status: 409 }
+      );
+    }
+    const current = activeTarget(this.targets);
+    this.targets = this.targets.map((candidate) => {
+      if (candidate.name === name) return { ...candidate, state: "active" };
+      if (candidate.name === current.name) return { ...candidate, state: "retired" };
+      return candidate;
+    });
+    this.readTarget = name;
+  }
+
+  pendingFollowerFailures(): readonly ProjectionFollowerFailure[] {
+    return [...this.failedFollowerWrites.values()].map(({ target, snapshot }) => ({
+      target,
+      tenantId: snapshot.tenantId,
+      doctype: snapshot.doctype,
+      name: snapshot.name,
+      reason: "retry pending"
+    }));
+  }
+
+  async retryFailedFollowers(): Promise<readonly ProjectionFollowerFailure[]> {
+    return this.withWriteBarrier(() => this.retryFailedFollowersUnlocked());
   }
 
   /**
@@ -101,6 +210,13 @@ export class RoutedProjectionStore implements ProjectionStore {
         { status: 409 }
       );
     }
+    if (target.state === "building") {
+      throw new FrameworkError(
+        "PROJECTION_TARGET_STATE_INVALID",
+        `Projection target '${name}' is still building and cannot serve reads`,
+        { status: 409 }
+      );
+    }
     this.readTarget = name;
   }
 
@@ -117,8 +233,10 @@ export class RoutedProjectionStore implements ProjectionStore {
   }
 
   async save(snapshot: DocumentSnapshot): Promise<void> {
-    await activeTarget(this.targets).store.save(snapshot);
-    await this.saveFollowers([snapshot]);
+    await this.withWriteBarrier(async () => {
+      await activeTarget(this.targets).store.save(snapshot);
+      await this.saveFollowersUnlocked([snapshot]);
+    });
   }
 
   /**
@@ -127,6 +245,27 @@ export class RoutedProjectionStore implements ProjectionStore {
    * already written the active projection inside its own atomic boundary.
    */
   async saveFollowers(snapshots: readonly DocumentSnapshot[]): Promise<void> {
+    await this.withWriteBarrier(() => this.saveFollowersUnlocked(snapshots));
+  }
+
+  /** Internal commit-path hook; the caller already owns the write barrier. */
+  async saveFollowersUnlockedForCommit(snapshots: readonly DocumentSnapshot[]): Promise<void> {
+    await this.saveFollowersUnlocked(snapshots);
+  }
+
+  async retryFailedFollowersUnlocked(): Promise<readonly ProjectionFollowerFailure[]> {
+    for (const [key, entry] of this.failedFollowerWrites) {
+      try {
+        await this.requireTarget(entry.target).store.save(entry.snapshot);
+        this.failedFollowerWrites.delete(key);
+      } catch (cause) {
+        this.onFollowerFailure(this.failure(entry.target, entry.snapshot, cause));
+      }
+    }
+    return this.pendingFollowerFailures();
+  }
+
+  private async saveFollowersUnlocked(snapshots: readonly DocumentSnapshot[]): Promise<void> {
     const followers = this.targets.filter(
       (target) => target.state !== "active" && target.state !== "retired"
     );
@@ -134,29 +273,39 @@ export class RoutedProjectionStore implements ProjectionStore {
       for (const snapshot of snapshots) {
         try {
           await target.store.save(snapshot);
+          this.failedFollowerWrites.delete(followerKey(target.name, snapshot));
         } catch (cause) {
-          this.onFollowerFailure({
-            target: target.name,
-            tenantId: snapshot.tenantId,
-            doctype: snapshot.doctype,
-            name: snapshot.name,
-            reason: cause instanceof Error ? cause.message : String(cause)
-          });
+          this.failedFollowerWrites.set(followerKey(target.name, snapshot), { target: target.name, snapshot });
+          this.onFollowerFailure(this.failure(target.name, snapshot, cause));
         }
       }
     }
   }
 
   private reader(): ProjectionStore {
-    const target = this.targets.find((candidate) => candidate.name === this.readTarget);
+    return this.requireTarget(this.readTarget).store;
+  }
+
+  private requireTarget(name: string): ProjectionTarget {
+    const target = this.targets.find((candidate) => candidate.name === name);
     if (target === undefined) {
-      throw new FrameworkError(
-        "PROJECTION_TARGET_NOT_FOUND",
-        `Read target '${this.readTarget}' is no longer mounted`,
-        { status: 500 }
-      );
+      throw new FrameworkError("PROJECTION_TARGET_NOT_FOUND", `Unknown projection target '${name}'`, { status: 404 });
     }
-    return target.store;
+    return target;
+  }
+
+  private replaceTarget(target: ProjectionTarget): void {
+    this.targets = this.targets.map((candidate) => candidate.name === target.name ? target : candidate);
+  }
+
+  private failure(target: string, snapshot: DocumentSnapshot, cause: unknown): ProjectionFollowerFailure {
+    return {
+      target,
+      tenantId: snapshot.tenantId,
+      doctype: snapshot.doctype,
+      name: snapshot.name,
+      reason: cause instanceof Error ? cause.message : String(cause)
+    };
   }
 }
 
@@ -180,9 +329,11 @@ export function withProjectionFollowers(
       events: readonly NewDomainEvent[],
       project: (committed: readonly DomainEvent[]) => DocumentSnapshot
     ) => {
-      const commit = await store.commit(stream, expectedVersion, events, project);
-      await router.saveFollowers([commit.snapshot]);
-      return commit;
+      return router.withWriteBarrier(async () => {
+        const commit = await store.commit(stream, expectedVersion, events, project);
+        await router.saveFollowersUnlockedForCommit([commit.snapshot]);
+        return commit;
+      });
     },
     commitBatch: async (
       entries: readonly DocumentCommitBatchEntry[],
@@ -192,15 +343,17 @@ export function withProjectionFollowers(
       // naming counters and unique-value reservations are projection rows too,
       // and a follower missing them is not a usable projection.
       let projected: DocumentCommitBatchProjection | undefined;
-      const commit = await store.commitBatch(entries, (committed) => {
-        projected = project(committed);
-        return projected;
+      return router.withWriteBarrier(async () => {
+        const commit = await store.commitBatch(entries, (committed) => {
+          projected = project(committed);
+          return projected;
+        });
+        await router.saveFollowersUnlockedForCommit([
+          commit.snapshot,
+          ...(projected?.auxiliarySnapshots ?? [])
+        ]);
+        return commit;
       });
-      await router.saveFollowers([
-        commit.snapshot,
-        ...(projected?.auxiliarySnapshots ?? [])
-      ]);
-      return commit;
     }
   };
 }
@@ -235,4 +388,34 @@ function assertProjectionTargets(targets: readonly ProjectionTarget[]): readonly
 
 function activeTarget(targets: readonly ProjectionTarget[]): ProjectionTarget {
   return targets.find((target) => target.state === "active")!;
+}
+
+function followerKey(target: string, snapshot: DocumentSnapshot): string {
+  return `${target}:${snapshot.tenantId}:${snapshot.doctype}:${snapshot.name}`;
+}
+
+async function listAll(
+  store: ProjectionStore,
+  tenantId: TenantId,
+  doctype: DocTypeName
+): Promise<readonly DocumentSnapshot[]> {
+  const rows: DocumentSnapshot[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await store.list({ tenantId, doctype, limit: 500, offset, skipTotal: true });
+    rows.push(...page.data);
+    if (page.data.length < page.limit) return rows;
+    offset += page.data.length;
+  }
+}
+
+function sameSnapshot(left: DocumentSnapshot, right: DocumentSnapshot): boolean {
+  return left.tenantId === right.tenantId &&
+    left.doctype === right.doctype &&
+    left.name === right.name &&
+    left.version === right.version &&
+    left.docstatus === right.docstatus &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    JSON.stringify(left.data) === JSON.stringify(right.data);
 }

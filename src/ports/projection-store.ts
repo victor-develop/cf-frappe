@@ -14,5 +14,7 @@ export interface ProjectionStore {
     name: DocumentName
   ): Promise<DocumentSnapshot | null>;
   save(snapshot: DocumentSnapshot): Promise<void>;
+  /** Removes one derived row. Implementations must scope the delete by key. */
+  remove?(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void>;
   list(query: ListDocumentsQuery): Promise<ListDocumentsResult>;
 }
