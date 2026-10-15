@@ -64,6 +64,16 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
       .run();
   }
 
+  async remove(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM ${D1_DOCUMENTS_TABLE}
+         WHERE tenant_id = ? AND doctype = ? AND name = ?`
+      )
+      .bind(tenantId, doctype, name)
+      .run();
+  }
+
   async list(query: ListDocumentsQuery): Promise<ListDocumentsResult> {
     const listQuery = d1ProjectionListQuery(query);
     const page = this.db

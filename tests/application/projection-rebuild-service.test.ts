@@ -8,7 +8,7 @@ import {
   foldProjectionRebuild,
   projectionRebuildStream
 } from "../../src";
-import type { NewDomainEvent, ProjectionTarget } from "../../src";
+import type { DocumentSnapshot, NewDomainEvent, ProjectionTarget } from "../../src";
 import type { IdGenerator } from "../../src/ports/id-generator.js";
 import type { ProjectionStore } from "../../src/ports/projection-store.js";
 import { now } from "../helpers";
@@ -57,6 +57,42 @@ describe("ProjectionRebuildService", () => {
     ]);
 
     expect(rebuilt.data).toEqual(live.data);
+  });
+
+  it("reconciles writes during rebuild, removes stale rows, and promotes only after parity", async () => {
+    const context = await scenario({ documents: 3, batchSize: 1 });
+    await context.candidate.save(snapshotFor("TASK-999"));
+    const started = await context.service.start({ tenantId: "acme", doctype: "Task", target: "v2", batchSize: 1 });
+
+    await context.service.advance("acme", started.runId);
+    await context.events.append("acme/Task/TASK-001", 1, [updateEvent("evt-update", "Changed")]);
+    await context.active.save(snapshotFor("TASK-001", { title: "Changed" }, 2));
+    await context.service.advance("acme", started.runId);
+    await context.service.advance("acme", started.runId);
+
+    const result = await context.service.promote("acme", started.runId);
+
+    expect(result.differences).toEqual([]);
+    expect(context.router.readingFrom()).toBe("v2");
+    await expect(context.candidate.get("acme", "Task", "TASK-999")).resolves.toBeNull();
+    await expect(context.candidate.get("acme", "Task", "TASK-001")).resolves.toMatchObject({
+      version: 2,
+      data: { title: "Changed" }
+    });
+  });
+
+  it("does not promote when parity or follower repair is incomplete", async () => {
+    const context = await scenario({ documents: 1, batchSize: 10 });
+    const started = await context.service.start({ tenantId: "acme", doctype: "Task", target: "v2" });
+    await context.service.advance("acme", started.runId);
+    await context.active.save(snapshotFor("TASK-001", { title: "Wrong" }));
+
+    const result = await context.service.promote("acme", started.runId);
+
+    expect(result.differences).toEqual([
+      { tenantId: "acme", doctype: "Task", name: "TASK-001", reason: "stale" }
+    ]);
+    expect(context.router.readingFrom()).toBe("v1");
   });
 
   it("resumes from the cursor instead of starting over", async () => {
@@ -124,6 +160,7 @@ describe("ProjectionRebuildService", () => {
     ).rejects.toMatchObject({ code: "PROJECTION_REBUILD_TARGET_INVALID" });
 
     // And it stays refused after the read source moves.
+    context.router.markCaughtUp("v2");
     context.router.readFrom("v2");
     await expect(
       context.service.start({ tenantId: "acme", doctype: "Task", target: "v2" })
@@ -253,6 +290,38 @@ function documentCreated(name: string, stream: string, index: number): NewDomain
     actorId: "owner",
     occurredAt: now,
     payload: { kind: "DocumentCreated", data: { title: `Task ${index}` }, docstatus: "draft" },
+    metadata: {}
+  };
+}
+
+function snapshotFor(
+  name: string,
+  data: DocumentSnapshot["data"] = { title: "t" },
+  version = 1
+): DocumentSnapshot {
+  return {
+    tenantId: "acme",
+    doctype: "Task",
+    name,
+    version,
+    docstatus: "draft" as const,
+    data,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function updateEvent(id: string, title: string): NewDomainEvent {
+  return {
+    id,
+    tenantId: "acme",
+    stream: "acme/Task/TASK-001",
+    type: "DocumentUpdated",
+    doctype: "Task",
+    documentName: "TASK-001",
+    actorId: "owner",
+    occurredAt: now,
+    payload: { kind: "DocumentUpdated", patch: { title } },
     metadata: {}
   };
 }

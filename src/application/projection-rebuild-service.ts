@@ -38,6 +38,11 @@ export interface ProjectionRebuildAdvanceResult {
   readonly more: boolean;
 }
 
+export interface ProjectionRebuildPromotionResult {
+  readonly state: ProjectionRebuildState;
+  readonly differences: readonly import("./projection-targets.js").ProjectionParityDifference[];
+}
+
 export interface ProjectionRebuildServiceOptions {
   readonly events: EventStore;
   readonly streams: StreamCatalog;
@@ -174,6 +179,62 @@ export class ProjectionRebuildService {
       runId
     });
     return { state: await this.requireState(tenantId, runId), more: false };
+  }
+
+  /**
+   * Performs the final catch-up under the same barrier used by live commits,
+   * compares the candidate with the active projection, and promotes only when
+   * there are no follower failures or parity differences.
+   */
+  async promote(tenantId: TenantId, runId: string): Promise<ProjectionRebuildPromotionResult> {
+    const initial = await this.requireState(tenantId, runId);
+    if (initial.status !== "completed") {
+      throw new FrameworkError(
+        "PROJECTION_REBUILD_NOT_READY",
+        `Projection rebuild '${runId}' must be completed before promotion`,
+        { status: 409 }
+      );
+    }
+    const target = this.assertRebuildableTarget(initial.target);
+    if (target.remove === undefined) {
+      throw new FrameworkError(
+        "PROJECTION_TARGET_NOT_PROMOTABLE",
+        `Projection target '${initial.target}' cannot remove stale rows before promotion`,
+        { status: 409 }
+      );
+    }
+    return this.options.router.withWriteBarrier(async () => {
+      await this.options.router.retryFailedFollowersUnlocked();
+      const streams = await this.options.streams.listStreams({ tenantId, doctype: initial.doctype });
+      const expectedNames = new Set<string>();
+      for (const stream of streams) {
+        const snapshot = foldDocument(await this.options.events.readStream(stream));
+        if (snapshot === null) {
+          continue;
+        }
+        expectedNames.add(snapshot.name);
+        await target.save(snapshot);
+      }
+      const staleNames: string[] = [];
+      let offset = 0;
+      for (;;) {
+        const candidate = await target.list({ tenantId, doctype: initial.doctype, limit: 500, offset, skipTotal: true });
+        staleNames.push(...candidate.data.filter((snapshot) => !expectedNames.has(snapshot.name)).map((snapshot) => snapshot.name));
+        if (candidate.data.length < candidate.limit) break;
+        offset += candidate.data.length;
+      }
+      for (const name of staleNames) {
+        await target.remove!(tenantId, initial.doctype, name);
+      }
+      const parity = await this.options.router.compare(initial.target, tenantId, initial.doctype);
+      const failures = this.options.router.pendingFollowerFailures();
+      if (parity.differences.length > 0 || failures.length > 0) {
+        return { state: await this.requireState(tenantId, runId), differences: parity.differences };
+      }
+      this.options.router.markCaughtUp(initial.target);
+      this.options.router.promote(initial.target);
+      return { state: await this.requireState(tenantId, runId), differences: [] };
+    });
   }
 
   private assertRebuildableTarget(name: string): ProjectionStore {

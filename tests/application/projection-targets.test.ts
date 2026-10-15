@@ -52,6 +52,24 @@ describe("RoutedProjectionStore", () => {
     expect(listed.data[0]?.data).toEqual({ title: "from v2" });
   });
 
+  it("does not expose a building target as a read source and promotes atomically", async () => {
+    const active = new InMemoryProjectionStore();
+    const candidate = new InMemoryProjectionStore();
+    const router = new RoutedProjectionStore({
+      targets: [target("v1", "active", active), target("v2", "building", candidate)]
+    });
+
+    expect(() => router.readFrom("v2")).toThrow("still building");
+    router.markCaughtUp("v2");
+    router.readFrom("v2");
+    expect(router.targetState("v2")).toBe("caught-up");
+
+    router.promote("v2");
+    expect(router.targetState("v1")).toBe("retired");
+    expect(router.targetState("v2")).toBe("active");
+    expect(router.readingFrom()).toBe("v2");
+  });
+
   it("reports follower failures without failing the write", async () => {
     const active = new InMemoryProjectionStore();
     const failures: ProjectionFollowerFailure[] = [];
@@ -66,6 +84,32 @@ describe("RoutedProjectionStore", () => {
     expect(failures).toEqual([
       { target: "v2", tenantId: "acme", doctype: "Task", name: "TASK-1", reason: "disk full" }
     ]);
+  });
+
+  it("keeps failed follower writes retryable", async () => {
+    const active = new InMemoryProjectionStore();
+    const follower = new InMemoryProjectionStore();
+    let fail = true;
+    const failures: ProjectionFollowerFailure[] = [];
+    const wrapped: ProjectionStore = {
+      get: (...args) => follower.get(...args),
+      list: (...args) => follower.list(...args),
+      save: async (value) => {
+        if (fail) throw new Error("temporary");
+        await follower.save(value);
+      }
+    };
+    const router = new RoutedProjectionStore({
+      targets: [target("v1", "active", active), target("v2", "building", wrapped)],
+      onFollowerFailure: (failure) => failures.push(failure)
+    });
+
+    await router.save(snapshot("TASK-1"));
+    expect(router.pendingFollowerFailures()).toHaveLength(1);
+    fail = false;
+    await expect(router.retryFailedFollowers()).resolves.toEqual([]);
+    expect(router.pendingFollowerFailures()).toEqual([]);
+    expect(failures).toHaveLength(1);
   });
 
   it("propagates a failure on the active target", async () => {
