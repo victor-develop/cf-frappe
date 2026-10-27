@@ -186,6 +186,74 @@ describe("typed projection tables as a named, rebuilt, compared projection versi
     legacy.d1.close();
   });
 
+  it("migrates a field change through a new table: rebuild, compare, switch, retire the old one", async () => {
+    // v1 is live and active. v2 promotes `title` as well, which moves the
+    // layout digest: a new table, filled by a rebuild while v1 keeps serving.
+    const registry = createRegistry({ doctypes: [Task] });
+    const v1 = planD1TypedProjectionLayout(Task);
+    const Task2 = defineDocType({ ...Task, promotedFields: ["points", "title"] });
+    const v2 = planD1TypedProjectionLayout(Task2);
+    expect(v2.table).not.toBe(v1.table);
+
+    const d1 = createTestD1({
+      schema: [...frameworkSchema(), ...planD1TypedProjectionMigrations([Task]).map(renderD1Migration)]
+    });
+    const clock = tickingClock("2026-01-01T00:00:00.000Z");
+    const ids = sequentialIds();
+    await seed(new DocumentService({
+      registry,
+      store: new D1DocumentStore(d1.database, { typedProjections: planD1TypedProjections([Task], { mode: "active" }) }),
+      clock,
+      ids
+    }), 7);
+
+    // Deploy v2: its migration creates the new table; v2 runs in shadow.
+    for (const migration of planD1TypedProjectionMigrations([Task2])) {
+      for (const statement of migration.statements) {
+        d1.query(statement.sql);
+      }
+    }
+    const shadowed = new DocumentService({
+      registry: createRegistry({ doctypes: [Task2] }),
+      store: new D1DocumentStore(d1.database, { typedProjections: planD1TypedProjections([Task2], { mode: "shadow" }) }),
+      clock,
+      ids
+    });
+    await shadowed.create({ actor, doctype: "Task", data: { title: "after v2", status: "Open", points: 9 } });
+
+    const shared = new D1ProjectionStore(d1.database);
+    const typedV2 = new D1TypedProjectionStore(d1.database, { layouts: [v2] });
+    const router = new RoutedProjectionStore({
+      targets: [{ name: "shared", state: "active", store: shared }, { name: "v2", state: "building", store: typedV2 }]
+    });
+    expect((await router.compare("v2", TENANT, "Task")).differences).toHaveLength(7);
+    const rebuild = new ProjectionRebuildService({
+      events: new D1EventStore(d1.database), streams: new D1EventStore(d1.database), router,
+      targetStore: (name) => router.targetStore(name), clock, ids
+    });
+    const run = await rebuild.start({ tenantId: TENANT, doctype: "Task", target: "v2" });
+    for (let more = true; more;) {
+      more = (await rebuild.advance(TENANT, run.runId)).more;
+    }
+    expect((await router.compare("v2", TENANT, "Task")).differences).toEqual([]);
+    expect(d1.query(`SELECT COUNT(*) AS n FROM ${v2.table} WHERE f_title IS NOT NULL`)[0]!.n).toBe(8);
+
+    // Switch reads to v2, then retire v1.
+    const viaV2 = new QueryService({
+      registry: createRegistry({ doctypes: [Task2] }),
+      projections: new D1TypedProjectionStore(d1.database, { layouts: [v2], fallback: shared })
+    });
+    expect((await viaV2.listDocuments(actor, "Task", { filters: [{ field: "title", value: "after v2" }] })).total).toBe(1);
+    for (const migration of planD1TypedProjectionMigrations([Task2], { retiredTables: [v1.table] }).slice(1)) {
+      for (const statement of migration.statements) {
+        d1.query(statement.sql);
+      }
+    }
+    expect(d1.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name LIKE 'cf_frappe_p_%'"))
+      .toEqual([{ name: v2.table }]);
+    d1.close();
+  });
+
   it("answers QueryService from the typed table exactly as from the shared one", async () => {
     const context = world();
     await seed(context.documents, 13);

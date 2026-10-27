@@ -56,7 +56,7 @@ export interface CloudFrappeTypedProjectionServices {
   compare(tenantId: TenantId, doctype: DocTypeName): Promise<ProjectionParityResult>;
 }
 
-const plans = new WeakMap<object, D1TypedProjectionPlan>();
+const plans = new WeakMap<ModelRegistry, WeakMap<object, D1TypedProjectionPlan>>();
 
 /**
  * Resolves the options once per options object, so a misconfiguration throws at
@@ -70,12 +70,19 @@ export function typedProjectionPlanFor(
   if (options === undefined) {
     return undefined;
   }
-  const cached = plans.get(options);
+  // Keyed by registry as well: the layouts come from the registry's DocTypes,
+  // so one options object shared by two registries must not share a plan.
+  let byOptions = plans.get(registry);
+  if (byOptions === undefined) {
+    byOptions = new WeakMap();
+    plans.set(registry, byOptions);
+  }
+  const cached = byOptions.get(options);
   if (cached !== undefined) {
     return cached;
   }
   const plan = planD1TypedProjections(registry.list(), options);
-  plans.set(options, plan);
+  byOptions.set(options, plan);
   return plan;
 }
 
