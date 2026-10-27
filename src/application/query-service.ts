@@ -69,7 +69,9 @@ import {
   type TenantDocTypeResolver
 } from "./document-tenant-policy.js";
 import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
+import type { DocumentFieldStates } from "./document-field-access-policy.js";
 import {
+  documentFieldStates,
   projectDocTypeForDocumentFormAccess,
   projectDocTypeForFieldAccess,
   projectDocTypeForFieldQueries,
@@ -115,6 +117,22 @@ export interface ListDocumentsOptions {
   readonly limit?: number;
   readonly offset?: number;
   readonly maxLimit?: number;
+}
+
+export interface DocumentWithFieldStates {
+  readonly document: DocumentSnapshot;
+  readonly fieldStates: DocumentFieldStates;
+}
+
+/** A page of a list, with field states per document name when they were asked for. */
+export interface ListDocumentsViewResult extends ListDocumentsResult {
+  readonly fieldStates?: Readonly<Record<string, DocumentFieldStates>>;
+}
+
+/** A readable document as stored, and as the caller is shown it. */
+interface ReadableDocument {
+  readonly source: DocumentSnapshot;
+  readonly document: DocumentSnapshot;
 }
 
 export interface DocumentCsvExport {
@@ -195,6 +213,30 @@ export class QueryService {
     return redactDocumentSnapshot({ actor, doctype, document, relatedDocType });
   }
 
+  /**
+   * `getDocument`, plus the per-field states that decided the document's shape,
+   * so a client is told which fields are read only or withheld instead of
+   * inferring it (issue #63). One extra permission check — the document's update
+   * permission — on top of the read.
+   */
+  async getDocumentWithFieldStates(
+    actor: Actor,
+    doctypeName: string,
+    name: string,
+    tenantId = actor.tenantId ?? DEFAULT_TENANT_ID
+  ): Promise<DocumentWithFieldStates> {
+    const { doctype, relatedDocType, document } = await this.documentContextForRead(
+      actor,
+      doctypeName,
+      name,
+      tenantId
+    );
+    return {
+      document: redactDocumentSnapshot({ actor, doctype, document, relatedDocType }),
+      fieldStates: await this.fieldStatesFor(actor, doctype, document)
+    };
+  }
+
   async getDocumentForAction(
     actor: Actor,
     doctypeName: string,
@@ -273,6 +315,19 @@ export class QueryService {
     action: PermissionAction,
     options: ListDocumentsOptions = {}
   ): Promise<ListDocumentsResult> {
+    return (await this.listDocumentPage(actor, doctypeName, action, options)).page;
+  }
+
+  private async listDocumentPage(
+    actor: Actor,
+    doctypeName: string,
+    action: PermissionAction,
+    options: ListDocumentsOptions
+  ): Promise<{
+    readonly doctype: DocTypeDefinition;
+    readonly page: ListDocumentsResult;
+    readonly sources: readonly DocumentSnapshot[];
+  }> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
     this.requireDocTypeAction(actor, doctype, "read");
@@ -295,7 +350,7 @@ export class QueryService {
           filters
         });
     const predicate = andPredicateExpressions([filtersPredicate, filterPredicate]);
-    return this.listReadableDocumentPage(actor, doctype, relatedDocType, action, {
+    const { page, sources } = await this.listReadableDocumentPage(actor, doctype, relatedDocType, action, {
       tenantId,
       doctype: doctype.name,
       ...(predicate === undefined ? {} : { predicate }),
@@ -304,6 +359,7 @@ export class QueryService {
       limit,
       offset
     });
+    return { doctype, page, sources };
   }
 
   getListView(actor: Actor, doctypeName: string): ResolvedListView {
@@ -532,11 +588,16 @@ export class QueryService {
       readonly limit?: number;
       readonly offset?: number;
       readonly maxLimit?: number;
+      /**
+       * Attach per-field states for each document on the page. Opt in, because
+       * it costs an update-permission check per row on top of the read.
+       */
+      readonly withFieldStates?: boolean;
     } = {}
   ): Promise<{
     readonly listView: ResolvedListView;
     readonly filters: readonly ListDocumentsFilter[];
-    readonly result: ListDocumentsResult;
+    readonly result: ListDocumentsViewResult;
   }> {
     const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
     const doctype = await this.doctypeFor(actor, doctypeName, tenantId);
@@ -557,7 +618,7 @@ export class QueryService {
       options.orderBy ?? listView.orderBy,
       options.order ?? listView.order
     );
-    const result = await this.listDocuments(actor, doctype.name, {
+    const { doctype: listedDoctype, page, sources } = await this.listDocumentPage(actor, doctype.name, "read", {
       tenantId,
       filters,
       ...(filterExpression === undefined ? {} : { filterExpression }),
@@ -567,6 +628,14 @@ export class QueryService {
       ...(options.maxLimit === undefined ? {} : { maxLimit: options.maxLimit }),
       ...(options.offset !== undefined ? { offset: options.offset } : {})
     });
+    const result: ListDocumentsViewResult = options.withFieldStates === true
+      ? {
+          ...page,
+          fieldStates: Object.fromEntries(await Promise.all(sources.map(async (source) =>
+            [source.name, await this.fieldStatesFor(actor, listedDoctype, source)] as const
+          )))
+        }
+      : page;
     return {
       listView: { ...listView, orderBy: order.orderBy, order: order.order },
       filters,
@@ -693,7 +762,7 @@ export class QueryService {
       });
       const context = await resolveTenantDocTypeContext(doctype, (name) => this.doctypeFor(actor, name, tenantId));
       const readable = await this.filterReadableDocuments(actor, doctype, result.data, context.relatedDocType);
-      for (const document of readable) {
+      for (const { document } of readable) {
         const candidate = planGlobalSearchCandidate({ doctype, document, query });
         if (candidate.status === "add") {
           results.push(candidate.result);
@@ -713,7 +782,7 @@ export class QueryService {
     documents: readonly DocumentSnapshot[],
     relatedDocType: RelatedDocTypeResolver,
     action: PermissionAction = "read"
-  ): Promise<readonly DocumentSnapshot[]> {
+  ): Promise<readonly ReadableDocument[]> {
     const readable = await Promise.all(
       documents.map(async (document) => {
         const projection = planDocumentReadProjection({ doctype, name: document.name, document });
@@ -728,7 +797,10 @@ export class QueryService {
     );
     return readable
       .filter((entry) => entry.readable)
-      .map((entry) => redactDocumentSnapshot({ actor, doctype, document: entry.document, relatedDocType }));
+      .map((entry) => ({
+        source: entry.document,
+        document: redactDocumentSnapshot({ actor, doctype, document: entry.document, relatedDocType })
+      }));
   }
 
   private async listReadableDocumentPage(
@@ -745,8 +817,9 @@ export class QueryService {
       readonly limit: number;
       readonly offset: number;
     }
-  ): Promise<ListDocumentsResult> {
+  ): Promise<{ readonly page: ListDocumentsResult; readonly sources: readonly DocumentSnapshot[] }> {
     const data: DocumentSnapshot[] = [];
+    const sources: DocumentSnapshot[] = [];
     const scanPageSize = 200;
     let readableTotal = 0;
     // Row-level permissions are decided here, not in SQL, and `total` is the
@@ -772,19 +845,23 @@ export class QueryService {
         matchTotal = result.total;
       }
       const readable = await this.filterReadableDocuments(actor, doctype, result.data, relatedDocType, action);
-      for (const document of readable) {
+      for (const { source, document } of readable) {
         if (readableTotal >= query.offset && data.length < query.limit) {
           data.push(document);
+          sources.push(source);
         }
         readableTotal += 1;
       }
       const scan = planProjectionPageScan({ offset: scanOffset, pageSize: scanPageSize, total: matchTotal });
       if (scan.status === "complete") {
         return {
-          data,
-          limit: query.limit,
-          offset: query.offset,
-          total: readableTotal
+          page: {
+            data,
+            limit: query.limit,
+            offset: query.offset,
+            total: readableTotal
+          },
+          sources
         };
       }
       scanOffset = scan.nextOffset;
@@ -820,6 +897,19 @@ export class QueryService {
       throw permissionDenied(access.message);
     }
     return { doctype, relatedDocType, document: projection.document };
+  }
+
+  private async fieldStatesFor(
+    actor: Actor,
+    doctype: DocTypeDefinition,
+    document: DocumentSnapshot
+  ): Promise<DocumentFieldStates> {
+    return documentFieldStates({
+      actor,
+      doctype,
+      document,
+      canUpdateDocument: await this.canActOnDocument(actor, doctype, "update", document)
+    });
   }
 
   async canReadDocument(actor: Actor, doctype: DocTypeDefinition, document: DocumentSnapshot): Promise<boolean> {
