@@ -98,9 +98,20 @@ export function emailOutboxStream(tenantId: TenantId, messageId: string): Stream
   return documentStream(tenantId, "__EmailOutbox", messageId);
 }
 
-export function documentDeliveryOutboxStream(tenantId: TenantId): StreamName {
-  return documentStream(tenantId, "__DocumentDeliveryOutbox", "deliveries");
+/**
+ * The tenant's delivery outbox stream. `channel` separates outboxes that must
+ * not share a working set: projection deliveries (issue #13) arrive once per
+ * write and would otherwise sit in the same fold, and push past the same
+ * compaction carry-over limit, as every notification delivery in the tenant.
+ */
+export function documentDeliveryOutboxStream(
+  tenantId: TenantId,
+  channel: string = DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL
+): StreamName {
+  return documentStream(tenantId, "__DocumentDeliveryOutbox", channel);
 }
+
+export const DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL = "deliveries";
 
 export function automationRunStream(tenantId: TenantId, runId: string): StreamName {
   return documentStream(tenantId, "__AutomationRuns", runId);

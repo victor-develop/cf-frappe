@@ -54,12 +54,48 @@ export function documentDeliveryOutboxRecordLookup(
 export function claimableDocumentDeliveryOutboxRecords(
   state: DocumentDeliveryOutboxState,
   now: string,
-  limit: number
+  limit: number,
+  claimLeaseSeconds?: number
 ): readonly DocumentDeliveryOutboxRecord[] {
   return [...state.records.values()]
-    .filter((record) => record.status === "pending" || (record.status === "failed" && documentDeliveryRetryDue(record, now)))
+    .filter((record) =>
+      record.status === "pending" ||
+      (record.status === "failed" && documentDeliveryRetryDue(record, now)) ||
+      (claimLeaseSeconds !== undefined && documentDeliveryClaimExpired(record, now, claimLeaseSeconds))
+    )
     .sort((left, right) => left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id))
     .slice(0, limit);
+}
+
+/**
+ * True for a record claimed longer ago than the lease.
+ *
+ * Without a lease a claim is forever: a consumer that dies between claiming and
+ * completing leaves the record `claimed`, and nothing claims it again. That was
+ * acceptable for notifications, which are best-effort; a projection delivery
+ * that is never retried is a list that never shows the write. Reclaiming hands
+ * the record a new claim id, so the original consumer — if it was only slow —
+ * fails its completion with a conflict instead of completing twice.
+ */
+export function documentDeliveryClaimExpired(
+  record: DocumentDeliveryOutboxRecord,
+  now: string,
+  claimLeaseSeconds: number
+): boolean {
+  if (record.status !== "claimed" || record.claimedAt === undefined) {
+    return false;
+  }
+  return Date.parse(record.claimedAt) + claimLeaseSeconds * 1000 <= Date.parse(now);
+}
+
+export function documentDeliveryOutboxClaimLeaseSeconds(value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw badRequest("Delivery outbox claimLeaseSeconds must be a positive integer");
+  }
+  return value;
 }
 
 export function ensureDocumentDeliveryOutboxClaimed(record: DocumentDeliveryOutboxRecord, claimId: string): void {
