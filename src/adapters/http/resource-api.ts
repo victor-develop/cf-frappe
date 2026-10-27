@@ -72,6 +72,8 @@ import { toErrorResponse } from "./errors.js";
 import { createFileApi } from "./file-api.js";
 import { createFieldPropertyApi } from "./field-property-api.js";
 import { createJobApi } from "./job-api.js";
+import { createAnalyticsApi } from "./analytics-api.js";
+import type { AnalyticsExportService } from "../../application/analytics-export-service.js";
 import { createKanbanApi } from "./kanban-api.js";
 import { createNamingApi } from "./naming-api.js";
 import { createNotificationApi } from "./notification-api.js";
@@ -135,6 +137,8 @@ export interface ResourceApiOptions {
   readonly jobs?: JobHistoryService;
   readonly jobRetry?: JobRetryPort;
   readonly jobSchedules?: JobScheduleService;
+  /** The analytics export (#16). Mounts `/api/analytics/exports` when set. */
+  readonly analyticsExports?: AnalyticsExportService;
   readonly notifications?: UserNotificationService;
   readonly notificationRules?: NotificationRuleService;
   readonly assignmentRules?: AssignmentRuleService;
@@ -473,6 +477,16 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
         ...(options.jobSchedules === undefined ? {} : { schedules: options.jobSchedules }),
         actor: resolveActor,
         maxJsonBytes
+      })
+    );
+  }
+
+  if (options.analyticsExports) {
+    app.route(
+      "/",
+      createAnalyticsApi({
+        analyticsExports: options.analyticsExports,
+        actor: resolveActor
       })
     );
   }
