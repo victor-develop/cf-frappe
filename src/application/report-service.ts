@@ -16,6 +16,12 @@ import {
 import type { ModelRegistry } from "../core/registry.js";
 import type { Actor, DocTypeDefinition, DocumentSnapshot } from "../core/types.js";
 import { QueryService } from "./query-service.js";
+import type { AnalyticsQueryService, AnalyticsResultMetadata } from "./analytics-query-service.js";
+import {
+  isAnalyticsUnavailableError,
+  planAnalyticsQueryPath,
+  reportAnalyticsPrefilters
+} from "./analytics-policy.js";
 import { CSV_CONTENT_TYPE, filenamePart } from "./csv.js";
 import {
   BoundedOrderedReportRows,
@@ -87,6 +93,11 @@ export interface ReportRunResult {
   readonly limit: number;
   readonly offset: number;
   readonly total: number;
+  /**
+   * Present only when the rows came from the analytics copy (#16), so an
+   * operational result is byte-for-byte what it was before analytics existed.
+   */
+  readonly analytics?: AnalyticsResultMetadata;
 }
 
 export interface ReportCsvExportOptions extends Pick<ReportRunOptions, "filters" | "filterExpression"> {
@@ -120,17 +131,31 @@ export interface ReportServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
   readonly rowProviders?: Readonly<Record<string, ReportRowProvider>>;
+  /**
+   * The analytics copy (#16). Reports declaring `queryPath: "analytical"` read
+   * from it when this is set; without it every report reads the operational
+   * projection, whatever it declares.
+   */
+  readonly analytics?: AnalyticsQueryService;
+}
+
+/** The readable documents a report runs over, and where they came from. */
+interface ReportDocumentSource {
+  readonly documents: readonly DocumentSnapshot[];
+  readonly analytics?: AnalyticsResultMetadata;
 }
 
 export class ReportService {
   private readonly registry: ModelRegistry;
   private readonly queries: QueryService;
   private readonly rowProviders: Readonly<Record<string, ReportRowProvider>>;
+  private readonly analytics: AnalyticsQueryService | undefined;
 
   constructor(options: ReportServiceOptions) {
     this.registry = options.registry;
     this.queries = options.queries;
     this.rowProviders = options.rowProviders ?? {};
+    this.analytics = options.analytics;
   }
 
   listReports(actor: Actor): readonly ReportDefinition[] {
@@ -166,7 +191,10 @@ export class ReportService {
     );
     const filters = materializeReportFilters(report, doctype, options.filters ?? {}, filterExpression);
     const order = resolveReportOrder(report, doctype, options);
-    const filtered = await this.filteredDocuments(actor, report, filters, filterExpression);
+    const source = await this.reportDocuments(actor, report, filters);
+    const filtered = source.documents.filter((document) =>
+      matchesReportFilters(document, report, filters, filterExpression)
+    );
     const sorted = sortReportDocuments(filtered, report, order);
     const aggregateRows = filtered.map((document) => document.data as ReportRow);
     const groups = buildReportGroups(aggregateRows, report.groups ?? []);
@@ -183,7 +211,8 @@ export class ReportService {
       rows,
       limit,
       offset,
-      total: filtered.length
+      total: filtered.length,
+      ...(source.analytics === undefined ? {} : { analytics: source.analytics })
     };
   }
 
@@ -218,7 +247,7 @@ export class ReportService {
     }
     const rows = new BoundedOrderedReportRows(report, order, limit);
     let total = 0;
-    await this.scanReadableDocuments(actor, report.doctype, (document) => {
+    await this.visitReportDocuments(actor, report, filters, (document) => {
       if (!matchesReportFilters(document, report, filters, filterExpression)) {
         return;
       }
@@ -251,7 +280,7 @@ export class ReportService {
     const lines = [reportCsvHeader(report.columns)];
     let total = 0;
     let exported = 0;
-    await this.scanReadableDocuments(actor, report.doctype, (document) => {
+    await this.visitReportDocuments(actor, report, filters, (document) => {
       if (!matchesReportFilters(document, report, filters, filterExpression)) {
         return;
       }
@@ -388,6 +417,53 @@ export class ReportService {
     return visibleDoctype;
   }
 
+  /**
+   * The readable documents a report runs over, from whichever store its
+   * declared query path and the deployment's configuration select.
+   *
+   * With `onUnavailable: "operational"` an analytics outage falls back to the
+   * projection. The default is to fail instead: the fallback puts the report's
+   * full scan back on D1 at exactly the moment something is already wrong, and
+   * the point of the analytical path is that a report cannot do that.
+   */
+  private async reportDocuments(
+    actor: Actor,
+    report: ReportDefinition,
+    filters: ReportFilters
+  ): Promise<ReportDocumentSource> {
+    const analytics = this.analytics;
+    const path = planAnalyticsQueryPath({ declared: report.queryPath, configured: analytics !== undefined });
+    if (path.status === "analytical" && analytics !== undefined) {
+      try {
+        return await analytics.readableDocuments(actor, report.doctype, {
+          prefilters: reportAnalyticsPrefilters(report, filters)
+        });
+      } catch (error) {
+        if (!(isAnalyticsUnavailableError(error) && analytics.onUnavailable === "operational")) {
+          throw error;
+        }
+      }
+    }
+    return { documents: await this.listAllReadableDocuments(actor, report.doctype) };
+  }
+
+  private async visitReportDocuments(
+    actor: Actor,
+    report: ReportDefinition,
+    filters: ReportFilters,
+    visit: (document: DocumentSnapshot) => void
+  ): Promise<void> {
+    if (planAnalyticsQueryPath({ declared: report.queryPath, configured: this.analytics !== undefined }).status === "operational") {
+      // Streamed page by page, as before analytics existed: the CSV export
+      // never holds more than one projection page plus its bounded output.
+      await this.scanReadableDocuments(actor, report.doctype, visit);
+      return;
+    }
+    for (const document of (await this.reportDocuments(actor, report, filters)).documents) {
+      visit(document);
+    }
+  }
+
   private async listAllReadableDocuments(actor: Actor, doctype: string): Promise<readonly DocumentSnapshot[]> {
     const documents: DocumentSnapshot[] = [];
     await this.scanReadableDocuments(actor, doctype, (document) => {
@@ -411,16 +487,6 @@ export class ReportService {
         return;
       }
     }
-  }
-
-  private async filteredDocuments(
-    actor: Actor,
-    report: ReportDefinition,
-    input: ReportFilters,
-    filterExpression: ReportFilterExpression | undefined
-  ): Promise<readonly DocumentSnapshot[]> {
-    const documents = await this.listAllReadableDocuments(actor, report.doctype);
-    return documents.filter((document) => matchesReportFilters(document, report, input, filterExpression));
   }
 }
 

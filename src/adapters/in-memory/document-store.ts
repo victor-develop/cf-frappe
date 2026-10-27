@@ -20,12 +20,14 @@ import type { ReadStreamOptions } from "../../ports/document-store.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
 import type { EventAppendBatchEntry, EventBatchStore, EventStore } from "../../ports/event-store.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
+import type { ProjectionChangeFeed, ProjectionChangeQuery } from "../../ports/analytics.js";
+import { listInMemoryProjectionChanges } from "./analytics-store.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { cloneDomainEvent, sequenceEvents } from "../../core/domain-events.js";
 import { readInMemoryAuditDocumentEvents, searchInMemoryAuditEvents } from "./audit-events.js";
 import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.js";
 
-export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBatchStore, ProjectionStore, AuditEventStore {
+export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBatchStore, ProjectionStore, AuditEventStore, ProjectionChangeFeed {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
   private readonly documents = new Map<string, DocumentSnapshot>();
 
@@ -153,6 +155,10 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBa
       offset,
       total: all.length
     };
+  }
+
+  async listChangedSince(query: ProjectionChangeQuery): Promise<readonly DocumentSnapshot[]> {
+    return listInMemoryProjectionChanges(this.documents.values(), query).map(cloneDocumentSnapshot);
   }
 
   clear(): void {
