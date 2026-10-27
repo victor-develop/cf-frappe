@@ -1,5 +1,6 @@
 export * from "./account-recovery.js";
 export * from "./audit-events.js";
+export * from "./cold-event-storage.js";
 export * from "./data-patch-log.js";
 export * from "./document-store.js";
 export * from "./event-store.js";

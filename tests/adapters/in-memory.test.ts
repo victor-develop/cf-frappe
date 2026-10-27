@@ -6,6 +6,7 @@ import {
   InMemoryEventStore,
   InMemoryJobExecutionLog,
   InMemoryProjectionStore,
+  InMemorySnapshotStore,
   predicateExpressionFromListFilterExpression
 } from "../../src";
 import type {
@@ -574,3 +575,35 @@ describe("in-memory adapters", () => {
 function filterPredicate(filters: readonly ListDocumentsFilter[]): PredicateExpression {
   return predicateExpressionFromListFilterExpression({ kind: "group", match: "all", filters });
 }
+
+describe("InMemorySnapshotStore with a durable fallback", () => {
+  const key = { stream: "acme:Note:One", foldName: "document", foldVersion: 1 };
+
+  it("reads the fallback on a miss and keeps what it found", async () => {
+    const durable = new InMemorySnapshotStore();
+    await durable.write({ ...key, uptoSequence: 7, state: "archived" });
+    let reads = 0;
+    const counting = {
+      read: async <State>(read: typeof key) => {
+        reads += 1;
+        return durable.read<State>(read);
+      },
+      write: durable.write.bind(durable)
+    };
+    const store = new InMemorySnapshotStore({ fallback: counting });
+
+    await expect(store.read(key)).resolves.toMatchObject({ uptoSequence: 7, state: "archived" });
+    await expect(store.read(key)).resolves.toMatchObject({ uptoSequence: 7 });
+    expect(reads).toBe(1);
+  });
+
+  it("never writes to the fallback", async () => {
+    const durable = new InMemorySnapshotStore();
+    const store = new InMemorySnapshotStore({ fallback: durable });
+
+    await store.write({ ...key, uptoSequence: 3, state: "memory" });
+
+    await expect(durable.read(key)).resolves.toBeNull();
+    await expect(store.read(key)).resolves.toMatchObject({ uptoSequence: 3, state: "memory" });
+  });
+});

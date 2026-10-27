@@ -1,7 +1,10 @@
+export * from "./archived-events.js";
 export * from "./audit-event-query.js";
 export * from "./automation-run-index.js";
 export * from "./data-patch-log.js";
 export * from "./document-store.js";
+export * from "./event-archive.js";
+export { EVENT_ARCHIVE_FORMAT, eventSegmentObjectKey } from "./event-archive-format.js";
 export * from "./event-store.js";
 export * from "./job-execution-log.js";
 export * from "./migrator.js";

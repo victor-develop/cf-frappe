@@ -32,16 +32,35 @@ import type { FoldSnapshot, FoldSnapshotKey, SnapshotStore } from "../../ports/s
 export class InMemorySnapshotStore implements SnapshotStore {
   private readonly snapshots = new Map<string, FoldSnapshot>();
   private readonly limit: number;
+  private readonly fallback: SnapshotStore | undefined;
 
-  constructor(options: { readonly limit?: number } = {}) {
+  /**
+   * @param options.fallback A durable store read on a miss, and never written.
+   *   This is how the aggregate Durable Object picks up the document snapshot
+   *   the event archive recorded before moving a stream's history to cold
+   *   storage (issue #18): an instance that starts cold resumes from that
+   *   snapshot and reads a hot tail, instead of folding the whole stream out of
+   *   R2. Writes stay in memory, so a commit costs what it did before — the
+   *   archiver is the only writer of the durable copy, and a snapshot that is
+   *   behind is only a longer tail.
+   */
+  constructor(options: { readonly limit?: number; readonly fallback?: SnapshotStore } = {}) {
     this.limit = options.limit ?? DEFAULT_SNAPSHOT_LIMIT;
+    this.fallback = options.fallback;
   }
 
   async read<State>(key: FoldSnapshotKey): Promise<FoldSnapshot<State> | null> {
     const mapKey = snapshotKey(key);
     const found = this.snapshots.get(mapKey);
     if (found === undefined) {
-      return null;
+      if (this.fallback === undefined) {
+        return null;
+      }
+      const durable = await this.fallback.read<State>(key);
+      if (durable !== null) {
+        await this.write(durable);
+      }
+      return durable;
     }
     // Re-inserted so `Map` iteration order tracks recency of use, which is what
     // the eviction below walks.

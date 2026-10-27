@@ -16,7 +16,7 @@ export function searchInMemoryAuditEvents(
     .filter((event) => query.since === undefined || event.occurredAt >= query.since)
     .filter((event) => query.until === undefined || event.occurredAt <= query.until)
     .filter((event) => payloadKinds === undefined || payloadKinds.has(event.payload.kind))
-    .sort(byAuditOrder);
+    .sort(compareAuditEvents);
   return query.limit === undefined ? events : events.slice(0, query.limit);
 }
 
@@ -43,7 +43,12 @@ export function readInMemoryAuditDocumentEvents(
   return query.limit === undefined ? events : events.slice(0, query.limit);
 }
 
-function byAuditOrder(left: DomainEvent, right: DomainEvent): number {
+/**
+ * The audit search order: newest first, then stream ascending, then sequence
+ * descending — the same `ORDER BY` as the D1 audit query. Exported so a store
+ * that merges hot and archived results sorts them exactly as one query would.
+ */
+export function compareAuditEvents(left: DomainEvent, right: DomainEvent): number {
   const time = right.occurredAt.localeCompare(left.occurredAt);
   if (time !== 0) {
     return time;

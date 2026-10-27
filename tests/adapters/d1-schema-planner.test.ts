@@ -4,6 +4,8 @@ import {
   D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS,
   D1_FOLD_SNAPSHOT_MIGRATION_ID,
   D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS,
+  D1_EVENT_ARCHIVE_MIGRATION_ID,
+  D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS,
   D1_AUTOMATION_RUN_SCHEMA_STATEMENTS,
   D1_CORE_MIGRATION_ID,
   D1_CORE_SCHEMA_STATEMENTS,
@@ -154,6 +156,7 @@ describe("D1 schema planner", () => {
       D1_AUTOMATION_RUN_MIGRATION_ID,
       D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
       D1_FOLD_SNAPSHOT_MIGRATION_ID,
+      D1_EVENT_ARCHIVE_MIGRATION_ID,
       "doctype_task_v7_indexes"
     ]);
     expect(migrations[0]!.checksum).toMatch(/^fnv1a32:[a-f0-9]{8}$/);
@@ -211,6 +214,11 @@ describe("D1 schema planner", () => {
       statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
     });
     expect(migrations[8]).toMatchObject({
+      id: D1_EVENT_ARCHIVE_MIGRATION_ID,
+      label: "cf-frappe event archive index",
+      statements: D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS
+    });
+    expect(migrations[9]).toMatchObject({
       label: "Task projection indexes",
       statements: [
         {
@@ -420,6 +428,16 @@ describe("D1 schema planner", () => {
     );
   });
 
+  it("keeps the checked-in Wrangler event archive migration exactly equivalent to the TypeScript plan", () => {
+    const fileSql = readFileSync(new URL("../../migrations/0009_cf_frappe_event_archive.sql", import.meta.url), "utf8");
+
+    expect(splitSqlStatements(fileSql)).toEqual(
+      D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS.map((statement) =>
+        normalizeSql(renderD1Migration({ ...eventArchiveMigrationStub, statements: [statement] }))
+      )
+    );
+  });
+
   it("keeps the checked-in Wrangler fold snapshot migration exactly equivalent to the TypeScript plan", () => {
     const fileSql = readFileSync(new URL("../../migrations/0008_cf_frappe_fold_snapshots.sql", import.meta.url), "utf8");
 
@@ -479,6 +497,11 @@ const automationRunMigrationStub = {
 
 const eventDocumentNameMigrationStub = {
   id: D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
+  checksum: "test"
+};
+
+const eventArchiveMigrationStub = {
+  id: D1_EVENT_ARCHIVE_MIGRATION_ID,
   checksum: "test"
 };
 
