@@ -268,6 +268,22 @@ createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* +
 
 The cost is real: lists, reports and dashboards become eventually consistent. Reads of one document by name stay strongly consistent, and writes never read projections at all. A write response carries an `X-CF-Frappe-Read-After` token; send it back on a read to wait for that write. Leave it off until the trigger is reached. Turning it back off needs the same care as turning it on: drain the projection channel into `DB`'s own table with `createProjectionRollbackDrainJob()` *while the split is still on*, then switch, then drain once more — with the switch off, reads by name come straight from that table. [Separate Projection Database](docs/projection-database.md) covers which reads are strong, the lag alert, turning it on, and turning it back off.
 
+#### Tenant sharding (off by default)
+
+When one tenant outgrows a shared database, or a database approaches D1's 10 GB ceiling, tenants can be spread across several D1 databases. Every port already names its tenant, so this is a set of routing stores in the adapter layer; the application services do not change:
+
+```ts
+const tenantSharding: CloudFrappeTenantShardingOptions<Env> = {
+  shards: (env) => ({ eu1: env.SHARD_EU1, eu2: env.SHARD_EU2 }), // DB is the "home" shard and holds the directory
+  newTenants: "place"                                             // default "home": nothing changes until you move someone
+};
+// Pass the same object to both.
+createAggregateCoordinatorClass<Env>({ registry, tenantSharding });
+createCloudFrappeWorker<Env>({ registry, actor, tenantSharding, jobs: { /* + createTenantMoveAdvanceJob() */ } });
+```
+
+`services.tenantShards` then provisions tenants (placing them and migrating their shard), reports and rolls out migrations shard by shard, moves a tenant between shards while it keeps reading and writing (`mover.start("acme", "eu2")`, advanced by the job), and runs bounded cross-tenant queries (`scatter`). A move copies events, rebuilds the target's projections from them, and fences the source for one invocation at the cutover; nothing is ever deleted from the source. Leave it off until the trigger is reached — cross-tenant queries, moves and provisioning are a permanent cost. [Tenant Sharding](docs/tenant-sharding.md) covers the directory and its cache, the fence, the move phases, per-shard migrations, and the scatter-gather limits.
+
 ### Development Setup
 
 Work on the framework:
@@ -315,6 +331,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
 - [Separate Projection Database](docs/projection-database.md): moving projections to their own D1 through the delivery outbox — which reads stay strong, read-your-writes tokens, lag alerts, and switching on and back off.
+- [Tenant Sharding](docs/tenant-sharding.md): spreading tenants across D1 databases — the directory and its cache, the write fence, provisioning, online moves, per-shard migrations and rolling upgrades, and bounded cross-tenant queries.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
@@ -581,6 +598,22 @@ createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* +
 
 代价是实打实的：列表、报表和仪表板会变成最终一致。按名称读取单个文档仍然是强一致的，写入路径也从不读投影。写入的响应会带一个 `X-CF-Frappe-Read-After` token，读取时带回去，就会等到这次写入可见。触发条件没到之前请保持关闭。回退到单库和开启一样要讲顺序：**在分库还开着的时候**，先用 `createProjectionRollbackDrainJob()` 把投影 channel 回放进 `DB` 自己的投影表，再关开关、部署，然后再回放一次——开关一关，按名称读取就直接读这张表了。哪些读取是强一致、lag 告警、怎么开启、怎么回退到单库，见 [Separate Projection Database](docs/projection-database.md)。
 
+#### 按租户分片（默认关闭）
+
+等某个租户大到需要独占一个库，或者某个库逼近 D1 的 10 GB 上限时，可以把租户分散到多个 D1 数据库。每个 port 的方法本来就带着租户，所以分片只是 adapter 层的一组路由 store，应用层的服务一行不用改：
+
+```ts
+const tenantSharding: CloudFrappeTenantShardingOptions<Env> = {
+  shards: (env) => ({ eu1: env.SHARD_EU1, eu2: env.SHARD_EU2 }), // DB 是 "home" 分片，路由表也放在这里
+  newTenants: "place"                                             // 默认 "home"：在你搬动任何租户之前，什么都不会变
+};
+// 同一个对象同时传给两边。
+createAggregateCoordinatorClass<Env>({ registry, tenantSharding });
+createCloudFrappeWorker<Env>({ registry, actor, tenantSharding, jobs: { /* + createTenantMoveAdvanceJob() */ } });
+```
+
+开启后，`services.tenantShards` 负责：开通租户（选分片并先把该分片的 migration 跑到最新）、按分片查询和滚动执行 migration、在租户照常读写的情况下把它从一个分片搬到另一个（`mover.start("acme", "eu2")`，由 job 推进），以及有上限保护的跨租户查询（`scatter`）。搬迁会复制事件、在目标分片上从事件重建投影，切换时只把源分片围栏住一次调用的时间；源分片上的任何数据都不会被删除。触发条件没到之前请保持关闭——跨租户查询、搬迁和开通的复杂度是永久的。路由表和缓存、围栏、搬迁的各个阶段、每片的 migration、scatter-gather 的上限，见 [Tenant Sharding](docs/tenant-sharding.md)。
+
 ### 开发环境
 
 开发框架本身：
@@ -628,6 +661,7 @@ See [English TODO](#todo).
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
 - [Document Delivery Outbox](docs/delivery-outbox.md)：outbox 的工作集如何随投递历史增长而保持有界，以及单记录读依赖的那条索引。
 - [Separate Projection Database](docs/projection-database.md)：经 delivery outbox 把投影搬到独立 D1——哪些读取保持强一致、read-your-writes token、lag 告警，以及如何开启和回退。
+- [Tenant Sharding](docs/tenant-sharding.md)：把租户分散到多个 D1——路由表与缓存、写入围栏、租户开通、不停机搬迁、每片的 migration 与滚动升级，以及有上限的跨租户查询。
 - [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。

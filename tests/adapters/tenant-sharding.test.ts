@@ -18,6 +18,7 @@ import {
   type IdGenerator,
   type TenantShardAssignment
 } from "../../src";
+import { isD1ConstraintError } from "../../src/adapters/d1/constraint-error.js";
 import { createTenantShardingRuntime, type CloudFrappeTenantShardingOptions } from "../../src/cloudflare";
 import { createTestD1, frameworkSchema, wranglerMigratedSchema, type TestD1 } from "../d1-engine.js";
 
@@ -65,11 +66,54 @@ interface World {
 
 const clock: Clock = { now: () => "2026-03-01T00:00:00.000Z" };
 
+/**
+ * workerd's D1 reports a trigger's `RAISE(ABORT, ...)` as
+ * `D1_ERROR: <message>: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`
+ * (observed under `wrangler dev`), while `node:sqlite` reports the bare message.
+ * The difference matters: D1's wording contains "constraint", which is what
+ * the D1 stores turn into a version conflict. Rewrapping here keeps the tests
+ * honest about the message the adapters actually see in production.
+ */
+const D1_TRIGGER_ERROR_CODE = 1811;
+function withWorkerdErrors(db: D1Database): D1Database {
+  const rethrow = (error: unknown): never => {
+    const code = (error as { readonly errcode?: number }).errcode;
+    if (error instanceof Error && code === D1_TRIGGER_ERROR_CODE) {
+      throw new Error(`D1_ERROR: ${error.message}: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`);
+    }
+    throw error;
+  };
+  const wrap = <T extends object>(statement: T): T =>
+    new Proxy(statement, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof value !== "function") {
+          return value;
+        }
+        return (...args: unknown[]) => {
+          const result = (value as (...a: unknown[]) => unknown).apply(target, args);
+          if (property === "bind") {
+            return wrap(result as object);
+          }
+          return result instanceof Promise ? result.catch(rethrow) : result;
+        };
+      }
+    });
+  return {
+    prepare: (sql: string) => wrap(db.prepare(sql)),
+    batch: (statements: D1PreparedStatement[]) => db.batch(statements).catch(rethrow)
+  } as unknown as D1Database;
+}
+
 function world(options: { readonly westSchema?: readonly string[] } = {}): World {
   const home = createTestD1({ schema: wranglerMigratedSchema() });
   const east = createTestD1({ schema: wranglerMigratedSchema() });
   const west = createTestD1({ schema: options.westSchema ?? wranglerMigratedSchema() });
-  const env: Env = { DB: home.database, EAST: east.database, WEST: west.database };
+  const env: Env = {
+    DB: withWorkerdErrors(home.database),
+    EAST: withWorkerdErrors(east.database),
+    WEST: withWorkerdErrors(west.database)
+  };
   return {
     home,
     east,
@@ -104,6 +148,14 @@ describe("tenantOfStream", () => {
 });
 
 describe("the tenant fence trigger", () => {
+  it("is told apart from a version conflict in D1's own wording", () => {
+    const fenced = new Error("D1_ERROR: CF_FRAPPE_TENANT_FENCED: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)");
+    const unique = new Error("D1_ERROR: UNIQUE constraint failed: cf_frappe_events.stream, cf_frappe_events.sequence: SQLITE_CONSTRAINT");
+
+    expect([isD1TenantFencedError(fenced), isD1ConstraintError(fenced)]).toEqual([true, false]);
+    expect([isD1TenantFencedError(unique), isD1ConstraintError(unique)]).toEqual([false, true]);
+  });
+
   it("refuses event inserts for a fenced tenant only, as an error that is not a version conflict", async () => {
     const db = createTestD1({ schema: frameworkSchema() });
     const events = new D1EventStore(db.database);
