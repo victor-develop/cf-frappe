@@ -578,3 +578,13 @@ describe("D1EventArchive", () => {
     });
   });
 });
+
+describe("archived segment object keys", () => {
+  it("refuse stream parts that could steer a key", async () => {
+    const { eventSegmentObjectKey } = await import("../../src");
+    await expect(eventSegmentObjectKey(documentStream(TENANT, "Note", "a/b..c"), 1, 2)).resolves.toMatch(/^events\/acme\/Note\//);
+    for (const stream of ["../x:Note:One", "acme:..:One", "acme:a/b:One", "acme::One"]) {
+      await expect(eventSegmentObjectKey(stream, 1, 2), stream).rejects.toMatchObject({ code: "EVENT_ARCHIVE_INVALID" });
+    }
+  });
+});

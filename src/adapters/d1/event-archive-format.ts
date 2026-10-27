@@ -85,13 +85,17 @@ export async function decodeEventSegment(body: string, expected: ExpectedSegment
  */
 export async function eventSegmentObjectKey(stream: StreamName, seqStart: number, seqEnd: number): Promise<string> {
   const parts = stream.split(":");
-  if (parts.length !== 3 || parts.some((part) => part.length === 0 || part.includes("/"))) {
+  // Only what `encodeURIComponent` can emit, minus the `.` that `escapePart`
+  // also encodes: no `/`, no `..`, nothing a key could be steered with.
+  if (parts.length !== 3 || parts.some((part) => !OBJECT_KEY_PART.test(part))) {
     throw new FrameworkError("EVENT_ARCHIVE_INVALID", `Stream '${stream}' is not a framework stream name`, {
       status: 400
     });
   }
   return `events/${parts[0]}/${parts[1]}/${await sha256Hex(stream)}/${padSequence(seqStart)}-${padSequence(seqEnd)}.ndjson`;
 }
+
+const OBJECT_KEY_PART = /^[A-Za-z0-9%_\-~*'()!]+$/;
 
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

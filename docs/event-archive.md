@@ -141,4 +141,5 @@ A store without the archive refuses a stream whose oldest events are missing (`E
 
 - A segment is filed under one tenant and one doctype; a stream that mixes them is refused (`EVENT_ARCHIVE_INVALID`). Every stream the framework writes satisfies this.
 - Restoring a segment is one D1 batch of one insert per event, so `maxSegmentEvents` is capped at 5,000 (default 500).
+- Every R2 read is a subrequest. A rebuild or an audit search that spans thousands of archived segments in one invocation can reach the Workers subrequest limit; drive rebuilds in batches (`ProjectionRebuildService.advance` already is) and keep audit windows bounded.
 - `cancel`, `amend` and the collaboration commands still fold whole streams, so on an archived document they read R2 (then the isolate cache). Snapshotting the assignment, tag and follower folds, as #18 suggests, would remove that; it is a latency improvement, not a correctness one, and is not done here.
