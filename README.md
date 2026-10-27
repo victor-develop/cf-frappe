@@ -252,6 +252,20 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
+#### Cold event archive (off by default)
+
+When a D1 database approaches its 10 GB cap, old events can be moved to R2 once a snapshot covers them, and read back transparently by every store. Nothing is ever deleted: archived events stay readable for timelines, `cancel`/`amend`, rebuilds and audit, and `restorePass()` moves them back. Naming-series and unique-value streams never move.
+
+Turn it on by passing the same `eventArchive` options to `createCloudFrappeWorker` and `createAggregateCoordinatorClass`, and drive `services.eventArchive.archivePass()` from a scheduled job:
+
+```ts
+const eventArchive: CloudFrappeEventArchiveOptions<Env> = { bucket: (env) => env.EVENT_ARCHIVE };
+export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({ registry, eventArchive }) {}
+export default createCloudFrappeWorker<Env>({ registry, actor, eventArchive });
+```
+
+Without the option the framework behaves exactly as before. See [Cold Event Archive](docs/event-archive.md) for the cut policies, the costs, and how to switch it off again.
+
 ### Development Setup
 
 Work on the framework:
@@ -298,6 +312,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
+- [Cold Event Archive](docs/event-archive.md): moving events that snapshots cover from D1 to R2 without deleting any, what still reads them, and how to switch it on and off.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
@@ -548,6 +563,20 @@ npm run deploy
 
 委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
+#### 冷事件归档（默认关闭）
+
+D1 单库上限 10 GB。接近上限时，可以把已被快照覆盖的旧事件搬到 R2，所有 store 读取时自动拼回，调用方无感。事件永远不会被删除：时间轴、`cancel`/`amend`、重建和审计依然能读到归档的事件，`restorePass()` 可以把它们搬回热库。命名序列和唯一值这两类 stream 永远不会被归档。
+
+开启方式：把同一份 `eventArchive` 配置同时传给 `createCloudFrappeWorker` 和 `createAggregateCoordinatorClass`，再用定时任务调用 `services.eventArchive.archivePass()`：
+
+```ts
+const eventArchive: CloudFrappeEventArchiveOptions<Env> = { bucket: (env) => env.EVENT_ARCHIVE };
+export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({ registry, eventArchive }) {}
+export default createCloudFrappeWorker<Env>({ registry, actor, eventArchive });
+```
+
+不配置这个选项时，框架行为和以前完全一样。切分规则、代价，以及怎么再关掉，见 [Cold Event Archive](docs/event-archive.md)。
+
 ### 开发环境
 
 开发框架本身：
@@ -594,6 +623,7 @@ See [English TODO](#todo).
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
 - [Document Delivery Outbox](docs/delivery-outbox.md)：outbox 的工作集如何随投递历史增长而保持有界，以及单记录读依赖的那条索引。
+- [Cold Event Archive](docs/event-archive.md)：把快照已覆盖的事件从 D1 搬到 R2、不删除任何事件；哪些路径还会读它们，以及如何开启和关闭。
 - [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。
