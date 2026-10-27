@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS cf_frappe_analytics_documents (
   data_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  export_generation INTEGER NOT NULL DEFAULT 0,
   exported_at TEXT NOT NULL,
-  PRIMARY KEY (tenant_id, doctype, name, version)
+  PRIMARY KEY (tenant_id, doctype, name, version, export_generation)
 );

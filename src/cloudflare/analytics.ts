@@ -30,6 +30,7 @@ export interface AnalyticsPipelineRecord extends Record<string, unknown> {
   readonly data_json: string;
   readonly created_at: string;
   readonly updated_at: string;
+  readonly export_generation: number;
   readonly exported_at: string;
 }
 
@@ -48,6 +49,7 @@ export const ANALYTICS_PIPELINE_STREAM_SCHEMA = Object.freeze({
     Object.freeze({ name: "data_json", type: "string", required: true }),
     Object.freeze({ name: "created_at", type: "string", required: true }),
     Object.freeze({ name: "updated_at", type: "string", required: true }),
+    Object.freeze({ name: "export_generation", type: "int64", required: true }),
     Object.freeze({ name: "exported_at", type: "string", required: true })
   ])
 });
@@ -57,12 +59,30 @@ export interface AnalyticsPipelineBinding {
   send(records: AnalyticsPipelineRecord[]): Promise<void>;
 }
 
+/** The R2 Data Catalog sink's default `--roll-interval`, in seconds. */
+export const PIPELINES_DEFAULT_ROLL_INTERVAL_SECONDS = 300;
+/**
+ * Added to the roll interval for the time between a file rolling and its
+ * Iceberg commit being readable. Pipelines does not document that delay, so
+ * this is a margin, not a measurement; raise it if lag shows rows arriving later.
+ */
+export const PIPELINES_DEFAULT_VISIBILITY_MARGIN_SECONDS = 60;
+
 export interface PipelinesAnalyticsSinkOptions {
   /**
    * Records per `send`. Pipelines does not document a per-call cap, so this
    * keeps each call well inside the Worker request size. Defaults to 500.
    */
   readonly maxRecordsPerSend?: number;
+  /**
+   * The sink's `--roll-interval`, in seconds. Pipelines writes buffered records
+   * into the Iceberg table only when the sink rolls a file, so a record `send`
+   * accepted is not readable until up to this long afterwards. Defaults to the
+   * sink's own default, 300; set it to whatever the sink was created with.
+   */
+  readonly rollIntervalSeconds?: number;
+  /** See {@link PIPELINES_DEFAULT_VISIBILITY_MARGIN_SECONDS}. */
+  readonly visibilityMarginSeconds?: number;
 }
 
 /**
@@ -74,9 +94,16 @@ export interface PipelinesAnalyticsSinkOptions {
  * the whole batch again, and rows are keyed by version so the repeats are
  * invisible to a reader. Pipelines does not document exactly-once delivery, so
  * nothing here could rely on it anyway.
+ *
+ * `send` resolving means the stream accepted the records, not that a reader
+ * can see them. {@link visibleAfterSeconds} tells the exporter how long to
+ * wait before it vouches for them, so `completeThrough` and the reported lag
+ * include the buffering, and a first export that has not landed yet still
+ * reads as "not finished" rather than as an empty copy.
  */
 export class PipelinesAnalyticsSink implements AnalyticsSink {
   private readonly maxRecordsPerSend: number;
+  readonly visibleAfterSeconds: number;
 
   constructor(
     private readonly binding: AnalyticsPipelineBinding,
@@ -87,6 +114,15 @@ export class PipelinesAnalyticsSink implements AnalyticsSink {
       throw badRequest("Pipelines analytics sink maxRecordsPerSend must be a positive integer");
     }
     this.maxRecordsPerSend = size;
+    const roll = options.rollIntervalSeconds ?? PIPELINES_DEFAULT_ROLL_INTERVAL_SECONDS;
+    const margin = options.visibilityMarginSeconds ?? PIPELINES_DEFAULT_VISIBILITY_MARGIN_SECONDS;
+    if (!Number.isFinite(roll) || roll <= 0) {
+      throw badRequest("Pipelines analytics sink rollIntervalSeconds must be a positive number");
+    }
+    if (!Number.isFinite(margin) || margin < 0) {
+      throw badRequest("Pipelines analytics sink visibilityMarginSeconds must be a non-negative number");
+    }
+    this.visibleAfterSeconds = roll + margin;
   }
 
   async append(rows: readonly AnalyticsDocumentRow[]): Promise<void> {
@@ -106,6 +142,7 @@ export function analyticsPipelineRecord(row: AnalyticsDocumentRow): AnalyticsPip
     data_json: row.dataJson,
     created_at: row.createdAt,
     updated_at: row.updatedAt,
+    export_generation: row.exportGeneration,
     exported_at: row.exportedAt
   };
 }
@@ -171,8 +208,14 @@ interface R2SqlRow {
  * refuses fails the query as unavailable.
  *
  * Pages are by `OFFSET`, not by a name cursor, so a document name never has to
- * become a literal. The reader above de-duplicates by name, which covers a row
- * shifting across a page boundary between two queries.
+ * become a literal. The cost: a commit landing between two page queries can
+ * shift rows. A newly exported document shifts later rows forward, and the
+ * de-duplication by name in `AnalyticsQueryService` absorbs the repeat. A
+ * document leaving the result set — deleted, or moved out of a pushed-down
+ * pre-filter — on an earlier page shifts later rows backward, and one document
+ * at the boundary is skipped for that read. The operational report scan pages
+ * by offset too and has the same exposure; a scan small enough for one page
+ * (`scanPageSize`, up to 10,000) has none.
  */
 export class R2SqlAnalyticsReader implements AnalyticsDocumentReader {
   private readonly endpoint: string;
@@ -250,8 +293,10 @@ export class R2SqlAnalyticsReader implements AnalyticsDocumentReader {
 }
 
 /**
- * The scan statement: per document the newest version, then live documents
- * only, then the pre-filters — in that order, which is the property everything
+ * The scan statement: per document the newest row — highest version, then
+ * highest export generation (a re-export after a reset keeps the version it
+ * replaces), then latest export — then live documents only, then the
+ * pre-filters — in that order, which is the property everything
  * else depends on. Ranking happens in the derived table over every version;
  * `docstatus` and the pre-filters are tested outside it, on the row that won.
  * Testing them inside would let an older version that still matched answer for
@@ -288,7 +333,7 @@ export function r2SqlAnalyticsScanSql(
     "SELECT name, version, docstatus, data_json, created_at, updated_at",
     "FROM (",
     "  SELECT name, version, docstatus, data_json, created_at, updated_at,",
-    "    ROW_NUMBER() OVER (PARTITION BY name ORDER BY version DESC) AS cf_rank",
+    "    ROW_NUMBER() OVER (PARTITION BY name ORDER BY version DESC, export_generation DESC, exported_at DESC) AS cf_rank",
     `  FROM ${r2SqlTableName(options.table)}`,
     `  WHERE tenant_id = ${tenant} AND doctype = ${doctype}`,
     ") AS latest",

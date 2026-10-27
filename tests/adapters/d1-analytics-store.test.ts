@@ -32,6 +32,10 @@ function row(name: string, version: number, overrides: Partial<DocumentSnapshot>
   );
 }
 
+function regenerated(base: AnalyticsDocumentRow, generation: number, data: Record<string, unknown>, exportedAt = EXPORTED_AT): AnalyticsDocumentRow {
+  return { ...base, exportGeneration: generation, dataJson: JSON.stringify(data), exportedAt };
+}
+
 function analyticsStore() {
   const d1 = createTestD1({ schema: analyticsSchema() });
   return { d1, store: new D1AnalyticsStore(d1.database) };
@@ -60,6 +64,43 @@ describe("D1AnalyticsStore on a real SQLite engine", () => {
     await store.append(batch);
 
     expect(d1.query("SELECT COUNT(*) AS total FROM cf_frappe_analytics_documents")).toEqual([{ total: 2 }]);
+    d1.close();
+  });
+
+  it("lets a re-export at the same version outrank the row it replaces", async () => {
+    // A rebuild (#11) or repair (#12) rewrites data without moving the version.
+    // The stale row was exported first, in generation 0; the corrected one in
+    // generation 1 after a reset. A reader keyed on version alone would pick
+    // either; it must pick the corrected one, and keep picking it.
+    const { d1, store } = analyticsStore();
+    const stale = row("T-1", 4, { data: { total: 10 } });
+    await store.append([stale, row("T-2", 1)]);
+    await store.append([regenerated(stale, 1, { total: 12 }, "2026-03-03T00:00:00.000Z")]);
+    // A late re-send of the stale generation (a run that was in flight when the
+    // reset landed) must not win back.
+    await store.append([regenerated(stale, 0, { total: 10 }, "2026-03-04T00:00:00.000Z")]);
+
+    const page = await store.scan({ tenantId: "acme", doctype: "Ticket", limit: 10 });
+
+    expect(page.documents.map((document) => `${document.name}@${document.version}:${JSON.stringify(document.data)}`)).toEqual([
+      'T-1@4:{"total":12}',
+      'T-2@1:{"status":"Open"}'
+    ]);
+    expect(d1.query("SELECT COUNT(*) AS total FROM cf_frappe_analytics_documents WHERE name = 'T-1'")).toEqual([{ total: 2 }]);
+    d1.close();
+  });
+
+  it("keeps the later export when the same version and generation is appended again", async () => {
+    // The same rule as the in-memory store and the R2 SQL ranking, so the three
+    // adapters cannot disagree about which of two same-key rows a report sees.
+    const { d1, store } = analyticsStore();
+    const first = row("T-1", 1, { data: { total: 1 } });
+    await store.append([first]);
+    await store.append([regenerated(first, 0, { total: 2 }, "2026-03-03T00:00:00.000Z")]);
+
+    const page = await store.scan({ tenantId: "acme", doctype: "Ticket", limit: 10 });
+
+    expect(page.documents.map((document) => document.data)).toEqual([{ total: 2 }]);
     d1.close();
   });
 
@@ -165,7 +206,7 @@ describe("D1AnalyticsStore on a real SQLite engine", () => {
   });
 
   it("rolls an append back as a whole when one row fails", async () => {
-    const d1 = createTestD1({ schema: analyticsSchema(), failSqlIncludes: "INSERT OR IGNORE" });
+    const d1 = createTestD1({ schema: analyticsSchema(), failSqlIncludes: "INSERT INTO cf_frappe_analytics_documents" });
     const store = new D1AnalyticsStore(d1.database);
 
     await expect(store.append([row("T-1", 1), row("T-2", 1)])).rejects.toThrow();
@@ -180,6 +221,10 @@ describe("D1AnalyticsExportCursorStore on the framework schema", () => {
     doctype: "Ticket",
     position: { updatedAt: "2026-03-01T00:00:05.000Z", name: "T-5" },
     completeThrough: "2026-03-01T00:09:00.000Z",
+    pendingThrough: null,
+    pendingVisibleAt: null,
+    generation: 0,
+    reexporting: false,
     exportedRows: 5,
     lastRunAt: "2026-03-01T00:10:00.000Z",
     lastError: null
@@ -219,16 +264,61 @@ describe("D1AnalyticsExportCursorStore on the framework schema", () => {
     d1.close();
   });
 
-  it("forgets one cursor on reset", async () => {
+  it("round-trips a pending horizon, the generation and the re-export flag", async () => {
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const cursors = new D1AnalyticsExportCursorStore(d1.database);
+    const pending: AnalyticsExportCursor = {
+      ...cursor,
+      pendingThrough: "2026-03-01T00:19:00.000Z",
+      pendingVisibleAt: "2026-03-01T00:26:00.000Z",
+      generation: 2,
+      reexporting: true
+    };
+
+    await expect(cursors.save(pending)).resolves.toBe(true);
+
+    await expect(cursors.get("acme", "Ticket")).resolves.toEqual(pending);
+    d1.close();
+  });
+
+  it("starts a re-export on reset: new generation, no position, freshness kept", async () => {
     const d1 = createTestD1({ schema: frameworkSchema() });
     const cursors = new D1AnalyticsExportCursorStore(d1.database);
     await cursors.save(cursor);
     await cursors.save({ ...cursor, doctype: "Invoice" });
 
     await cursors.reset("acme", "Ticket");
+    await cursors.reset("acme", "Never Exported");
 
-    await expect(cursors.get("acme", "Ticket")).resolves.toBeNull();
-    await expect(cursors.get("acme", "Invoice")).resolves.not.toBeNull();
+    await expect(cursors.get("acme", "Ticket")).resolves.toEqual({
+      ...cursor,
+      position: null,
+      generation: 1,
+      reexporting: true
+    });
+    await expect(cursors.get("acme", "Invoice")).resolves.toEqual({ ...cursor, doctype: "Invoice" });
+    await expect(cursors.get("acme", "Never Exported")).resolves.toMatchObject({
+      position: null,
+      completeThrough: null,
+      generation: 1,
+      reexporting: true
+    });
+    d1.close();
+  });
+
+  it("refuses a save from the generation before a reset, so the reset sticks", async () => {
+    // A run read the cursor (generation 0), then a reset landed. The run's next
+    // save carries its old position; accepting it would silently undo the reset.
+    const d1 = createTestD1({ schema: frameworkSchema() });
+    const cursors = new D1AnalyticsExportCursorStore(d1.database);
+    await cursors.save(cursor);
+    await cursors.reset("acme", "Ticket");
+
+    await expect(cursors.save({ ...cursor, position: { updatedAt: "2026-03-01T00:00:09.000Z", name: "T-9" } })).resolves.toBe(false);
+
+    await expect(cursors.get("acme", "Ticket")).resolves.toMatchObject({ position: null, generation: 1, reexporting: true });
+    await expect(cursors.save({ ...cursor, generation: 1, position: { updatedAt: "2026-03-01T00:00:01.000Z", name: "T-1" } })).resolves.toBe(true);
+    await expect(cursors.get("acme", "Ticket")).resolves.toMatchObject({ position: { name: "T-1" }, generation: 1 });
     d1.close();
   });
 });

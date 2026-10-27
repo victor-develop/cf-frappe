@@ -5,11 +5,13 @@ import type {
   AnalyticsExportCursorStore,
   AnalyticsStringEqualsPrefilter
 } from "../ports/analytics.js";
+import { systemClock, type Clock } from "../ports/clock.js";
 import {
   analyticsActorTenant,
   analyticsErrorMessage,
   analyticsPositiveInteger,
   analyticsUnavailable,
+  analyticsVisibleCompleteThrough,
   DEFAULT_ANALYTICS_SCAN_PAGE_SIZE,
   DEFAULT_ANALYTICS_UNAVAILABLE_POLICY,
   isAnalyticsUnavailableError,
@@ -26,6 +28,8 @@ export interface AnalyticsQueryServiceOptions {
    * report is indistinguishable from a real zero, which is the wrong failure.
    */
   readonly cursors?: AnalyticsExportCursorStore;
+  /** Decides whether a pending export has become visible; see `analyticsVisibleCompleteThrough`. */
+  readonly clock?: Clock;
   readonly pageSize?: number;
   /** See {@link AnalyticsUnavailablePolicy}. Defaults to `"fail"`. */
   readonly onUnavailable?: AnalyticsUnavailablePolicy;
@@ -45,7 +49,7 @@ export interface AnalyticsReadOptions {
 export interface AnalyticsResultMetadata {
   readonly path: "analytical";
   /**
-   * Every projection change at or before this time is in the copy that
+   * Every projection change at or before this time is visible in the copy that
    * answered. `null` when no cursor store is wired, so nothing vouches for it.
    */
   readonly completeThrough: string | null;
@@ -78,6 +82,7 @@ export class AnalyticsQueryService {
   private readonly reader: AnalyticsDocumentReader;
   private readonly queries: QueryService;
   private readonly cursors: AnalyticsExportCursorStore | undefined;
+  private readonly clock: Clock;
   private readonly pageSize: number;
   readonly onUnavailable: AnalyticsUnavailablePolicy;
 
@@ -85,6 +90,7 @@ export class AnalyticsQueryService {
     this.reader = options.reader;
     this.queries = options.queries;
     this.cursors = options.cursors;
+    this.clock = options.clock ?? systemClock;
     this.pageSize = analyticsPositiveInteger(options.pageSize, DEFAULT_ANALYTICS_SCAN_PAGE_SIZE, "Analytics scan pageSize");
     this.onUnavailable = options.onUnavailable ?? DEFAULT_ANALYTICS_UNAVAILABLE_POLICY;
   }
@@ -133,10 +139,14 @@ export class AnalyticsQueryService {
         `Analytics freshness for ${doctype} could not be read: ${analyticsErrorMessage(error)}`
       );
     }
-    if (cursor === null || cursor.completeThrough === null) {
+    // Visible, not merely sent: a sink that buffers (Pipelines) has accepted
+    // rows a reader cannot see yet, and a first export in that state must read
+    // as unfinished, not as an empty copy.
+    const completeThrough = cursor === null ? null : analyticsVisibleCompleteThrough(cursor, this.clock.now());
+    if (completeThrough === null) {
       throw analyticsUnavailable(`Analytics copy of ${doctype} has not finished its first export`);
     }
-    return cursor.completeThrough;
+    return completeThrough;
   }
 
   private async scanAll(

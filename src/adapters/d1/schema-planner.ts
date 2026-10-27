@@ -366,6 +366,10 @@ export const D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement
       "position_updated_at TEXT, " +
       "position_name TEXT, " +
       "complete_through TEXT, " +
+      "pending_through TEXT, " +
+      "pending_visible_at TEXT, " +
+      "generation INTEGER NOT NULL DEFAULT 0, " +
+      "reexporting INTEGER NOT NULL DEFAULT 0, " +
       "exported_rows INTEGER NOT NULL DEFAULT 0, " +
       "last_run_at TEXT, " +
       "last_error TEXT, " +
@@ -377,10 +381,11 @@ export const D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement
 /**
  * The analytics copy, in the analytics database (not `DB`).
  *
- * Append-only and keyed by version: the primary key
- * `(tenant_id, doctype, name, version)` is both the idempotency of a re-sent
- * export and the index the reader's newest-version seek runs on. No other index
- * — the reader filters on `data_json` only for rows the key has already chosen.
+ * Append-only and keyed by version and export generation: the primary key
+ * `(tenant_id, doctype, name, version, export_generation)` is both the
+ * idempotency of a re-sent export and the index the reader's newest-row seek
+ * runs on. No other index — the reader filters on `data_json` only for rows the
+ * key has already chosen.
  */
 export const D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
   {
@@ -395,8 +400,9 @@ export const D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS: readonly PlannedSqlStatem
       "data_json TEXT NOT NULL, " +
       "created_at TEXT NOT NULL, " +
       "updated_at TEXT NOT NULL, " +
+      "export_generation INTEGER NOT NULL DEFAULT 0, " +
       "exported_at TEXT NOT NULL, " +
-      "PRIMARY KEY (tenant_id, doctype, name, version)" +
+      "PRIMARY KEY (tenant_id, doctype, name, version, export_generation)" +
       ");"
   }
 ];

@@ -10,6 +10,7 @@ import type {
 } from "../ports/analytics.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import {
+  advanceAnalyticsCompleteThrough,
   analyticalDocTypeNames,
   analyticsChangePosition,
   analyticsErrorMessage,
@@ -18,10 +19,11 @@ import {
   analyticsLagSeconds,
   analyticsPositiveInteger,
   analyticsRowFromSnapshot,
+  analyticsSinkVisibleAfterSeconds,
+  analyticsVisibleCompleteThrough,
   DEFAULT_ANALYTICS_EXPORT_BATCH_SIZE,
   DEFAULT_ANALYTICS_EXPORT_MAX_ROWS_PER_RUN,
   emptyAnalyticsExportCursor,
-  laterCompleteThrough,
   planAnalyticsAdminAccess
 } from "./analytics-policy.js";
 import { permanentJobError, retryableJobError } from "./job-errors.js";
@@ -61,7 +63,11 @@ export interface AnalyticsExportCommand {
 
 export interface AnalyticsDocTypeExportResult {
   readonly doctype: DocTypeName;
-  readonly status: "exported" | "failed";
+  /**
+   * `superseded` means a reset landed while this run was exporting: the run
+   * stopped without saving, and the next run starts the new generation.
+   */
+  readonly status: "exported" | "failed" | "superseded";
   readonly exported: number;
   /** Whether the run reached its horizon; `false` means it stopped at `maxRowsPerRun`. */
   readonly drained: boolean;
@@ -82,6 +88,8 @@ export interface AnalyticsExportStatus {
   readonly doctype: DocTypeName;
   readonly completeThrough: string | null;
   readonly lagSeconds: number | null;
+  /** A reset's re-export has not drained yet; the copy can still show rows from before it. */
+  readonly reexporting: boolean;
   readonly exportedRows: number;
   readonly lastRunAt: string | null;
   readonly lastError: string | null;
@@ -99,8 +107,9 @@ export interface AnalyticsExportStatus {
  * order up to a horizon (`now` minus the settle window), appending each batch
  * to the sink and then saving the position. A crash between those two steps
  * re-appends the batch next run, which the sink absorbs (rows are keyed by
- * version). `completeThrough` advances to the horizon only when a run drains
- * everything below it.
+ * version and export generation). `completeThrough` advances to the horizon
+ * only when a run drains everything below it, and — for a sink that shows rows
+ * some time after accepting them — only once that time has passed.
  *
  * One DocType failing does not stop the others, and is recorded on its cursor
  * as `lastError` — that, and the lag, are what `status` reports.
@@ -112,6 +121,7 @@ export class AnalyticsExportService {
   private readonly cursors: AnalyticsExportCursorStore;
   private readonly clock: Clock;
   private readonly settleSeconds: number;
+  private readonly visibleAfterSeconds: number;
   private readonly batchSize: number;
   private readonly maxRowsPerRun: number;
   private readonly configuredDoctypes: readonly DocTypeName[] | undefined;
@@ -124,6 +134,7 @@ export class AnalyticsExportService {
     this.cursors = options.cursors;
     this.clock = options.clock ?? systemClock;
     this.settleSeconds = analyticsExportSettleSeconds(options.settleSeconds);
+    this.visibleAfterSeconds = analyticsSinkVisibleAfterSeconds(options.sink.visibleAfterSeconds);
     this.batchSize = analyticsPositiveInteger(options.batchSize, DEFAULT_ANALYTICS_EXPORT_BATCH_SIZE, "Analytics export batchSize");
     this.maxRowsPerRun = analyticsPositiveInteger(
       options.maxRowsPerRun,
@@ -167,10 +178,12 @@ export class AnalyticsExportService {
     const stored = new Map((await this.cursors.list(tenantId)).map((cursor) => [cursor.doctype, cursor]));
     return this.exportedDoctypes().map((doctype) => {
       const cursor = stored.get(doctype) ?? emptyAnalyticsExportCursor(tenantId, doctype);
+      const completeThrough = analyticsVisibleCompleteThrough(cursor, now);
       return {
         doctype,
-        completeThrough: cursor.completeThrough,
-        lagSeconds: analyticsLagSeconds(cursor.completeThrough, now),
+        completeThrough,
+        lagSeconds: analyticsLagSeconds(completeThrough, now),
+        reexporting: cursor.reexporting,
         exportedRows: cursor.exportedRows,
         lastRunAt: cursor.lastRunAt,
         lastError: cursor.lastError
@@ -179,12 +192,16 @@ export class AnalyticsExportService {
   }
 
   /**
-   * Forgets one DocType's cursor, so the next run exports it from the start.
+   * Starts a re-export of one DocType: the next run exports it from the start,
+   * in a new export generation.
    *
    * Needed after anything that rewrites projection rows without moving their
-   * `updatedAt` — a full rebuild (#11) or a repair after a rebuild-diff (#12).
-   * Re-exporting is safe because rows are keyed by version: unchanged documents
-   * append rows that are already there.
+   * `updatedAt` or `version` — a full rebuild (#11) or a repair after a
+   * rebuild-diff (#12). Because the rewritten rows keep their version, the
+   * re-export cannot rely on version to win; its rows carry the new
+   * generation, which every reader ranks above the old one. `completeThrough`
+   * is kept, so analytical reads stay up while the re-export runs, and status
+   * reports `reexporting` until it drains.
    */
   async reset(actor: Actor, doctype: DocTypeName): Promise<void> {
     const tenantId = this.requireAdmin(actor);
@@ -217,7 +234,9 @@ export class AnalyticsExportService {
           drained = true;
           break;
         }
-        await this.sink.append(changes.map((snapshot) => analyticsRowFromSnapshot(snapshot, now)));
+        await this.sink.append(
+          changes.map((snapshot) => analyticsRowFromSnapshot(snapshot, now, cursor.generation))
+        );
         exported += changes.length;
         // Saved after every batch, not once at the end: a run that dies later
         // resumes here instead of re-appending everything it already shipped.
@@ -226,15 +245,28 @@ export class AnalyticsExportService {
           position: analyticsChangePosition(last),
           exportedRows: cursor.exportedRows + changes.length
         };
-        await this.cursors.save(cursor);
+        if (!(await this.cursors.save(cursor))) {
+          return await this.superseded(tenantId, doctype, exported, now);
+        }
         if (changes.length < limit) {
           drained = true;
           break;
         }
       }
-      const completeThrough = drained ? laterCompleteThrough(cursor.completeThrough, horizon) : cursor.completeThrough;
-      cursor = { ...cursor, completeThrough, lastRunAt: now, lastError: null };
-      await this.cursors.save(cursor);
+      cursor = {
+        ...advanceAnalyticsCompleteThrough(cursor, {
+          now,
+          drainedHorizon: drained ? horizon : null,
+          visibleAfterSeconds: this.visibleAfterSeconds
+        }),
+        reexporting: drained ? false : cursor.reexporting,
+        lastRunAt: now,
+        lastError: null
+      };
+      if (!(await this.cursors.save(cursor))) {
+        return await this.superseded(tenantId, doctype, exported, now);
+      }
+      const completeThrough = analyticsVisibleCompleteThrough(cursor, now);
       return {
         doctype,
         status: "exported",
@@ -246,16 +278,40 @@ export class AnalyticsExportService {
     } catch (error) {
       const message = analyticsErrorMessage(error);
       await this.recordFailure({ ...cursor, lastRunAt: now, lastError: message });
+      const completeThrough = analyticsVisibleCompleteThrough(cursor, now);
       return {
         doctype,
         status: "failed",
         exported,
         drained: false,
-        completeThrough: cursor.completeThrough,
-        lagSeconds: analyticsLagSeconds(cursor.completeThrough, now),
+        completeThrough,
+        lagSeconds: analyticsLagSeconds(completeThrough, now),
         error: message
       };
     }
+  }
+
+  /**
+   * A reset moved the generation under this run. Its rows already sent carry
+   * the old generation, so the re-export outranks them; what is left is to stop
+   * and report the cursor the reset left.
+   */
+  private async superseded(
+    tenantId: TenantId,
+    doctype: DocTypeName,
+    exported: number,
+    now: string
+  ): Promise<AnalyticsDocTypeExportResult> {
+    const tenantCursor = await this.cursors.get(tenantId, doctype);
+    const completeThrough = tenantCursor === null ? null : analyticsVisibleCompleteThrough(tenantCursor, now);
+    return {
+      doctype,
+      status: "superseded",
+      exported,
+      drained: false,
+      completeThrough,
+      lagSeconds: analyticsLagSeconds(completeThrough, now)
+    };
   }
 
   private async recordFailure(cursor: AnalyticsExportCursor): Promise<void> {

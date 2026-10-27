@@ -199,6 +199,7 @@ describe("the Worker's analytics option", () => {
           doctype: "Invoice",
           completeThrough: "2026-03-31T23:59:00.000Z",
           lagSeconds: 60,
+          reexporting: false,
           exportedRows: 4,
           lastRunAt: NOW,
           lastError: null

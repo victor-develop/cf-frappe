@@ -106,7 +106,11 @@ export function reportAnalyticsPrefilters(
   return prefilters;
 }
 
-export function analyticsRowFromSnapshot(snapshot: DocumentSnapshot, exportedAt: string): AnalyticsDocumentRow {
+export function analyticsRowFromSnapshot(
+  snapshot: DocumentSnapshot,
+  exportedAt: string,
+  exportGeneration = 0
+): AnalyticsDocumentRow {
   return {
     tenantId: snapshot.tenantId,
     doctype: snapshot.doctype,
@@ -116,12 +120,15 @@ export function analyticsRowFromSnapshot(snapshot: DocumentSnapshot, exportedAt:
     dataJson: JSON.stringify(snapshot.data),
     createdAt: snapshot.createdAt,
     updatedAt: snapshot.updatedAt,
+    exportGeneration,
     exportedAt
   };
 }
 
 /** Rebuilds the snapshot an exported row was taken from. */
-export function snapshotFromAnalyticsRow(row: Omit<AnalyticsDocumentRow, "exportedAt">): DocumentSnapshot {
+export function snapshotFromAnalyticsRow(
+  row: Omit<AnalyticsDocumentRow, "exportedAt" | "exportGeneration">
+): DocumentSnapshot {
   let data: unknown;
   try {
     data = JSON.parse(row.dataJson);
@@ -189,6 +196,10 @@ export function emptyAnalyticsExportCursor(tenantId: TenantId, doctype: DocTypeN
     doctype,
     position: null,
     completeThrough: null,
+    pendingThrough: null,
+    pendingVisibleAt: null,
+    generation: 0,
+    reexporting: false,
     exportedRows: 0,
     lastRunAt: null,
     lastError: null
@@ -205,6 +216,83 @@ export function analyticsChangePosition(snapshot: DocumentSnapshot): ProjectionC
  */
 export function laterCompleteThrough(current: string | null, next: string): string {
   return current === null || next > current ? next : current;
+}
+
+/**
+ * Seconds a sink needs before appended rows can be read; see
+ * `AnalyticsSink.visibleAfterSeconds`. Omitted means visible on append.
+ */
+export function analyticsSinkVisibleAfterSeconds(value: number | undefined): number {
+  const seconds = value ?? 0;
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw badRequest("Analytics sink visibleAfterSeconds must be a non-negative number");
+  }
+  return seconds;
+}
+
+/**
+ * `now` plus a number of seconds, as an ISO timestamp. Used for
+ * `pendingVisibleAt`, which is compared as a string like every other time here.
+ */
+export function analyticsSecondsAfter(now: string, seconds: number): string {
+  return new Date(Date.parse(now) + seconds * 1000).toISOString();
+}
+
+/**
+ * The freshness claim as of `now`: `completeThrough`, or the pending horizon if
+ * its rows have become visible since. Every reader of the claim — the query
+ * path's first-export guard, the analytics metadata on a result, the status
+ * endpoint, the job result — goes through this, so none of them can vouch for
+ * rows a sink has accepted but not yet made readable.
+ */
+export function analyticsVisibleCompleteThrough(cursor: AnalyticsExportCursor, now: string): string | null {
+  if (cursor.pendingThrough !== null && cursor.pendingVisibleAt !== null && cursor.pendingVisibleAt <= now) {
+    return laterCompleteThrough(cursor.completeThrough, cursor.pendingThrough);
+  }
+  return cursor.completeThrough;
+}
+
+/**
+ * Folds a drained run's horizon into the cursor.
+ *
+ * With a sink that shows rows on append the horizon is the claim straight
+ * away. Otherwise it is held as pending until `now + visibleAfterSeconds`. A
+ * pending horizon that is still not visible is kept rather than replaced: the
+ * one behind it would be pushed back by every run and, with runs more frequent
+ * than the visibility delay, would never become visible at all. The newer
+ * horizon is picked up by the first drained run after the pending one lands.
+ */
+export function advanceAnalyticsCompleteThrough(
+  cursor: AnalyticsExportCursor,
+  input: { readonly now: string; readonly drainedHorizon: string | null; readonly visibleAfterSeconds: number }
+): AnalyticsExportCursor {
+  const settled = settleAnalyticsPending(cursor, input.now);
+  if (input.drainedHorizon === null) {
+    return settled;
+  }
+  if (input.visibleAfterSeconds === 0) {
+    return { ...settled, completeThrough: laterCompleteThrough(settled.completeThrough, input.drainedHorizon) };
+  }
+  if (settled.pendingThrough !== null) {
+    return settled;
+  }
+  return {
+    ...settled,
+    pendingThrough: input.drainedHorizon,
+    pendingVisibleAt: analyticsSecondsAfter(input.now, input.visibleAfterSeconds)
+  };
+}
+
+function settleAnalyticsPending(cursor: AnalyticsExportCursor, now: string): AnalyticsExportCursor {
+  if (cursor.pendingThrough === null || cursor.pendingVisibleAt === null || cursor.pendingVisibleAt > now) {
+    return cursor;
+  }
+  return {
+    ...cursor,
+    completeThrough: laterCompleteThrough(cursor.completeThrough, cursor.pendingThrough),
+    pendingThrough: null,
+    pendingVisibleAt: null
+  };
 }
 
 /** Seconds between `completeThrough` and `now`; `null` when nothing has been fully exported yet. */

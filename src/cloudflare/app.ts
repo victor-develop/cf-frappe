@@ -514,6 +514,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         reader: analyticsOptions.reader(env),
         queries: restrictedQueries,
         cursors: analyticsCursors,
+        ...(analyticsOptions.clock === undefined ? {} : { clock: analyticsOptions.clock }),
         ...(analyticsOptions.scanPageSize === undefined ? {} : { pageSize: analyticsOptions.scanPageSize }),
         ...(analyticsOptions.onUnavailable === undefined ? {} : { onUnavailable: analyticsOptions.onUnavailable })
       })

@@ -252,7 +252,7 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
-**Analytical reads (optional, off by default).** A report or dashboard can declare `queryPath: "analytical"` so its whole-DocType scan reads an exported copy of the projection — Cloudflare Pipelines into R2, queried with R2 SQL, or a second D1 database — instead of the D1 database serving the Desk. Nothing changes until the Worker gets an `analytics` option and the per-tenant export job is scheduled; until then every report runs on the projection whatever it declares. Results carry `analytics.completeThrough`, admins see per-DocType lag at `GET /api/analytics/exports`, and an analytics outage fails only analytical reads (503) — never lists, forms or writes. Setup, guarantees and limits: [Analytical Query Path](docs/analytics.md).
+**Analytical reads (optional, off by default).** A report or dashboard can declare `queryPath: "analytical"` so its whole-DocType scan reads an exported copy of the projection — Cloudflare Pipelines into R2, queried with R2 SQL, or a second D1 database — instead of the D1 database serving the Desk. Nothing changes until the Worker gets an `analytics` option and the per-tenant export job is scheduled; until then every report runs on the projection whatever it declares. Results carry `analytics.completeThrough` (counted only once rows are readable — Pipelines buffers until its sink rolls a file, so pass the sink's roll interval as `rollIntervalSeconds`), admins see per-DocType lag at `GET /api/analytics/exports` and re-export a DocType after a rebuild with `POST /api/analytics/exports/:doctype/reset`, and an analytics outage fails only analytical reads (503) — never lists, forms or writes. Setup, guarantees and limits: [Analytical Query Path](docs/analytics.md).
 
 ### Development Setup
 
@@ -551,7 +551,7 @@ npm run deploy
 
 委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
-**分析查询（可选，默认关闭）。** 报表或仪表板可以声明 `queryPath: "analytical"`，让整个 DocType 的扫描改读投影的导出副本 —— 经 Cloudflare Pipelines 写入 R2、用 R2 SQL 查询，或者放在第二个 D1 数据库 —— 而不是服务 Desk 的那个 D1。在 Worker 配上 `analytics` 选项、并按租户排好导出 job 之前，什么都不会变：无论声明了什么，所有报表都照旧跑在投影上。分析结果带 `analytics.completeThrough`，管理员可以在 `GET /api/analytics/exports` 看到每个 DocType 的延迟；分析存储出故障时只有分析读取会失败（503），列表、表单和写入都不受影响。配置方法、保证与限制见 [Analytical Query Path](docs/analytics.md)。
+**分析查询（可选，默认关闭）。** 报表或仪表板可以声明 `queryPath: "analytical"`，让整个 DocType 的扫描改读投影的导出副本 —— 经 Cloudflare Pipelines 写入 R2、用 R2 SQL 查询，或者放在第二个 D1 数据库 —— 而不是服务 Desk 的那个 D1。在 Worker 配上 `analytics` 选项、并按租户排好导出 job 之前，什么都不会变：无论声明了什么，所有报表都照旧跑在投影上。分析结果带 `analytics.completeThrough`（只算已经能读到的行 —— Pipelines 要等 sink 滚动写文件才落表，所以要把 sink 的 roll interval 作为 `rollIntervalSeconds` 传进去），管理员可以在 `GET /api/analytics/exports` 看到每个 DocType 的延迟，重建投影之后用 `POST /api/analytics/exports/:doctype/reset` 重新导出该 DocType；分析存储出故障时只有分析读取会失败（503），列表、表单和写入都不受影响。配置方法、保证与限制见 [Analytical Query Path](docs/analytics.md)。
 
 ### 开发环境
 

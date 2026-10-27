@@ -1,4 +1,4 @@
-import { snapshotFromAnalyticsRow } from "../../application/analytics-policy.js";
+import { emptyAnalyticsExportCursor, snapshotFromAnalyticsRow } from "../../application/analytics-policy.js";
 import type { DocTypeName, DocumentSnapshot, TenantId } from "../../core/types.js";
 import type {
   AnalyticsDocumentReader,
@@ -27,9 +27,11 @@ export class InMemoryAnalyticsStore implements AnalyticsSink, AnalyticsDocumentR
   async append(rows: readonly AnalyticsDocumentRow[]): Promise<void> {
     this.appends.push([...rows]);
     for (const row of rows) {
-      // Keyed by version: appending the same version twice is a no-op, which is
-      // the idempotency the exporter's at-least-once delivery depends on.
-      this.rows.set(rowKey(row.tenantId, row.doctype, row.name, row.version), { ...row });
+      // Keyed by version and export generation, as the D1 table is: appending
+      // the same key twice keeps one row, which is the idempotency the
+      // exporter's at-least-once delivery depends on, and — as in D1 — the
+      // later append's values win.
+      this.rows.set(rowKey(row), { ...row });
     }
   }
 
@@ -40,7 +42,7 @@ export class InMemoryAnalyticsStore implements AnalyticsSink, AnalyticsDocumentR
         continue;
       }
       const current = newest.get(row.name);
-      if (current === undefined || row.version > current.version) {
+      if (current === undefined || compareAnalyticsRowRank(row, current) > 0) {
         newest.set(row.name, row);
       }
     }
@@ -87,12 +89,26 @@ export class InMemoryAnalyticsExportCursorStore implements AnalyticsExportCursor
       .map((cursor) => ({ ...cursor }));
   }
 
-  async save(cursor: AnalyticsExportCursor): Promise<void> {
-    this.cursors.set(cursorKey(cursor.tenantId, cursor.doctype), { ...cursor });
+  async save(cursor: AnalyticsExportCursor): Promise<boolean> {
+    const key = cursorKey(cursor.tenantId, cursor.doctype);
+    const stored = this.cursors.get(key);
+    if (stored !== undefined && stored.generation !== cursor.generation) {
+      return false;
+    }
+    const completeThrough =
+      stored?.completeThrough === null || stored === undefined
+        ? cursor.completeThrough
+        : cursor.completeThrough === null || cursor.completeThrough < stored.completeThrough
+          ? stored.completeThrough
+          : cursor.completeThrough;
+    this.cursors.set(key, { ...cursor, completeThrough });
+    return true;
   }
 
   async reset(tenantId: TenantId, doctype: DocTypeName): Promise<void> {
-    this.cursors.delete(cursorKey(tenantId, doctype));
+    const key = cursorKey(tenantId, doctype);
+    const stored = this.cursors.get(key) ?? emptyAnalyticsExportCursor(tenantId, doctype);
+    this.cursors.set(key, { ...stored, position: null, generation: stored.generation + 1, reexporting: true });
   }
 }
 
@@ -122,8 +138,21 @@ function compareNames(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function rowKey(tenantId: TenantId, doctype: DocTypeName, name: string, version: number): string {
-  return `${tenantId}\u0000${doctype}\u0000${name}\u0000${version}`;
+function rowKey(row: AnalyticsDocumentRow): string {
+  return [row.tenantId, row.doctype, row.name, row.version, row.exportGeneration].join("\u0000");
+}
+
+/**
+ * Which of two rows of one document a reader takes: higher version, then
+ * higher export generation, then later export. The same order the D1 and R2
+ * SQL statements use.
+ */
+function compareAnalyticsRowRank(left: AnalyticsDocumentRow, right: AnalyticsDocumentRow): number {
+  return (
+    left.version - right.version ||
+    left.exportGeneration - right.exportGeneration ||
+    compareNames(left.exportedAt, right.exportedAt)
+  );
 }
 
 function cursorKey(tenantId: TenantId, doctype: DocTypeName): string {

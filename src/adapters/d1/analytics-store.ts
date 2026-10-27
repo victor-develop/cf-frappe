@@ -53,22 +53,34 @@ export class D1AnalyticsStore implements AnalyticsSink, AnalyticsDocumentReader 
     }
     // One batch, so the whole append is one D1 request and atomic: the
     // exporter's cursor only moves once this resolves, and a partial append is
-    // never left behind for it to skip over. `OR IGNORE` on the
-    // `(tenant, doctype, name, version)` key is the idempotency the exporter's
-    // at-least-once delivery relies on.
+    // never left behind for it to skip over. The conflict on the
+    // `(tenant, doctype, name, version, export_generation)` key is the
+    // idempotency the exporter's at-least-once delivery relies on; on it the
+    // later append's values win, the same rule the in-memory store and the R2
+    // SQL ranking (`exported_at DESC` last) follow. A re-export after a reset
+    // never conflicts with what it replaces — it is a new generation — and
+    // wins by ranking, not by overwrite.
     await this.db.batch(
       rows.map((row) =>
         this.db
           .prepare(
-            `INSERT OR IGNORE INTO ${D1_ANALYTICS_DOCUMENTS_TABLE}
-               (tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at, exported_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO ${D1_ANALYTICS_DOCUMENTS_TABLE}
+               (tenant_id, doctype, name, version, export_generation, docstatus, data_json,
+                created_at, updated_at, exported_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (tenant_id, doctype, name, version, export_generation) DO UPDATE SET
+               docstatus = excluded.docstatus,
+               data_json = excluded.data_json,
+               created_at = excluded.created_at,
+               updated_at = excluded.updated_at,
+               exported_at = excluded.exported_at`
           )
           .bind(
             row.tenantId,
             row.doctype,
             row.name,
             row.version,
+            row.exportGeneration,
             row.docstatus,
             row.dataJson,
             row.createdAt,
@@ -105,13 +117,19 @@ export class D1AnalyticsStore implements AnalyticsSink, AnalyticsDocumentReader 
 }
 
 /**
- * One page of the newest live version of each document, after `cursor` by name.
+ * One page of the newest live row of each document, after `cursor` by name.
  *
- * The newest version is chosen by a correlated `MAX(version)` rather than a
+ * "Newest" is the highest version, then the highest export generation — a
+ * re-export after a reset carries the version it replaces, so version alone
+ * would pick between the stale and the corrected row arbitrarily. Within one
+ * key the append upsert has already kept the later export.
+ *
+ * The newest row is chosen by a correlated seek (`ORDER BY version DESC,
+ * export_generation DESC LIMIT 1`, compared as a row value) rather than a
  * window function. Both are correct; this one is a seek per outer row on the
- * primary key `(tenant_id, doctype, name, version)`, so a page costs its own
- * size, where `ROW_NUMBER() OVER (PARTITION BY name …)` numbers every version
- * of the DocType before `LIMIT` applies and makes each page cost the table.
+ * primary key, so a page costs its own size, where `ROW_NUMBER() OVER
+ * (PARTITION BY name …)` numbers every row of the DocType before `LIMIT`
+ * applies and makes each page cost the table.
  *
  * Where the conditions sit is the part that matters. `docstatus` and the
  * pre-filters are tested on the row that *is* the newest version, never used to
@@ -130,8 +148,11 @@ export function d1AnalyticsScanStatement(query: AnalyticsDocumentScanQuery): {
     params.push(query.cursor);
   }
   conditions.push(
-    `d.version = (SELECT MAX(n.version) FROM ${D1_ANALYTICS_DOCUMENTS_TABLE} AS n
-       WHERE n.tenant_id = d.tenant_id AND n.doctype = d.doctype AND n.name = d.name)`
+    `(d.version, d.export_generation) = (
+       SELECT n.version, n.export_generation FROM ${D1_ANALYTICS_DOCUMENTS_TABLE} AS n
+       WHERE n.tenant_id = d.tenant_id AND n.doctype = d.doctype AND n.name = d.name
+       ORDER BY n.version DESC, n.export_generation DESC
+       LIMIT 1)`
   );
   conditions.push("d.docstatus <> 'deleted'");
   for (const prefilter of pushablePrefilters(query)) {
@@ -165,10 +186,18 @@ interface AnalyticsExportCursorRow {
   readonly position_updated_at: string | null;
   readonly position_name: string | null;
   readonly complete_through: string | null;
+  readonly pending_through: string | null;
+  readonly pending_visible_at: string | null;
+  readonly generation: number;
+  readonly reexporting: number;
   readonly exported_rows: number;
   readonly last_run_at: string | null;
   readonly last_error: string | null;
 }
+
+const CURSOR_COLUMNS = `tenant_id, doctype, position_updated_at, position_name, complete_through,
+                pending_through, pending_visible_at, generation, reexporting,
+                exported_rows, last_run_at, last_error`;
 
 /**
  * Export cursors in the framework database (migration 0009).
@@ -183,8 +212,7 @@ export class D1AnalyticsExportCursorStore implements AnalyticsExportCursorStore 
   async get(tenantId: TenantId, doctype: DocTypeName): Promise<AnalyticsExportCursor | null> {
     const row = await this.db
       .prepare(
-        `SELECT tenant_id, doctype, position_updated_at, position_name, complete_through,
-                exported_rows, last_run_at, last_error
+        `SELECT ${CURSOR_COLUMNS}
          FROM ${D1_ANALYTICS_EXPORTS_TABLE}
          WHERE tenant_id = ? AND doctype = ?`
       )
@@ -196,8 +224,7 @@ export class D1AnalyticsExportCursorStore implements AnalyticsExportCursorStore 
   async list(tenantId: TenantId): Promise<readonly AnalyticsExportCursor[]> {
     const result = await this.db
       .prepare(
-        `SELECT tenant_id, doctype, position_updated_at, position_name, complete_through,
-                exported_rows, last_run_at, last_error
+        `SELECT ${CURSOR_COLUMNS}
          FROM ${D1_ANALYTICS_EXPORTS_TABLE}
          WHERE tenant_id = ?
          ORDER BY doctype ASC`
@@ -207,18 +234,25 @@ export class D1AnalyticsExportCursorStore implements AnalyticsExportCursorStore 
     return (result.results ?? []).map(cursorFromRow);
   }
 
-  async save(cursor: AnalyticsExportCursor): Promise<void> {
-    // `complete_through` never moves backwards, decided inside the statement:
-    // two overlapping runs (a retry landing on the next cron tick) can save in
-    // either order, and the freshness claim must not regress when the slower
-    // one finishes last. The position may regress that way, which only costs
-    // re-appending rows the sink already has.
-    await this.db
+  async save(cursor: AnalyticsExportCursor): Promise<boolean> {
+    // Two guards, both decided inside the one statement so no read-then-write
+    // race can slip between them:
+    //
+    // - The `WHERE` on the update refuses a save from an older generation. A
+    //   run that read the cursor before a reset would otherwise put its old
+    //   position back and the reset would be lost without a trace.
+    // - `complete_through` never moves backwards: two overlapping runs (a retry
+    //   landing on the next cron tick) can save in either order, and the
+    //   freshness claim must not regress when the slower one finishes last. The
+    //   position may regress that way, which only costs re-appending rows the
+    //   sink already has.
+    const result = await this.db
       .prepare(
         `INSERT INTO ${D1_ANALYTICS_EXPORTS_TABLE}
            (tenant_id, doctype, position_updated_at, position_name, complete_through,
+            pending_through, pending_visible_at, generation, reexporting,
             exported_rows, last_run_at, last_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (tenant_id, doctype) DO UPDATE SET
            position_updated_at = excluded.position_updated_at,
            position_name = excluded.position_name,
@@ -228,9 +262,13 @@ export class D1AnalyticsExportCursorStore implements AnalyticsExportCursorStore 
              WHEN excluded.complete_through > ${D1_ANALYTICS_EXPORTS_TABLE}.complete_through THEN excluded.complete_through
              ELSE ${D1_ANALYTICS_EXPORTS_TABLE}.complete_through
            END,
+           pending_through = excluded.pending_through,
+           pending_visible_at = excluded.pending_visible_at,
+           reexporting = excluded.reexporting,
            exported_rows = excluded.exported_rows,
            last_run_at = excluded.last_run_at,
-           last_error = excluded.last_error`
+           last_error = excluded.last_error
+         WHERE ${D1_ANALYTICS_EXPORTS_TABLE}.generation = excluded.generation`
       )
       .bind(
         cursor.tenantId,
@@ -238,16 +276,32 @@ export class D1AnalyticsExportCursorStore implements AnalyticsExportCursorStore 
         cursor.position?.updatedAt ?? null,
         cursor.position?.name ?? null,
         cursor.completeThrough,
+        cursor.pendingThrough,
+        cursor.pendingVisibleAt,
+        cursor.generation,
+        cursor.reexporting ? 1 : 0,
         cursor.exportedRows,
         cursor.lastRunAt,
         cursor.lastError
       )
       .run();
+    return Number(result.meta.changes ?? 0) > 0;
   }
 
   async reset(tenantId: TenantId, doctype: DocTypeName): Promise<void> {
+    // An upsert, not a delete: the generation has to survive the reset for the
+    // re-export to outrank what it replaces, and `complete_through` is kept so
+    // analytical reads stay up while the re-export runs.
     await this.db
-      .prepare(`DELETE FROM ${D1_ANALYTICS_EXPORTS_TABLE} WHERE tenant_id = ? AND doctype = ?`)
+      .prepare(
+        `INSERT INTO ${D1_ANALYTICS_EXPORTS_TABLE} (tenant_id, doctype, generation, reexporting)
+         VALUES (?, ?, 1, 1)
+         ON CONFLICT (tenant_id, doctype) DO UPDATE SET
+           position_updated_at = NULL,
+           position_name = NULL,
+           generation = ${D1_ANALYTICS_EXPORTS_TABLE}.generation + 1,
+           reexporting = 1`
+      )
       .bind(tenantId, doctype)
       .run();
   }
@@ -262,6 +316,10 @@ function cursorFromRow(row: AnalyticsExportCursorRow): AnalyticsExportCursor {
         ? null
         : { updatedAt: row.position_updated_at, name: row.position_name },
     completeThrough: row.complete_through,
+    pendingThrough: row.pending_through,
+    pendingVisibleAt: row.pending_visible_at,
+    generation: Number(row.generation),
+    reexporting: Number(row.reexporting) === 1,
     exportedRows: Number(row.exported_rows),
     lastRunAt: row.last_run_at,
     lastError: row.last_error

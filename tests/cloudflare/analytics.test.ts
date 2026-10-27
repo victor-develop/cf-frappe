@@ -11,7 +11,19 @@ import {
   type AnalyticsPipelineRecord,
   type AnalyticsSqlDialect
 } from "../../src/cloudflare/analytics.js";
-import { analyticsRowFromSnapshot, type AnalyticsDocumentRow, type DocumentSnapshot } from "../../src";
+import {
+  AnalyticsExportService,
+  InMemoryAnalyticsExportCursorStore,
+  InMemoryProjectionStore,
+  SYSTEM_MANAGER_ROLE,
+  analyticsRowFromSnapshot,
+  createRegistry,
+  defineDocType,
+  defineReport,
+  type AnalyticsDocumentRow,
+  type AnalyticsSink,
+  type DocumentSnapshot
+} from "../../src";
 
 const ENDPOINT = "https://api.sql.cloudflarestorage.com/api/v1/accounts/abc123/basin-sql/query/cf-frappe-analytics";
 
@@ -64,7 +76,7 @@ describe("R2 SQL scan statement", () => {
         "SELECT name, version, docstatus, data_json, created_at, updated_at",
         "FROM (",
         "  SELECT name, version, docstatus, data_json, created_at, updated_at,",
-        "    ROW_NUMBER() OVER (PARTITION BY name ORDER BY version DESC) AS cf_rank",
+        "    ROW_NUMBER() OVER (PARTITION BY name ORDER BY version DESC, export_generation DESC, exported_at DESC) AS cf_rank",
         "  FROM cf_frappe.documents",
         "  WHERE tenant_id = 'acme' AND doctype = 'Ticket'",
         ") AS latest",
@@ -127,14 +139,37 @@ describe("R2 SQL scan statement semantics on a real SQL engine", () => {
   function engine(rows: readonly AnalyticsDocumentRow[]) {
     const db = new DatabaseSync(":memory:");
     db.exec("ATTACH ':memory:' AS cf_frappe");
+    // No key, like the Iceberg table: every record Pipelines delivers is a row,
+    // duplicates included, and only the ranking decides which one a read sees.
     db.exec(
-      "CREATE TABLE cf_frappe.documents (tenant_id TEXT, doctype TEXT, name TEXT, version INTEGER, docstatus TEXT, data_json TEXT, created_at TEXT, updated_at TEXT, exported_at TEXT)"
+      "CREATE TABLE cf_frappe.documents (tenant_id TEXT, doctype TEXT, name TEXT, version INTEGER, docstatus TEXT, data_json TEXT, created_at TEXT, updated_at TEXT, export_generation INTEGER, exported_at TEXT)"
     );
-    const insert = db.prepare("INSERT INTO cf_frappe.documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const record of rows.map(analyticsPipelineRecord)) {
-      insert.run(record.tenant_id, record.doctype, record.name, record.version, record.docstatus, record.data_json, record.created_at, record.updated_at, record.exported_at);
-    }
+    const insert = db.prepare("INSERT INTO cf_frappe.documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    const append = (batch: readonly AnalyticsDocumentRow[]) => {
+      for (const record of batch.map(analyticsPipelineRecord)) {
+        insert.run(
+          record.tenant_id,
+          record.doctype,
+          record.name,
+          record.version,
+          record.docstatus,
+          record.data_json,
+          record.created_at,
+          record.updated_at,
+          record.export_generation,
+          record.exported_at
+        );
+      }
+    };
+    append(rows);
     return {
+      append,
+      data(query: Parameters<typeof r2SqlAnalyticsScanSql>[0]) {
+        const sql = r2SqlAnalyticsScanSql(query, { table: "cf_frappe.documents", offset: 0, dialect: sqliteDialect });
+        return (db.prepare(sql).all() as { name: string; version: number; data_json: string }[]).map(
+          (item) => `${item.name}@${item.version}:${item.data_json}`
+        );
+      },
       names(query: Parameters<typeof r2SqlAnalyticsScanSql>[0], offset = 0) {
         const sql = r2SqlAnalyticsScanSql(query, { table: "cf_frappe.documents", offset, dialect: sqliteDialect });
         return (db.prepare(sql).all() as { name: string; version: number }[]).map((item) => `${item.name}@${item.version}`);
@@ -158,6 +193,88 @@ describe("R2 SQL scan statement semantics on a real SQL engine", () => {
     expect(sql.names({ tenantId: "acme", doctype: "Ticket", limit: 10, prefilters: [{ field: "status", value: "Open" }] })).toEqual(["T-3@1"]);
     expect(sql.names({ tenantId: "acme", doctype: "Ticket", limit: 1 }, 1)).toEqual(["T-3@1"]);
     sql.close();
+  });
+
+  it("ranks a higher export generation above a later-exported older one at the same version", () => {
+    const base = row("T-1", 2, { data: { total: 1 } });
+    const sql = engine([
+      { ...base, exportGeneration: 1, dataJson: '{"total":2}', exportedAt: "2026-03-03T00:00:00.000Z" },
+      // A run in flight when the reset landed re-sends generation 0 later still.
+      { ...base, exportedAt: "2026-03-04T00:00:00.000Z" },
+      base,
+      // Same version and generation twice: the later export wins.
+      row("T-2", 1, { data: { total: 5 } }),
+      { ...row("T-2", 1, { data: { total: 6 } }), exportedAt: "2026-03-03T00:00:00.000Z" }
+    ]);
+
+    expect(sql.data({ tenantId: "acme", doctype: "Ticket", limit: 10 })).toEqual(['T-1@2:{"total":2}', 'T-2@1:{"total":6}']);
+    sql.close();
+  });
+});
+
+describe("R2 SQL statement after a reset, on a real SQL engine", () => {
+  const sqliteDialect: AnalyticsSqlDialect = {
+    jsonString: (column, field) => `json_extract(${column}, '$.${field}')`
+  };
+
+  it("shows the re-exported data when a rebuild rewrote a row at the same version", async () => {
+    // The scenario: a projection bug computed `total` wrong; a rebuild (#11)
+    // fixes the row in place, same version, same updatedAt; the operator resets
+    // the export. Iceberg keeps both rows, and the corrected one must win every
+    // time, not whichever the engine happens to number first.
+    const db = new DatabaseSync(":memory:");
+    db.exec("ATTACH ':memory:' AS cf_frappe");
+    db.exec(
+      "CREATE TABLE cf_frappe.documents (tenant_id TEXT, doctype TEXT, name TEXT, version INTEGER, docstatus TEXT, data_json TEXT, created_at TEXT, updated_at TEXT, export_generation INTEGER, exported_at TEXT)"
+    );
+    const insert = db.prepare("INSERT INTO cf_frappe.documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    const sink: AnalyticsSink = {
+      async append(rows) {
+        for (const record of rows.map(analyticsPipelineRecord)) {
+          insert.run(record.tenant_id, record.doctype, record.name, record.version, record.docstatus, record.data_json, record.created_at, record.updated_at, record.export_generation, record.exported_at);
+        }
+      }
+    };
+    const projections = new InMemoryProjectionStore();
+    const cursors = new InMemoryAnalyticsExportCursorStore();
+    let now = "2026-03-01T00:10:00.000Z";
+    const exporter = new AnalyticsExportService({
+      registry: createRegistry({
+        doctypes: [defineDocType({ name: "Ticket", fields: [{ name: "total", type: "integer" }] })],
+        reports: [defineReport({ name: "Totals", doctype: "Ticket", queryPath: "analytical", columns: [{ name: "total" }] })]
+      }),
+      feed: projections,
+      sink,
+      cursors,
+      clock: { now: () => now }
+    });
+    const document: DocumentSnapshot = {
+      tenantId: "acme",
+      doctype: "Ticket",
+      name: "T-1",
+      version: 4,
+      docstatus: "draft",
+      data: { total: 10 },
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z"
+    };
+    await projections.save(document);
+    await exporter.exportTenant({ tenantId: "acme" });
+    await projections.save({ ...document, data: { total: 12 } });
+    await exporter.reset({ id: "admin", roles: [SYSTEM_MANAGER_ROLE], tenantId: "acme" }, "Ticket");
+    now = "2026-03-01T00:11:00.000Z";
+    await exporter.exportTenant({ tenantId: "acme" });
+
+    const sql = r2SqlAnalyticsScanSql({ tenantId: "acme", doctype: "Ticket", limit: 10 }, { table: "cf_frappe.documents", offset: 0, dialect: sqliteDialect });
+    // Both physical orders: the winner must not depend on which row the engine reads first.
+    const ascending = db.prepare(sql).all() as { data_json: string }[];
+    db.exec("CREATE TABLE cf_frappe.reordered AS SELECT * FROM cf_frappe.documents ORDER BY export_generation DESC");
+    const descending = db.prepare(sql.replace("cf_frappe.documents", "cf_frappe.reordered")).all() as { data_json: string }[];
+
+    expect(ascending.map((item) => item.data_json)).toEqual(['{"total":12}']);
+    expect(descending.map((item) => item.data_json)).toEqual(['{"total":12}']);
+    expect((db.prepare("SELECT COUNT(*) AS total FROM cf_frappe.documents").get() as { total: number }).total).toBe(2);
+    db.close();
   });
 });
 
@@ -252,8 +369,18 @@ describe("PipelinesAnalyticsSink", () => {
       data_json: "{\"status\":\"Open\"}",
       created_at: "2026-03-01T00:00:00.000Z",
       updated_at: "2026-03-01T00:00:01.000Z",
+      export_generation: 0,
       exported_at: "2026-03-02T00:00:00.000Z"
     });
+  });
+
+  it("tells the exporter its rows are visible only after the sink rolls a file", () => {
+    const send = async () => undefined;
+
+    expect(new PipelinesAnalyticsSink({ send }).visibleAfterSeconds).toBe(360);
+    expect(new PipelinesAnalyticsSink({ send }, { rollIntervalSeconds: 60, visibilityMarginSeconds: 30 }).visibleAfterSeconds).toBe(90);
+    expect(() => new PipelinesAnalyticsSink({ send }, { rollIntervalSeconds: 0 })).toThrow("rollIntervalSeconds");
+    expect(() => new PipelinesAnalyticsSink({ send }, { visibilityMarginSeconds: -1 })).toThrow("visibilityMarginSeconds");
   });
 
   it("propagates a failed send so the exporter does not advance", async () => {

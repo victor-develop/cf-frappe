@@ -75,7 +75,8 @@ createCloudFrappeWorker<Env>({
   registry,
   actor,
   analytics: {
-    sink: (env) => new PipelinesAnalyticsSink(env.ANALYTICS_STREAM),
+    // rollIntervalSeconds: what the Pipelines sink was created with (default 300)
+    sink: (env) => new PipelinesAnalyticsSink(env.ANALYTICS_STREAM, { rollIntervalSeconds: 300 }),
     reader: (env) => new R2SqlAnalyticsReader({
       accountId: env.CF_ACCOUNT_ID,
       bucket: "my-analytics-bucket",
@@ -98,13 +99,17 @@ Schedule the export job once per tenant, the same way as the delivery outbox dra
 
 Cloudflare has renamed these products to Basin Pipelines, Basin Catalog and Basin SQL; the commands below are the current `wrangler basin …` ones, and the Workers `pipelines` binding is unchanged.
 
-1. Create a stream whose schema is `ANALYTICS_PIPELINE_STREAM_SCHEMA` (exported from `cf-frappe/cloudflare`; nine required fields: `tenant_id`, `doctype`, `name`, `version` `int64`, `docstatus`, `data_json`, `created_at`, `updated_at`, `exported_at`):
+1. Create a stream whose schema is `ANALYTICS_PIPELINE_STREAM_SCHEMA` (exported from `cf-frappe/cloudflare`; ten required fields: `tenant_id`, `doctype`, `name`, `version` `int64`, `docstatus`, `data_json`, `created_at`, `updated_at`, `export_generation` `int64`, `exported_at`):
    `npx wrangler basin pipelines streams create cf_frappe_documents --schema-file analytics-schema.json`
-2. Create a sink into a Data Catalog table on an R2 bucket with the catalog enabled, e.g. namespace `cf_frappe`, table `documents`, and the pipeline `INSERT INTO <sink> SELECT * FROM <stream>`. Enable catalog compaction: every export appends, so small files accumulate.
+2. Create a sink into a Data Catalog table on an R2 bucket with the catalog enabled, e.g. namespace `cf_frappe`, table `documents`, and the pipeline `INSERT INTO <sink> SELECT * FROM <stream>`. Enable catalog compaction: every export appends, so small files accumulate. Note the sink's `--roll-interval` (default 300 seconds, minimum 60) and pass the same number as `rollIntervalSeconds` — see [Freshness](#freshness--the-latency-is-observable).
 3. Bind the stream to the Worker: `"pipelines": [{ "binding": "ANALYTICS_STREAM", "stream": "<stream id>" }]`.
 4. Create an API token with R2 SQL read, Data Catalog read and R2 storage read on that bucket, and store it as a Worker secret (`wrangler secret put R2_SQL_TOKEN`). It is only ever sent as the bearer header and never appears in an error message.
 
 The reader posts to `https://api.sql.cloudflarestorage.com/api/v1/accounts/{accountId}/basin-sql/query/{bucket}` and accepts an `endpoint` override for the old path.
+
+Each page query ranks rows with `ROW_NUMBER() OVER (PARTITION BY name ORDER BY version DESC, export_generation DESC, exported_at DESC)` over the tenant's DocType. R2 SQL documents window functions as supported but budget-gated, so on a very large DocType the query can be refused, and the report then fails with `ANALYTICS_UNAVAILABLE` rather than answering. The statement's semantics are tested on SQLite; it has not been run against a live R2 SQL account in this repository's tests, so load-test a large DocType before relying on it.
+
+Migration `0009` (the export cursor table) is part of the framework migrations and is applied whether or not `analytics` is configured — an empty table that nothing reads or writes until the option is set.
 
 ### Option B — a second D1 database
 
@@ -133,8 +138,9 @@ Apply `migrations/analytics/` to that database (`wrangler d1 migrations apply ap
 Per tenant and DocType a cursor walks the projection in `(updatedAt, name)` order up to a **horizon**, `now − settleSeconds` (default 60):
 
 - **Why a total order.** The list ordering has no tie-breaker on `updatedAt`, and a resumable cursor needs one. `listChangedSince` resumes strictly after `(updatedAt, name)`, so a batch boundary inside a tie loses nothing. It rides `idx_cf_frappe_documents_list` as an index range; a test pins the plan.
-- **Why a settle window.** The cursor only moves forward, so a row that lands *behind* it is never seen. `updatedAt` is stamped when a command is planned and becomes visible when its commit lands; not exporting anything younger than the window means the cursor is never ahead of a commit still in flight. A D1 commit takes milliseconds against a 60-second window.
-- **Why it is safe to repeat.** Each batch is appended, then the position is saved. A crash between the two re-appends the batch next run; the copy is keyed `(tenant, doctype, name, version)` so the repeat is invisible. Pipelines does not document exactly-once delivery, so nothing relies on it.
+- **Why a settle window.** The cursor only moves forward, so a row that lands *behind* it is never seen. `updatedAt` is stamped when a command is planned and becomes visible when its commit lands; not exporting anything younger than the window means the cursor is never ahead of a commit still in flight. A D1 commit takes milliseconds against a 60-second window. The window has to cover the whole time from planning to commit, though: a command whose hooks await slow external calls between the two, or a retry that reuses the planned timestamp, can take longer, and a row committed more than `settleSeconds` after its `updatedAt` is never exported. Raise `settleSeconds` above the longest such command if you have them.
+- **Why it is safe to repeat.** Each batch is appended, then the position is saved. A crash between the two re-appends the batch next run; the copy is keyed `(tenant, doctype, name, version, export_generation)` so the repeat is invisible. Pipelines does not document exactly-once delivery, so nothing relies on it.
+- **Which row a reader takes.** Per document: the highest `version`, then the highest `export_generation`, then the latest `exported_at`. The same order in the D1 statement, the R2 SQL statement and the in-memory store, each tested. Within one key D1 keeps the later append (an upsert), which is the same answer the R2 ranking gives over Iceberg's duplicates.
 - **Deletes are rows.** A deleted document is exported with `docstatus: "deleted"`. Readers choose the newest version first and hide deletes after — filtering first would bring a deleted document back as its last live version. Both the D1 and the R2 SQL statement are tested for that on a real engine.
 - **Events are never touched.** This copies the cache, not the asset.
 
@@ -148,17 +154,29 @@ A projection row rewritten **without** a new `updatedAt`: a full rebuild (#11) p
 POST /api/analytics/exports/Return%20Request/reset
 ```
 
-The next run re-exports it from the start; unchanged documents append rows that are already there.
+The reset starts a new **export generation**: the next run re-exports the DocType from the start, and every row it appends outranks the rows exported before the reset. That matters because a rebuild folds the same events — the rewritten row keeps its `version` and `updatedAt`, so version alone could not tell the corrected row from the stale one, and on Iceberg either could win.
+
+While the re-export runs:
+
+- Analytical reads keep being served (the reset keeps `completeThrough`), but documents the re-export has not reached yet still show their pre-rebuild values. `GET /api/analytics/exports` reports `reexporting: true` until a run of the new generation drains; at `maxRowsPerRun` 10,000 and a one-minute cron, that is about one minute per 10,000 documents.
+- An export run that was already in flight when the reset landed stops at its next save and reports `status: "superseded"`, rather than writing its old position back over the reset. Rows it sent carry the old generation, so they cannot outrank the re-export.
 
 ## Freshness — the latency is observable
 
-`completeThrough` is the claim: every projection change at or before it is in the copy. It moves only when a run drains everything up to its horizon, and never backwards (enforced inside the cursor upsert, because two overlapping runs can save in either order).
+`completeThrough` is the claim: every projection change at or before it is **visible** in the copy. It moves only when a run drains everything up to its horizon, and never backwards (enforced inside the cursor upsert, because two overlapping runs can save in either order).
+
+**Pipelines buffers.** `send` resolving means the stream accepted the records; the sink writes them into the Iceberg table only when it rolls a file, up to its roll interval later. `PipelinesAnalyticsSink` therefore declares `visibleAfterSeconds` = `rollIntervalSeconds` + `visibilityMarginSeconds` (defaults 300 + 60). A drained horizon is held on the cursor as `pendingThrough` until that much time has passed since it was sent, and only then counts towards `completeThrough` — for reports, for `GET /api/analytics/exports`, for the job result. Two consequences:
+
+- Lag on the Pipelines path is roughly settle window + roll interval + margin, and up to one more of that while the next pending horizon waits behind the current one. That is the real figure, not an understatement of it.
+- A first export that has been sent but has not landed yet still reads as "not finished" (`ANALYTICS_UNAVAILABLE`), so an empty table is never reported as a zero.
+
+The D1 and in-memory stores show rows on append (`visibleAfterSeconds` 0), so their claim moves with each drained run. If you change the Pipelines sink's roll interval, change `rollIntervalSeconds` with it; if lag shows rows landing later than the claim, raise `visibilityMarginSeconds`.
 
 | Where | What |
 | --- | --- |
 | Every analytical report result | `analytics: { path: "analytical", completeThrough }` — absent on operational results, so those are unchanged byte for byte |
-| `GET /api/analytics/exports` (admin roles) | per DocType: `completeThrough`, `lagSeconds`, `exportedRows`, `lastRunAt`, `lastError` |
-| The export job's result in job history | per DocType: `exported`, `drained`, `completeThrough`, `lagSeconds`, `error` |
+| `GET /api/analytics/exports` (admin roles) | per DocType: `completeThrough`, `lagSeconds`, `reexporting`, `exportedRows`, `lastRunAt`, `lastError` |
+| The export job's result in job history | per DocType: `status` (`exported`, `failed`, `superseded`), `exported`, `drained`, `completeThrough`, `lagSeconds`, `error` |
 
 A run that hits `maxRowsPerRun` (default 10,000) stops, saves its position and leaves `completeThrough` where it was, so a backlog shows as growing lag rather than as a run that never ends.
 
@@ -192,12 +210,13 @@ Operational lists, forms, operational reports and writes do not touch the analyt
 
 ## Security notes
 
-- R2 SQL takes no bound parameters, so the R2 reader writes literals. Tenant and DocType are inlined only through `sqlStringLiteral`, which doubles quotes and **refuses** backslashes and control characters rather than trusting an undocumented parser; the table name must be `namespace.table` of plain identifiers; account id and bucket are validated before they reach the URL. Paging is by `OFFSET`, so document names never become literals.
+- R2 SQL takes no bound parameters, so the R2 reader writes literals. Tenant and DocType are inlined only through `sqlStringLiteral`, which doubles quotes and **refuses** backslashes and control characters rather than trusting an undocumented parser; the table name must be `namespace.table` of plain identifiers; account id and bucket are validated before they reach the URL. Paging is by `OFFSET`, so document names never become literals. The cost: a document leaving the result set (deleted, or no longer matching a pushed-down pre-filter) on an earlier page between two page queries shifts later rows back, and one document at the boundary is skipped for that read; a new document shifts rows forward and the reader de-duplicates by name. The operational report scan pages by offset too. A DocType that fits in one page (`scanPageSize`, up to 10,000) is unaffected.
 - Every D1 statement binds its values.
 - The copy holds full document data, including fields some actors cannot read. Nothing reads it except through the access checks above.
 
 ## What is deliberately not here
 
+- **A row cap on the analytical scan.** The analytical path loads the readable DocType into the Worker before the report code runs, including for CSV export, which pages on the operational path. Worker memory (128 MB) therefore bounds how large a DocType an analytical report can cover; measure a large one before relying on it.
 - **Aggregate pushdown into R2 SQL.** See above: collation and mixed-type keys. If a report outgrows Worker memory, the next step is a declared, SQL-native aggregate shape whose semantics are defined by the SQL engine, not a translation of the existing report code.
 - **Compaction of the copy.** Every exported version is kept. Use the catalog's compaction for file counts; collapsing versions would need a rewrite job nobody needs yet.
 - **Exporting events.** The events stay in D1 and are archive material for #18, not report input.
