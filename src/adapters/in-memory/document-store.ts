@@ -10,11 +10,15 @@ import type {
   StreamName,
   TenantId
 } from "../../core/types.js";
-import type {
-  DocumentCommit,
-  DocumentCommitBatchEntry,
-  DocumentCommitBatchProjection,
-  DocumentStore
+import {
+  afterProjectionHandoff,
+  projectionHandoffEvents,
+  type DocumentCommit,
+  type DocumentCommitBatchEntry,
+  type DocumentCommitBatchProjection,
+  type DocumentStore,
+  type DocumentStoreProjectionOptions,
+  type ProjectionHandoff
 } from "../../ports/document-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
@@ -28,6 +32,12 @@ import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.j
 export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBatchStore, ProjectionStore, AuditEventStore {
   private readonly streams = new Map<StreamName, DomainEvent[]>();
   private readonly documents = new Map<string, DocumentSnapshot>();
+  private readonly projectionHandoff: ProjectionHandoff | undefined;
+
+  /** See `D1DocumentStore`: no options is the single-database layout. */
+  constructor(options: DocumentStoreProjectionOptions = {}) {
+    this.projectionHandoff = options.projectionHandoff;
+  }
 
   async commit(
     stream: StreamName,
@@ -50,13 +60,27 @@ export class InMemoryDocumentStore implements DocumentStore, EventStore, EventBa
     }
     const saved = entries.flatMap((entry) => sequenceEvents(entry.expectedVersion, entry.events));
     const projection = project(saved);
+    const snapshots = [projection.snapshot, ...(projection.auxiliarySnapshots ?? [])];
+    // Planned before anything is written, so a refused handoff leaves the
+    // streams untouched — the same all-or-nothing a D1 batch gives.
+    const handoff = this.projectionHandoff === undefined
+      ? undefined
+      : projectionHandoffEvents(this.projectionHandoff, entries, saved, snapshots);
     for (const entry of entries) {
       const current = this.streams.get(entry.stream) ?? [];
       const savedForStream = saved.filter((event) => event.stream === entry.stream);
       this.streams.set(entry.stream, [...current, ...savedForStream.map(cloneDomainEvent)]);
     }
-    for (const snapshot of [projection.snapshot, ...(projection.auxiliarySnapshots ?? [])]) {
-      await this.save(snapshot);
+    if (handoff === undefined) {
+      for (const snapshot of snapshots) {
+        await this.save(snapshot);
+      }
+    } else {
+      for (const event of handoff) {
+        const current = this.streams.get(event.stream) ?? [];
+        this.streams.set(event.stream, [...current, cloneDomainEvent({ ...event, sequence: current.length + 1 })]);
+      }
+      await afterProjectionHandoff(this.projectionHandoff!, snapshots);
     }
     return { events: saved, snapshot: projection.snapshot };
   }

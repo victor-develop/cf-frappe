@@ -6,22 +6,39 @@ import type {
   StreamName
 } from "../../core/types.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
-import type {
-  DocumentCommit,
-  DocumentCommitBatchEntry,
-  DocumentCommitBatchProjection,
-  DocumentStore,
-  ReadStreamOptions
+import {
+  afterProjectionHandoff,
+  projectionHandoffEvents,
+  type DocumentCommit,
+  type DocumentCommitBatchEntry,
+  type DocumentCommitBatchProjection,
+  type DocumentStore,
+  type DocumentStoreProjectionOptions,
+  type ProjectionHandoff,
+  type ReadStreamOptions
 } from "../../ports/document-store.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
-import { insertEventStatements, sequenceEvents } from "./event-writer.js";
+import { insertEventAtHeadStatement, insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { automationRunIndexUpsertStatement } from "./automation-run-index.js";
 import { D1_DOCUMENTS_TABLE, D1_EVENTS_TABLE } from "./tables.js";
 
 export class D1DocumentStore implements DocumentStore, AuditEventStore {
-  constructor(private readonly db: D1Database) {}
+  private readonly projectionHandoff: ProjectionHandoff | undefined;
+
+  /**
+   * With no options this writes projection rows inline, in the commit's own
+   * batch — the single-database layout. `projectionHandoff` is the split
+   * layout from issue #13: the rows leave as events instead, and this database
+   * holds no projection writes at all.
+   */
+  constructor(
+    private readonly db: D1Database,
+    options: DocumentStoreProjectionOptions = {}
+  ) {
+    this.projectionHandoff = options.projectionHandoff;
+  }
 
   async commit(
     stream: StreamName,
@@ -45,18 +62,24 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
 
     const saved = entries.flatMap((entry) => sequenceEvents(entry.expectedVersion, entry.events));
     const projection = project(saved);
+    const snapshots = [projection.snapshot, ...(projection.auxiliarySnapshots ?? [])];
     try {
       await this.db.batch([
         ...insertEventStatements(this.db, saved),
-        ...[projection.snapshot, ...(projection.auxiliarySnapshots ?? [])].flatMap((snapshot) =>
-          documentProjectionStatements(this.db, snapshot)
-        )
+        ...(this.projectionHandoff === undefined
+          ? snapshots.flatMap((snapshot) => documentProjectionStatements(this.db, snapshot))
+          : projectionHandoffEvents(this.projectionHandoff, entries, saved, snapshots).map((event) =>
+              insertEventAtHeadStatement(this.db, event)
+            ))
       ]);
     } catch (error) {
       if (isD1ConstraintError(error)) {
         throw conflict("One or more streams changed while committing");
       }
       throw error;
+    }
+    if (this.projectionHandoff !== undefined) {
+      await afterProjectionHandoff(this.projectionHandoff, snapshots);
     }
     return { events: saved, snapshot: projection.snapshot };
   }

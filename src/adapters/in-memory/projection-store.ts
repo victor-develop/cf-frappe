@@ -7,10 +7,10 @@ import type {
   TenantId
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
-import type { ProjectionStore } from "../../ports/projection-store.js";
+import type { MonotonicProjectionWriter, ProjectionStore } from "../../ports/projection-store.js";
 import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.js";
 
-export class InMemoryProjectionStore implements ProjectionStore {
+export class InMemoryProjectionStore implements ProjectionStore, MonotonicProjectionWriter {
   private readonly documents = new Map<string, DocumentSnapshot>();
 
   async get(
@@ -24,6 +24,19 @@ export class InMemoryProjectionStore implements ProjectionStore {
 
   async save(snapshot: DocumentSnapshot): Promise<void> {
     this.documents.set(key(snapshot.tenantId, snapshot.doctype, snapshot.name), cloneDocumentSnapshot(snapshot));
+  }
+
+  async saveNewest(snapshots: readonly DocumentSnapshot[]): Promise<void> {
+    for (const snapshot of snapshots) {
+      const existing = this.documents.get(key(snapshot.tenantId, snapshot.doctype, snapshot.name));
+      if (existing === undefined || snapshot.version >= existing.version) {
+        // `createdAt` is never rewritten on conflict, matching the D1 upsert.
+        this.documents.set(
+          key(snapshot.tenantId, snapshot.doctype, snapshot.name),
+          cloneDocumentSnapshot(existing === undefined ? snapshot : { ...snapshot, createdAt: existing.createdAt })
+        );
+      }
+    }
   }
 
   async remove(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void> {

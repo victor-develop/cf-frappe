@@ -28,7 +28,7 @@ export const DOCUMENT_FOLD_VERSION = 1;
  */
 export class DocumentFoldSnapshots {
   constructor(
-    private readonly store: DocumentStore,
+    private readonly store: Pick<DocumentStore, "readStream">,
     private readonly snapshots: SnapshotStore | undefined
   ) {}
 

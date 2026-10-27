@@ -9,12 +9,7 @@ export function automationRunIndexUpsertStatement(
   if (snapshot.doctype !== "__AutomationRuns") {
     return undefined;
   }
-  const data = snapshot.data;
-  const status = typeof data.status === "string" ? data.status : "";
-  const enqueuedAt = typeof data.enqueuedAt === "string" ? data.enqueuedAt : snapshot.createdAt;
-  const retryAt = typeof data.retryAt === "string" ? data.retryAt : null;
-  const claimExpiresAt = typeof data.claimExpiresAt === "string" ? data.claimExpiresAt : null;
-  const availableAt = automationRunAvailableAt(status, enqueuedAt, retryAt, claimExpiresAt);
+  const { status, availableAt, enqueuedAt } = automationRunIndexRow(snapshot);
   return db
     .prepare(
       `INSERT INTO ${D1_AUTOMATION_RUNS_TABLE}
@@ -28,6 +23,62 @@ export function automationRunIndexUpsertStatement(
          updated_at = excluded.updated_at`
     )
     .bind(snapshot.tenantId, snapshot.name, status, availableAt, enqueuedAt, snapshot.updatedAt);
+}
+
+/**
+ * {@link automationRunIndexUpsertStatement}, but only while the document row
+ * holds this snapshot's version. For writers that may deliver an older run
+ * snapshot after a newer one: the claim index has no version column, so it
+ * borrows the document row's — see `D1ProjectionStore.saveNewest`.
+ */
+export function automationRunIndexUpsertIfCurrentStatement(
+  db: D1Database,
+  snapshot: DocumentSnapshot
+): D1PreparedStatement | undefined {
+  if (snapshot.doctype !== "__AutomationRuns") {
+    return undefined;
+  }
+  const row = automationRunIndexRow(snapshot);
+  return db
+    .prepare(
+      `INSERT INTO ${D1_AUTOMATION_RUNS_TABLE}
+       (tenant_id, run_id, status, available_at, enqueued_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM ${D1_DOCUMENTS_TABLE}
+         WHERE tenant_id = ? AND doctype = '__AutomationRuns' AND name = ? AND version = ?
+       )
+       ON CONFLICT(tenant_id, run_id)
+       DO UPDATE SET
+         status = excluded.status,
+         available_at = excluded.available_at,
+         enqueued_at = excluded.enqueued_at,
+         updated_at = excluded.updated_at`
+    )
+    .bind(
+      snapshot.tenantId,
+      snapshot.name,
+      row.status,
+      row.availableAt,
+      row.enqueuedAt,
+      snapshot.updatedAt,
+      snapshot.tenantId,
+      snapshot.name,
+      snapshot.version
+    );
+}
+
+function automationRunIndexRow(snapshot: DocumentSnapshot): {
+  readonly status: string;
+  readonly availableAt: string | null;
+  readonly enqueuedAt: string;
+} {
+  const data = snapshot.data;
+  const status = typeof data.status === "string" ? data.status : "";
+  const enqueuedAt = typeof data.enqueuedAt === "string" ? data.enqueuedAt : snapshot.createdAt;
+  const retryAt = typeof data.retryAt === "string" ? data.retryAt : null;
+  const claimExpiresAt = typeof data.claimExpiresAt === "string" ? data.claimExpiresAt : null;
+  return { status, availableAt: automationRunAvailableAt(status, enqueuedAt, retryAt, claimExpiresAt), enqueuedAt };
 }
 
 export async function listD1AutomationRunClaimCandidateSnapshots(
