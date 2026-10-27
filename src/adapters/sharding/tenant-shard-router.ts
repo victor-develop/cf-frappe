@@ -15,6 +15,19 @@ import type {
  */
 export const HOME_SHARD_TENANTS: readonly TenantId[] = Object.freeze(["__global__"]);
 
+/**
+ * The stream prefix of `__global__`'s streams. Routing goes by a stream's
+ * tenant, so these always land on home — but their rows carry the tenant id of
+ * whoever wrote them (a runtime job schedule saved by `acme` is an `acme` row
+ * on `__global__:__JobSchedules:definitions`). The fence trigger and the
+ * mover both key on rows' tenant id, so both skip this prefix: a tenant that
+ * moved off home must still be able to save its schedules there, and a move
+ * must not carry other tenants' framework state along. `__global__` needs no
+ * escaping in a stream name (`documentStream` escapes with
+ * `encodeURIComponent`), which `tests/adapters/tenant-sharding.test.ts` pins.
+ */
+export const HOME_SHARD_STREAM_PREFIX = "__global__:";
+
 /** How long a routing answer is reused before the directory is asked again. */
 export const DEFAULT_TENANT_SHARD_CACHE_TTL_MS = 5_000;
 /** How long a fenced write keeps retrying before it gives up with `TENANT_MOVING`. */

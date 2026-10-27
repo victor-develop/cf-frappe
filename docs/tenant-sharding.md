@@ -22,8 +22,8 @@ Every port the framework writes through already names its tenant: `ProjectionSto
 `cf_frappe_tenant_shards` on `DB` maps tenant → shard. `DB` is always a shard too, called `home` unless you name it otherwise, and it is where every tenant lives until something places it elsewhere.
 
 - **Reads never place a tenant.** A tenant with no entry reads from `home`, and that answer is not cached.
-- **The first write places it.** With `newTenants: "home"` (the default) it lands on `home`, so switching sharding on changes nothing for anyone; with `newTenants: "place"` it lands on the accepting shard with the fewest tenants, after that shard's migrations are brought up to the plan. Two isolates placing the same tenant at once agree on one shard (`INSERT … ON CONFLICT DO NOTHING`, then read back).
-- **`__global__`** — framework state such as job schedule definitions — always lives on `home` and never gets an entry.
+- **The first write places it.** With `newTenants: "home"` (the default) it lands on `home`, so switching sharding on changes nothing for anyone; with `newTenants: "place"` it lands on the accepting shard with the fewest tenants, after that shard's migrations are brought up to the plan — unless the tenant already has events on `home` (it wrote before sharding was on and was never registered), in which case it is registered on `home`: placing it elsewhere would strand its history there, restart its naming series and duplicate its unique values. Two isolates placing the same tenant at once agree on one shard (`INSERT … ON CONFLICT DO NOTHING`, then read back).
+- **`__global__`** — framework state such as job schedule definitions — always lives on `home` and never gets an entry. Its streams' rows carry the tenant id of whoever wrote them (a runtime job schedule saved by `acme` is an `acme` row on `__global__:__JobSchedules:definitions`), so the fence trigger and the mover skip `__global__:` streams: a tenant that moved off `home` can still save and delete its schedules there, and a move never carries them along. Do not give a customer tenant the id `__global__`: it would be pinned to `home` and could never move.
 
 Each isolate caches answers for `cacheTtlMs` (5 s). What that cache can get wrong after a move:
 
@@ -32,7 +32,7 @@ Each isolate caches answers for `cacheTtlMs` (5 s). What that cache can get wron
 
 ### The fence
 
-`cf_frappe_tenant_fences` and a `BEFORE INSERT` trigger on `cf_frappe_events` exist in every database (migration `0009`). A row in the fence table makes the trigger raise `CF_FRAPPE_TENANT_FENCED` for any event insert of that tenant, which rolls back the whole batch — events, inline projection rows, projection handoff — whichever code path issued it. It is a trigger rather than a check in the adapters because a check would read and then write (a race) and would have to be in every writer. Verified on workerd's D1 (`wrangler dev`) and on `node:sqlite`; D1 reports it as `D1_ERROR: CF_FRAPPE_TENANT_FENCED: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`, which `isD1TenantFencedError` recognizes and the D1 stores rethrow as is instead of reporting a version conflict.
+`cf_frappe_tenant_fences` and a `BEFORE INSERT` trigger on `cf_frappe_events` exist in every database (migration `0009`). A row in the fence table makes the trigger raise `CF_FRAPPE_TENANT_FENCED` for any event insert of that tenant, which rolls back the whole batch — events, inline projection rows, projection handoff — whichever code path issued it — except on `__global__:` streams, which live on `home` whatever tenant id their rows carry (above). It is a trigger rather than a check in the adapters because a check would read and then write (a race) and would have to be in every writer. Verified on workerd's D1 (`wrangler dev`) and on `node:sqlite`; D1 reports it as `D1_ERROR: CF_FRAPPE_TENANT_FENCED: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`, which `isD1TenantFencedError` recognizes and the D1 stores rethrow as is instead of reporting a version conflict.
 
 With no fence rows — every deployment that never moves a tenant — the trigger costs one primary-key probe of an empty table per event insert.
 
@@ -79,7 +79,7 @@ With no fence rows — every deployment that never moves a tenant — the trigge
 
    Deploy it in one non-gradual deployment, for the same reason as the projection switch: an old Worker next to a new coordinator would disagree on where tenants live.
 
-3. **Register existing tenants** (optional, for scatter-gather). Tenants that already live on `DB` keep working without an entry, but cross-tenant listings only see tenants in the directory. `services.tenantShards.directory.assign(tenantId, "home")` registers one; do it for each tenant you know of.
+3. **Register existing tenants** (recommended; do it before switching to `newTenants: "place"`). Tenants that already live on `DB` keep working without an entry — under `"place"` too, because provisioning checks `DB` for the tenant's events before placing it anywhere else and keeps a tenant it finds there on `home` — but cross-tenant listings only see tenants in the directory, and that check costs one index probe on each unregistered tenant's first write. `services.tenantShards.directory.assign(tenantId, "home")` registers one; do it for each tenant you know of.
 
 `services.tenantShards` on the Worker's runtime services carries `directory`, `provisioner`, `migrations`, `mover`, `scatter` and `router`. None of it is exposed over HTTP.
 
@@ -95,7 +95,7 @@ The projection drain, rollback drain and read-your-writes wait are routed per te
 
 ## Provisioning
 
-`services.tenantShards.provisioner.provision(tenantId, { shardId? })` places a tenant ahead of its first write — at sign-up, or to give a known-large tenant a shard of its own. Without `shardId` it applies the placement policy. Before a tenant lands on any shard but `home`, that shard is brought up to the migration plan (`planD1Migrations(registry.list())`, or the `migrations` option).
+`services.tenantShards.provisioner.provision(tenantId, { shardId? })` places a tenant ahead of its first write — at sign-up, or to give a known-large tenant a shard of its own. Without `shardId` it applies the placement policy. With a `shardId` other than `home` it refuses (`409 TENANT_SHARD_INVALID`) a tenant that already has events on `home`: getting that tenant elsewhere is a move. Before a tenant lands on any shard but `home`, that shard is brought up to the migration plan (`planD1Migrations(registry.list())`, or the `migrations` option).
 
 What provisioning cannot do is create a D1 database: see step 1. Adding a shard is: create it, apply migrations, bind it, add it to `shards`, deploy, then add it to `accepting`.
 
@@ -116,14 +116,18 @@ The tenant keeps reading and writing throughout. Events are the asset and projec
 | `copying` | every event of the tenant `INSERT OR IGNORE`d into the target, in `(occurred_at, stream, sequence)` order — the `idx_cf_frappe_events_tenant_time` index, no sort | source |
 | `building` | the target's projection table rebuilt from the copied events with the #11 backfill, one projected doctype at a time — a second, not-yet-active projection version (#10) | source |
 | `catching-up` | passes that re-read the source from the start of the previous pass less `catchUpMarginMs` (5 min), copy what the target lacks, and refold the streams those events touched; repeats until a pass finds at most `cutoverThreshold` (100) missing events | source |
-| `cutover` | in **one** call: fence the source, run the final pass, compare the tenant's event counts on both sides, flip the directory | writes wait (retrying) for one invocation; reads continue |
+| `cutover` | in **one** call: claim the attempt in the journal, fence the source, run the final pass, compare the tenant's event counts on both sides, flip the directory | writes wait (retrying) for one invocation; reads continue |
 | `completed` | the directory points at the target; `epoch` bumped | target |
 
 Why it cannot lose an event: an event committed before a pass started is found by that pass, and an event committed after was stamped no earlier than that start less its commit latency, which the next pass's window covers. The cutover then checks this instead of trusting it. Every target event is a copy of a source event by id, so **equal counts mean equal sets**. If the counts differ — an event committed later than the margin assumed — or the final pass would take more than `maxCutoverPages` (20) pages, the fence comes off and the move goes back to catching up (from the tenant's first event after a count mismatch). The write stall is bounded by one invocation, never a pass over the tenant.
 
 Each step is bounded: `pagesPerAdvance` (5) pages of `pageSize` (100) events, at three queries a page plus the refolds — inside Workers Paid's per-invocation query limit with the job's default 10 steps. On Workers Free, lower both.
 
-Journaled in `cf_frappe_tenant_moves` with a revision compare-and-swap, so two drivers advancing the same move (an overlapping cron tick, a retried message) cannot both apply a step, and a stale driver can never flip the directory. `mover.abort(moveId, reason)` abandons a move before its cutover lands: the fence comes off and the tenant stays where it was.
+Journaled in `cf_frappe_tenant_moves` with a revision compare-and-swap, so two drivers advancing the same move (an overlapping cron tick, a retried message, an operator's `mover.run` next to the job) cannot both apply a step, and a stale driver can never flip the directory. The fence follows the journal, never the other way round: a cutover claims its attempt (a journal write) before it fences, so a second driver holding the same revision stops before it touches anything; and the fence comes off only after the journal write that goes back to catching up — or aborts — has succeeded, and only while the directory still points at the source. A driver that loses a race leaves the fence alone, because the move is either completed (the fence must stay) or in another driver's hands.
+
+`mover.abort(moveId, reason)` abandons a move before its cutover lands: the journal records the abort, then the fence comes off and the tenant stays where it was. An abort that loses to a completing cutover fails with a conflict and leaves the source fenced.
+
+**If a tenant is stuck on `503 TENANT_MOVING`.** An invocation that dies between fencing and its journal write leaves the fence on. If the move is still in `cutover`, the next `advance` takes it from there (it either completes or lifts it). If the move was aborted meanwhile, call `mover.abort(moveId, reason)` again: on an aborted move it lifts that move's leftover fence, provided the directory still points at the source. A cutover that keeps failing — a final pass that never fits in one invocation, for a tenant too large or too busy — can be stopped the same way, with `abort`, and retried at a quieter time; the move's `state.cutovers` lists every attempt and its outcome.
 
 A move refuses: a target that is behind the source on migrations (roll them out first), a tenant already moving, the shard the tenant is on, and `__global__`.
 
@@ -133,7 +137,7 @@ A move refuses: a target that is behind the source on migrations (roll them out 
 
 It also means moving a tenant **off** a shard stops that shard's growth from that tenant but does not shrink it. The framework does not reclaim that space, and #5's rule against deleting events applies to a frozen copy as much as to anything else: if the space is needed, archive the copy to R2 (#18) — a human decision, made after checking that the target holds every event (the cutover report journaled with the move records both counts).
 
-Moving a tenant **back** onto a shard holding its frozen copy works: the copy is a prefix of the tenant's history (events never change, ids are unique), so the move copies on top of it. Its fence is lifted at the start of the move, but only once it is older than `staleFenceAgeMs` (10 s, twice the cache lifetime), so no isolate can still be routing writes there.
+Moving a tenant **back** onto a shard holding its frozen copy works: the copy is a prefix of the tenant's history (events never change, ids are unique), so the move copies on top of it. Its fence is lifted at the start of the move, but only once the move away from it finished more than `staleFenceAgeMs` (10 s, twice the cache lifetime) ago — measured from when the directory flipped, not from when that move's cutover began — so no isolate can still be routing writes there.
 
 ## Per-shard migrations
 

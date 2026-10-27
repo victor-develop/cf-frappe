@@ -159,6 +159,7 @@ export function createTenantShardingRuntime<TEnv extends { readonly DB: D1Databa
     directory,
     migrations,
     home,
+    homeDatabase: env.DB,
     ...(options.newTenants === undefined ? {} : { newTenants: options.newTenants }),
     ...(options.accepting === undefined ? {} : { accepting: options.accepting })
   });

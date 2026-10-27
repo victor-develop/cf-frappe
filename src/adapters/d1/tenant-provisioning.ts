@@ -4,6 +4,7 @@ import type { Clock } from "../../ports/clock.js";
 import type { ShardId, TenantShardAssignment, TenantShardDirectory } from "../../ports/tenant-shards.js";
 import { D1MigrationRunner } from "./migrator.js";
 import type { D1Migration } from "./schema-planner.js";
+import { D1_EVENTS_TABLE } from "./tables.js";
 
 /** One shard's migration state. */
 export interface D1ShardMigrationStatus {
@@ -206,7 +207,9 @@ export class D1ShardMigrations {
  *   changes nothing for anyone: every existing tenant already lives there, and
  *   new ones keep arriving there until an operator moves them.
  * - `place`: onto the accepting shard with the fewest tenants, after bringing
- *   its migrations up to date.
+ *   its migrations up to date. A tenant that already has events on home —
+ *   one that wrote before sharding was on and was never registered — stays on
+ *   home instead: placing it would strand its history there.
  */
 export type TenantPlacementPolicy = "home" | "place";
 
@@ -214,6 +217,11 @@ export interface D1TenantProvisionerOptions {
   readonly directory: TenantShardDirectory;
   readonly migrations: D1ShardMigrations;
   readonly home: ShardId;
+  /**
+   * The home shard's database, `DB`. Asked whether a tenant with no directory
+   * entry already has events there before it is placed anywhere else.
+   */
+  readonly homeDatabase: D1Database;
   readonly newTenants?: TenantPlacementPolicy;
   /** Shards that take new tenants under `place`. Defaults to every shard. */
   readonly accepting?: readonly ShardId[];
@@ -249,11 +257,27 @@ export class D1TenantProvisioner {
     if (existing !== null) {
       return existing;
     }
-    const shardId = request.shardId ?? (await this.place(tenantId));
+    let shardId = request.shardId ?? (await this.place(tenantId));
     if (!this.options.migrations.shardIds.includes(shardId)) {
       throw new FrameworkError("TENANT_SHARD_NOT_FOUND", `Shard '${shardId}' is not bound in this deployment`, {
         status: 404
       });
+    }
+    // A tenant with no entry may still be an old one: everything written
+    // before sharding was switched on lives on home without an entry. Placing
+    // it elsewhere would split it — reads would follow the directory to an
+    // empty shard, its naming series would start again, its history would be
+    // unreachable. So an unregistered tenant with events on home is home's;
+    // getting it anywhere else is a move, not a placement.
+    if (shardId !== this.options.home && (await hasTenantEvents(this.options.homeDatabase, tenantId))) {
+      if (request.shardId !== undefined) {
+        throw new FrameworkError(
+          "TENANT_SHARD_INVALID",
+          `Tenant '${tenantId}' already has data on the home shard; move it to '${shardId}' instead of placing it there`,
+          { status: 409 }
+        );
+      }
+      shardId = this.options.home;
     }
     // The home shard is `DB`, which the deployment migrates itself; every
     // other shard is brought up to the plan before a tenant can land on it.
@@ -287,6 +311,15 @@ export class D1TenantProvisioner {
     // only by as much as their counts were stale.
     return candidates.reduce((best, candidate) => (candidate.tenants < best.tenants ? candidate : best)).shardId;
   }
+}
+
+/** Served by `idx_cf_frappe_events_tenant_time`; one index probe, run once per tenant ever (on its first write). */
+async function hasTenantEvents(db: D1Database, tenantId: TenantId): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS found FROM ${D1_EVENTS_TABLE} WHERE tenant_id = ? LIMIT 1`)
+    .bind(tenantId)
+    .first<{ found: number }>();
+  return row !== null;
 }
 
 function errorMessage(error: unknown): string {

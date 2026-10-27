@@ -5,7 +5,7 @@ import { systemClock, type Clock } from "../../ports/clock.js";
 import { cryptoIdGenerator, type IdGenerator } from "../../ports/id-generator.js";
 import type { MonotonicProjectionWriter } from "../../ports/projection-store.js";
 import type { ShardId, TenantShardAssignment } from "../../ports/tenant-shards.js";
-import { HOME_SHARD_TENANTS } from "../sharding/tenant-shard-router.js";
+import { HOME_SHARD_STREAM_PREFIX, HOME_SHARD_TENANTS } from "../sharding/tenant-shard-router.js";
 import { D1EventStore } from "./event-store.js";
 import { D1_EVENTS_TABLE } from "./tables.js";
 import {
@@ -150,15 +150,18 @@ interface PassPage {
  *    previous pass (less a margin), copy what the target is missing, and refold
  *    the streams those events belong to. Repeats until a pass finds at most
  *    `cutoverThreshold` missing events.
- * 4. **cutover** — in one call: fence the tenant on the source (from here every
- *    write to it there is refused by the trigger and retried by the routing
- *    stores), run a final pass, and compare the tenant's event counts on both
+ * 4. **cutover** — in one call: claim the attempt in the journal (so of two
+ *    drivers holding the same revision only one goes on), fence the tenant on
+ *    the source (from here every write to it there is refused by the trigger
+ *    and retried by the routing stores), run a final pass, and compare the tenant's event counts on both
  *    sides. Every target event is a copy of a source event, by id, so equal
  *    counts mean equal sets; then the directory flips and writes resume on the
  *    target. Unequal counts — an event committed later than the margin assumed —
- *    or a final pass longer than `maxCutoverPages` lift the fence and go back to
- *    catching up (from the tenant's first event, after a count mismatch). The
- *    write stall is one invocation, not a pass over the tenant.
+ *    or a final pass longer than `maxCutoverPages` go back to catching up (from
+ *    the tenant's first event, after a count mismatch) and then lift the fence.
+ *    The fence only ever comes off after a journal write this driver won, and
+ *    only while the directory points at the source. The write stall is one
+ *    invocation, not a pass over the tenant.
  *
  * Why the passes cannot lose an event: an event committed before a pass started
  * is found by that pass's scan, and an event committed after it started was
@@ -221,7 +224,12 @@ export class D1TenantMover {
     // go, and only once no isolate can still be routing writes there.
     const targetFence = await readD1TenantFence(target.database, tenantId);
     if (targetFence !== null) {
-      const age = Date.parse(this.clock.now()) - Date.parse(targetFence.fencedAt);
+      // Aged from when the directory flipped away from the target — the last
+      // moment a cache could have learned to route there — not from when that
+      // move's cutover fenced it, which can be much earlier.
+      const leaving = await this.options.directory.getMove<TenantMoveState>(targetFence.moveId);
+      const leftAt = leaving?.finishedAt ?? leaving?.updatedAt ?? targetFence.fencedAt;
+      const age = Date.parse(this.clock.now()) - Date.parse(leftAt);
       if (!(age >= this.staleFenceAgeMs)) {
         throw new FrameworkError(
           "TENANT_MOVE_INVALID",
@@ -279,14 +287,27 @@ export class D1TenantMover {
     return move;
   }
 
-  /** Abandons a move before its cutover lands. The tenant stays where it was, unfenced. */
+  /**
+   * Abandons a move before its cutover lands. The tenant stays where it was,
+   * unfenced.
+   *
+   * The journal goes first and the fence comes off only once the abort has
+   * won: an abort racing a cutover that completes must leave the source
+   * frozen, because the directory now points away from it. Calling it again on
+   * an aborted move lifts a fence an interrupted abort, or a stale cutover
+   * driver, left behind — the repair for a tenant stuck on `TENANT_MOVING`
+   * with no move in progress.
+   */
   async abort(moveId: string, reason: string): Promise<TenantMove> {
     const move = await this.options.directory.requireMove<TenantMoveState>(moveId);
-    if (move.phase === "completed" || move.phase === "aborted") {
+    if (move.phase === "completed") {
       return move;
     }
-    await liftD1TenantFence(this.shard(move.sourceShardId).database, move.tenantId, move.moveId);
-    return this.options.directory.abortMove(move, { ...move.state, abortReason: reason });
+    const aborted = move.phase === "aborted"
+      ? move
+      : await this.options.directory.abortMove(move, { ...move.state, abortReason: reason });
+    await this.liftSourceFence(aborted);
+    return aborted;
   }
 
   private async copy(move: TenantMove): Promise<TenantMove> {
@@ -368,9 +389,14 @@ export class D1TenantMover {
     return this.options.directory.saveMove(move, { phase: "catching-up", state });
   }
 
-  private async cutover(move: TenantMove): Promise<TenantMove> {
-    const source = this.shard(move.sourceShardId);
-    const target = this.shard(move.targetShardId);
+  private async cutover(read: TenantMove): Promise<TenantMove> {
+    const source = this.shard(read.sourceShardId);
+    const target = this.shard(read.targetShardId);
+    // Claim the attempt before touching the fence. Two drivers that read the
+    // same revision — an overlapping cron tick, a retried message, an operator
+    // `run` next to the job — cannot both get past this: the loser stops here
+    // with a conflict, before it has fenced, copied or lifted anything.
+    const move = await this.options.directory.saveMove(read, { phase: "cutover", state: read.state });
     const fence = await fenceD1Tenant(source.database, {
       tenantId: move.tenantId,
       moveId: move.moveId,
@@ -398,26 +424,24 @@ export class D1TenantMover {
     }
     const at = this.clock.now();
     if (!done) {
-      await liftD1TenantFence(source.database, move.tenantId, move.moveId);
-      return this.options.directory.saveMove(move, {
-        phase: "catching-up",
-        state: this.newPass(
+      return this.backOff(
+        move,
+        this.newPass(
           { ...move.state, copied: move.state.copied + copied, cutovers: [...move.state.cutovers, { at, outcome: "too-many-pages", pages }] },
           move.state.nextWindowFrom
         )
-      });
+      );
     }
     const [sourceEvents, targetEvents] = await Promise.all([
       tenantEventCount(source.database, move.tenantId),
       tenantEventCount(target.database, move.tenantId)
     ]);
     if (sourceEvents !== targetEvents) {
-      await liftD1TenantFence(source.database, move.tenantId, move.moveId);
       // Something escaped the window. Rescan from the tenant's first event;
       // the rows the target already has cost a read, not a write.
-      return this.options.directory.saveMove(move, {
-        phase: "catching-up",
-        state: this.newPass(
+      return this.backOff(
+        move,
+        this.newPass(
           {
             ...move.state,
             copied: move.state.copied + copied,
@@ -425,7 +449,7 @@ export class D1TenantMover {
           },
           undefined
         )
-      });
+      );
     }
     const finalState: TenantMoveState = {
       ...move.state,
@@ -436,16 +460,60 @@ export class D1TenantMover {
     try {
       assignment = await this.options.directory.completeMove(move, finalState);
     } catch (error) {
-      // The directory did not flip, so the tenant still lives on the source:
-      // it must not stay frozen there.
-      const now = await this.options.directory.get(move.tenantId);
-      if (now?.shardId !== move.targetShardId) {
-        await liftD1TenantFence(source.database, move.tenantId, move.moveId);
-      }
+      await this.liftAfterLostRace(move);
       throw error;
     }
     this.options.onMoved?.(assignment);
     return this.options.directory.requireMove<TenantMoveState>(move.moveId);
+  }
+
+  /**
+   * A cutover that cannot finish goes back to catching up, and only then
+   * unfences. Journal first: if the step is not this driver's to record —
+   * someone completed, aborted or re-claimed the move since — the fence is
+   * left to whoever now owns it.
+   */
+  private async backOff(move: TenantMove, state: TenantMoveState): Promise<TenantMove> {
+    let saved: TenantMove;
+    try {
+      saved = await this.options.directory.saveMove(move, { phase: "catching-up", state });
+    } catch (error) {
+      await this.liftAfterLostRace(move);
+      throw error;
+    }
+    await this.liftSourceFence(saved);
+    return saved;
+  }
+
+  /**
+   * After a journal write this driver lost: lift the fence only if the move
+   * ended in an abort — then nothing will ever lift it otherwise, and the
+   * directory never left the source. A completed move keeps it by design, and
+   * a move still in flight belongs to the driver that beat this one.
+   */
+  private async liftAfterLostRace(move: TenantMove): Promise<void> {
+    const now = await this.options.directory.getMove<TenantMoveState>(move.moveId);
+    if (now?.phase === "aborted") {
+      await this.liftSourceFence(now);
+    }
+  }
+
+  /**
+   * Lifts this move's fence on its source, but never while the directory
+   * points the tenant anywhere other than the source, or names another move:
+   * a fence on a shard the tenant has left is what keeps stale-cached writes
+   * from landing there, and lifting it loses them.
+   */
+  private async liftSourceFence(move: TenantMove): Promise<void> {
+    const assignment = await this.options.directory.get(move.tenantId);
+    if (
+      assignment === null ||
+      assignment.shardId !== move.sourceShardId ||
+      (assignment.moveId !== undefined && assignment.moveId !== move.moveId)
+    ) {
+      return;
+    }
+    await liftD1TenantFence(this.shard(move.sourceShardId).database, move.tenantId, move.moveId);
   }
 
   /**
@@ -550,6 +618,16 @@ export class D1TenantMover {
   }
 }
 
+/**
+ * Excludes streams that live on the home shard whatever their rows' tenant
+ * says. `__global__:__JobSchedules:definitions` holds every tenant's runtime
+ * job schedules, each event carrying that tenant's id; those rows are not the
+ * tenant's to move, and counting them would make a move back to home disagree
+ * with itself. Binds the prefix as one parameter; `substr` rather than `LIKE`
+ * because `_` is a `LIKE` wildcard.
+ */
+const NOT_HOME_ONLY_STREAM = `substr(stream, 1, ${HOME_SHARD_STREAM_PREFIX.length}) <> ?`;
+
 const EVENT_COLUMNS =
   "id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json";
 
@@ -573,18 +651,28 @@ async function readEventPage(
     ? db
         .prepare(
           `SELECT ${EVENT_COLUMNS} FROM ${D1_EVENTS_TABLE}
-           WHERE tenant_id = ? AND occurred_at >= ?
+           WHERE tenant_id = ? AND occurred_at >= ? AND ${NOT_HOME_ONLY_STREAM}
            ORDER BY occurred_at, stream, sequence LIMIT ?`
         )
-        .bind(tenantId, windowFrom ?? "", limit)
+        .bind(tenantId, windowFrom ?? "", HOME_SHARD_STREAM_PREFIX, limit)
     : db
         .prepare(
           `SELECT ${EVENT_COLUMNS} FROM ${D1_EVENTS_TABLE}
            WHERE tenant_id = ? AND occurred_at >= ?
              AND (occurred_at > ? OR stream > ? OR (stream = ? AND sequence > ?))
+             AND ${NOT_HOME_ONLY_STREAM}
            ORDER BY occurred_at, stream, sequence LIMIT ?`
         )
-        .bind(tenantId, cursor.occurredAt, cursor.occurredAt, cursor.stream, cursor.stream, cursor.sequence, limit);
+        .bind(
+          tenantId,
+          cursor.occurredAt,
+          cursor.occurredAt,
+          cursor.stream,
+          cursor.stream,
+          cursor.sequence,
+          HOME_SHARD_STREAM_PREFIX,
+          limit
+        );
   const result = await statement.all<EventRow>();
   return result.results ?? [];
 }
@@ -625,8 +713,8 @@ function insertCopiedEventStatement(db: D1Database, row: EventRow): D1PreparedSt
 
 export async function tenantEventCount(db: D1Database, tenantId: TenantId): Promise<number> {
   const row = await db
-    .prepare(`SELECT COUNT(*) AS events FROM ${D1_EVENTS_TABLE} WHERE tenant_id = ?`)
-    .bind(tenantId)
+    .prepare(`SELECT COUNT(*) AS events FROM ${D1_EVENTS_TABLE} WHERE tenant_id = ? AND ${NOT_HOME_ONLY_STREAM}`)
+    .bind(tenantId, HOME_SHARD_STREAM_PREFIX)
     .first<{ events: number }>();
   return Number(row!.events);
 }

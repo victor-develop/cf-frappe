@@ -282,7 +282,7 @@ createAggregateCoordinatorClass<Env>({ registry, tenantSharding });
 createCloudFrappeWorker<Env>({ registry, actor, tenantSharding, jobs: { /* + createTenantMoveAdvanceJob() */ } });
 ```
 
-`services.tenantShards` then provisions tenants (placing them and migrating their shard), reports and rolls out migrations shard by shard, moves a tenant between shards while it keeps reading and writing (`mover.start("acme", "eu2")`, advanced by the job), and runs bounded cross-tenant queries (`scatter`). A move copies events, rebuilds the target's projections from them, and fences the source for one invocation at the cutover; nothing is ever deleted from the source. Leave it off until the trigger is reached — cross-tenant queries, moves and provisioning are a permanent cost. [Tenant Sharding](docs/tenant-sharding.md) covers the directory and its cache, the fence, the move phases, per-shard migrations, and the scatter-gather limits.
+`services.tenantShards` then provisions tenants (placing them and migrating their shard; a tenant that already has data on `DB` from before sharding stays there), reports and rolls out migrations shard by shard, moves a tenant between shards while it keeps reading and writing (`mover.start("acme", "eu2")`, advanced by the job), and runs bounded cross-tenant queries (`scatter`). A move copies events, rebuilds the target's projections from them, and fences the source for one invocation at the cutover; nothing is ever deleted from the source. Leave it off until the trigger is reached — cross-tenant queries, moves and provisioning are a permanent cost. [Tenant Sharding](docs/tenant-sharding.md) covers the directory and its cache, the fence, the move phases, per-shard migrations, and the scatter-gather limits.
 
 ### Development Setup
 
@@ -612,7 +612,7 @@ createAggregateCoordinatorClass<Env>({ registry, tenantSharding });
 createCloudFrappeWorker<Env>({ registry, actor, tenantSharding, jobs: { /* + createTenantMoveAdvanceJob() */ } });
 ```
 
-开启后，`services.tenantShards` 负责：开通租户（选分片并先把该分片的 migration 跑到最新）、按分片查询和滚动执行 migration、在租户照常读写的情况下把它从一个分片搬到另一个（`mover.start("acme", "eu2")`，由 job 推进），以及有上限保护的跨租户查询（`scatter`）。搬迁会复制事件、在目标分片上从事件重建投影，切换时只把源分片围栏住一次调用的时间；源分片上的任何数据都不会被删除。触发条件没到之前请保持关闭——跨租户查询、搬迁和开通的复杂度是永久的。路由表和缓存、围栏、搬迁的各个阶段、每片的 migration、scatter-gather 的上限，见 [Tenant Sharding](docs/tenant-sharding.md)。
+开启后，`services.tenantShards` 负责：开通租户（选分片并先把该分片的 migration 跑到最新；开启分片之前就已经在 `DB` 上有数据的租户会留在 `DB`）、按分片查询和滚动执行 migration、在租户照常读写的情况下把它从一个分片搬到另一个（`mover.start("acme", "eu2")`，由 job 推进），以及有上限保护的跨租户查询（`scatter`）。搬迁会复制事件、在目标分片上从事件重建投影，切换时只把源分片围栏住一次调用的时间；源分片上的任何数据都不会被删除。触发条件没到之前请保持关闭——跨租户查询、搬迁和开通的复杂度是永久的。路由表和缓存、围栏、搬迁的各个阶段、每片的 migration、scatter-gather 的上限，见 [Tenant Sharding](docs/tenant-sharding.md)。
 
 ### 开发环境
 

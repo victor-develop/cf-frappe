@@ -363,6 +363,10 @@ export const D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
  * path issued it. With no fence rows — every deployment that never moves a
  * tenant — it costs one primary-key probe of an empty table per event insert.
  *
+ * `__global__:` streams are exempt (`HOME_SHARD_STREAM_PREFIX`): they live on
+ * home whatever tenant id their rows carry, so a tenant that moved away — whose
+ * fence on home stays for good — can still save its runtime job schedules.
+ *
  * `RAISE(ABORT, ...)` reaches the caller as an error whose message carries
  * `CF_FRAPPE_TENANT_FENCED` (verified on workerd's D1 and on `node:sqlite`);
  * `isD1TenantFencedError` recognizes it, and the D1 stores rethrow it as is
@@ -423,7 +427,8 @@ export const D1_TENANT_SHARD_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] =
     sql:
       `CREATE TRIGGER IF NOT EXISTS ${D1_TENANT_FENCE_TRIGGER} ` +
       `BEFORE INSERT ON ${D1_EVENTS_TABLE} ` +
-      `WHEN EXISTS (SELECT 1 FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = NEW.tenant_id) ` +
+      `WHEN substr(NEW.stream, 1, 11) <> '__global__:' ` +
+      `AND EXISTS (SELECT 1 FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = NEW.tenant_id) ` +
       "BEGIN SELECT RAISE(ABORT, 'CF_FRAPPE_TENANT_FENCED'); END;"
   }
 ];

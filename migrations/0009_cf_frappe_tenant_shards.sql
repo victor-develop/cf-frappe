@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS cf_frappe_tenant_fences (
 
 CREATE TRIGGER IF NOT EXISTS cf_frappe_events_tenant_fence
   BEFORE INSERT ON cf_frappe_events
-  WHEN EXISTS (SELECT 1 FROM cf_frappe_tenant_fences WHERE tenant_id = NEW.tenant_id)
+  WHEN substr(NEW.stream, 1, 11) <> '__global__:'
+  AND EXISTS (SELECT 1 FROM cf_frappe_tenant_fences WHERE tenant_id = NEW.tenant_id)
   BEGIN
     SELECT RAISE(ABORT, 'CF_FRAPPE_TENANT_FENCED');
   END;

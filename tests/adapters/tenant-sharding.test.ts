@@ -406,6 +406,44 @@ describe("provisioning", () => {
     w.close();
   });
 
+  it("keeps a tenant that wrote before sharding was on, and was never registered, on home under placement", async () => {
+    const w = world();
+    // Sharding off: acme writes straight to DB.
+    const before = new DocumentService({ registry, store: new D1DocumentStore(w.env.DB), clock, ids: ids() });
+    const old = await before.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "old", code: "X" } });
+    // Switched on with placement, acme not registered.
+    const runtime = w.runtime({ newTenants: "place", accepting: ["east"] });
+    const documents = w.documents(runtime);
+
+    const next = await documents.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "new" } });
+
+    expect(await runtime.services.directory.get("acme")).toMatchObject({ shardId: "home" });
+    expect(next.name).not.toBe(old.name);
+    expect(await runtime.table.get("acme", "Ticket", old.name)).toMatchObject({ data: { subject: "old" } });
+    await expect(documents.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "dup", code: "X" } })).rejects.toMatchObject({
+      status: 409
+    });
+    expect(count(w.east, "cf_frappe_events", "acme")).toBe(0);
+    // A tenant that never wrote is still placed.
+    await documents.create({ actor: agent("fresh"), doctype: "Ticket", data: { subject: "F" } });
+    expect(await runtime.services.directory.get("fresh")).toMatchObject({ shardId: "east" });
+    w.close();
+  });
+
+  it("refuses to place an unregistered tenant with data on home onto another shard by hand", async () => {
+    const w = world();
+    const before = new DocumentService({ registry, store: new D1DocumentStore(w.env.DB), clock, ids: ids() });
+    await before.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "old" } });
+    const runtime = w.runtime();
+
+    await expect(runtime.services.provisioner.provision("acme", { shardId: "east" })).rejects.toMatchObject({
+      code: "TENANT_SHARD_INVALID",
+      status: 409
+    });
+    expect(await runtime.services.directory.get("acme")).toBeNull();
+    w.close();
+  });
+
   it("refuses a placement onto a shard that is not bound", async () => {
     const w = world();
     const runtime = w.runtime();
