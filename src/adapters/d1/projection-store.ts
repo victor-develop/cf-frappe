@@ -9,6 +9,7 @@ import type {
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
 import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
+import type { ProjectionChangeFeed, ProjectionChangeQuery } from "../../ports/analytics.js";
 import { listD1AutomationRunClaimCandidateSnapshots } from "./automation-run-index.js";
 import {
   d1ProjectionCountSql,
@@ -18,7 +19,7 @@ import {
 import { documentFromRow, type DocumentRow } from "./serde.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
 
-export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimStore {
+export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimStore, ProjectionChangeFeed {
   constructor(private readonly db: D1Database) {}
 
   async get(
@@ -105,6 +106,44 @@ export class D1ProjectionStore implements ProjectionStore, AutomationRunClaimSto
       offset: listQuery.offset,
       total: Number(((count.results ?? [])[0] as { total?: number } | undefined)?.total ?? 0)
     };
+  }
+
+  /**
+   * The analytics exporter's read (#16): one tenant's DocType in
+   * `(updated_at, name)` order, after a position and up to a horizon.
+   *
+   * It rides `idx_cf_frappe_documents_list (tenant_id, doctype, updated_at)`:
+   * the `updated_at` range is an index range, and only rows tied on the
+   * boundary `updated_at` are checked against the name. Written as
+   * `updated_at >= ? AND (updated_at > ? OR name > ?)` rather than the row
+   * value `(updated_at, name) > (?, ?)` so the range on the indexed column is
+   * explicit; `tests/adapters/d1-analytics-store.test.ts` pins the plan.
+   */
+  async listChangedSince(query: ProjectionChangeQuery): Promise<readonly DocumentSnapshot[]> {
+    const after = query.after;
+    const statement = after === undefined
+      ? this.db
+          .prepare(
+            `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
+             FROM ${D1_DOCUMENTS_TABLE}
+             WHERE tenant_id = ? AND doctype = ? AND updated_at <= ?
+             ORDER BY updated_at ASC, name ASC
+             LIMIT ?`
+          )
+          .bind(query.tenantId, query.doctype, query.through, query.limit)
+      : this.db
+          .prepare(
+            `SELECT tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at
+             FROM ${D1_DOCUMENTS_TABLE}
+             WHERE tenant_id = ? AND doctype = ?
+               AND updated_at >= ? AND updated_at <= ?
+               AND (updated_at > ? OR name > ?)
+             ORDER BY updated_at ASC, name ASC
+             LIMIT ?`
+          )
+          .bind(query.tenantId, query.doctype, after.updatedAt, query.through, after.updatedAt, after.name, query.limit);
+    const rows = await statement.all<DocumentRow>();
+    return (rows.results ?? []).map(documentFromRow);
   }
 
   async listAutomationRunClaimCandidates(query: {

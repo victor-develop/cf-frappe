@@ -1,5 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import {
+  D1_ANALYTICS_DOCUMENTS_TABLE,
+  D1_ANALYTICS_EXPORTS_TABLE,
+  D1_ANALYTICS_TABLES,
   D1_AUTOMATION_RUNS_TABLE,
   D1_DATA_PATCHES_TABLE,
   D1_DOCUMENTS_TABLE,
@@ -38,6 +41,24 @@ describe("D1 table constants", () => {
     expect([...new Set(created)].sort()).toEqual([...D1_TABLES].sort());
   });
 
+  it("names every table the analytics database's migrations create, and none of the framework's", () => {
+    const directory = new URL("../../migrations/analytics/", import.meta.url);
+    const sql = readdirSync(directory)
+      .filter((name) => name.endsWith(".sql"))
+      .sort()
+      .map((name) => readFileSync(new URL(name, directory), "utf8"))
+      .join("\n");
+    const created = [...sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]!);
+
+    expect([...new Set(created)].sort()).toEqual([...D1_ANALYTICS_TABLES].sort());
+    expect(D1_ANALYTICS_TABLES).toContain(D1_ANALYTICS_DOCUMENTS_TABLE);
+    // Kept apart on purpose: the copy lives in a different database.
+    for (const table of D1_ANALYTICS_TABLES) {
+      expect(D1_TABLES, table).not.toContain(table);
+    }
+    expect(D1_TABLES).toContain(D1_ANALYTICS_EXPORTS_TABLE);
+  });
+
   it("plans core migrations that only touch the named tables", () => {
     const sql = planD1Migrations([])
       .flatMap((migration) => migration.statements.map((statement) => statement.sql))
@@ -56,12 +77,13 @@ describe("D1 table constants", () => {
 
   it("derives the statistics targets from the queried tables", () => {
     expect(D1_STATISTICS_TARGETS).toEqual(D1_QUERIED_TABLES);
-    // Two are excluded: the migration journal is read once per migrate, and the
-    // fold snapshots are only ever touched by full primary key, so there is no
-    // alternative plan for statistics to influence.
+    // Three are excluded: the migration journal is read once per migrate, and
+    // the fold snapshots and analytics export cursors are only ever touched by
+    // primary key, so there is no alternative plan for statistics to influence.
     expect(D1_TABLES.filter((table) => !D1_QUERIED_TABLES.includes(table))).toEqual([
       D1_MIGRATIONS_TABLE,
-      D1_FOLD_SNAPSHOTS_TABLE
+      D1_FOLD_SNAPSHOTS_TABLE,
+      D1_ANALYTICS_EXPORTS_TABLE
     ]);
   });
 
