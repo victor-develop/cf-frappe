@@ -225,6 +225,8 @@ Field conditions receive `{ actor, action, doctype, field, tenantId, document, v
 
 Field permissions are enforced server-side. Read paths redact document data and project metadata. Create, update, merge, and domain commands reject unauthorized user-supplied fields. Query surfaces only allow filters, ordering, aggregates, saved filters, reports, dashboards, Kanban, Calendar, web views, print formats, and import templates to reference fields that are unconditionally readable for the actor role; conditionally readable fields can be displayed after a document is loaded, but cannot be queried to infer hidden values. `System Manager` bypasses field-level rules.
 
+Clients do not have to infer those decisions from a missing key. `GET /api/resource/:doctype/:name` returns `fieldStates` next to `data`, and `GET /api/resource/:doctype?field_states=1` returns `fieldStates` keyed by document name. Each entry is `{ read, write, redacted?, hidden? }`: `redacted` means the field is in the actor's schema but its value was withheld; `write` folds in update permission, docstatus (`allowOnSubmit` after submit), `readOnly`/`readOnlyDependsOn`, the workflow state field, and field rules; `hidden` is the display hint from `hidden`/`hiddenDependsOn`, evaluated on what the actor can see. Fields the actor's metadata omits have no entry. In code, use `QueryService.getDocumentWithFieldStates`.
+
 Defaults, hooks, and `fetchFrom` are trusted server-side model code and may derive fields that were not directly submitted by the user. Custom report row providers are also trusted code; document-backed reports are field-filtered by the framework, while arbitrary custom provider rows must preserve their own data boundary. Audit search is an administrator boundary: the default audit role is `System Manager`, and any custom audit admin role should be treated as a field-permission-bypassing operator role.
 
 ### Production Setup
@@ -518,6 +520,8 @@ naming: {
 字段条件函数会拿到 `{ actor, action, doctype, field, tenantId, document, value }`。当检查发生在具体文档或字段值上时，`document` 和 `value` 会存在；纯 metadata 检查不会执行条件函数。
 
 字段级权限是服务端强制的。读路径会对 document data 脱敏，并按 actor 投影 metadata。create、update、merge 和 domain command 会拒绝用户提交的无权限字段。filter、排序、聚合、saved filter、report、dashboard、Kanban、Calendar、web view、print format 和 import template 只能引用该 actor role 无条件可读的字段；条件可读字段可以在文档加载后展示，但不能被拿来查询和推断隐藏值。`System Manager` 会绕过字段级规则。
+
+客户端不需要再从「少了哪个 key」去反推这些判断。`GET /api/resource/:doctype/:name` 会在 `data` 旁边返回 `fieldStates`；`GET /api/resource/:doctype?field_states=1` 返回按文档 name 分组的 `fieldStates`。每一项是 `{ read, write, redacted?, hidden? }`：`redacted` 表示字段在该 actor 的 schema 里，但值被扣下了；`write` 综合了 update 权限、docstatus（提交后只有 `allowOnSubmit` 字段可写）、`readOnly`/`readOnlyDependsOn`、workflow state 字段和字段规则；`hidden` 是 `hidden`/`hiddenDependsOn` 给出的显示提示，按 actor 看得到的数据计算。actor 的 metadata 里没有的字段不会出现。代码里用 `QueryService.getDocumentWithFieldStates`。
 
 defaults、hooks 和 `fetchFrom` 属于受信任的服务端模型代码，可以派生用户没有直接提交的字段。custom report row provider 也是受信任扩展代码；框架会保护 document-backed report 的字段边界，但任意 custom provider row 需要由 provider 自己维护数据边界。audit search 是管理员边界：默认 audit 角色是 `System Manager`；如果配置自定义 audit admin role，应把它视为会绕过字段权限的高信任运维角色。
 

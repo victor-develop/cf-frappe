@@ -469,6 +469,30 @@ describe("resource api", () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: "PERMISSION_DENIED" } });
   });
 
+  it("returns per-field states with a document, and with a list page on request", async () => {
+    const app = makeApp();
+    await app.request("/api/resource/Note", {
+      method: "POST",
+      headers: userHeaders,
+      body: JSON.stringify({ title: "State Note", body: "Body" })
+    });
+
+    const read = await app.request("/api/resource/Note/State%20Note", { headers: userHeaders });
+    const body = await read.json() as { data: { name: string }; fieldStates: Record<string, unknown> };
+    expect(body.data.name).toBe("State Note");
+    expect(body.fieldStates.title).toEqual({ read: true, write: true });
+    expect(body.fieldStates.created_by).toEqual({ read: true, write: false });
+
+    const plain = await app.request("/api/resource/Note?limit=5", { headers: userHeaders });
+    await expect(plain.json()).resolves.not.toHaveProperty("fieldStates");
+
+    const list = await app.request("/api/resource/Note?limit=5&field_states=1", { headers: userHeaders });
+    await expect(list.json()).resolves.toMatchObject({
+      data: [{ name: "State Note" }],
+      fieldStates: { "State Note": body.fieldStates }
+    });
+  });
+
   it("creates, reads, lists, updates, transitions, submits, cancels, and deletes a resource", async () => {
     const app = makeApp();
     const created = await app.request("/api/resource/Note", {

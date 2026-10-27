@@ -288,6 +288,20 @@ export function copyDocumentData(
   return Object.fromEntries(entries) as DocumentData;
 }
 
+/**
+ * Whether a field is read only for a document holding `data`: declared so, or
+ * made so by its `readOnlyDependsOn` condition. Evaluated on the same snapshot
+ * shape `readonlyIssues` uses, so a caller asking "may this be written" gets the
+ * answer a write that left the condition's inputs alone would get.
+ */
+export function fieldIsReadOnlyForData(
+  doctype: DocTypeDefinition,
+  field: FieldDefinition,
+  data: DocumentData
+): boolean {
+  return fieldIsReadOnly(field, documentSnapshotForFieldCondition(doctype, data));
+}
+
 function fieldIsReadOnly(field: FieldDefinition, document: DocumentSnapshot): boolean {
   return field.readOnly === true || conditionalReadOnlyApplies(field, document);
 }

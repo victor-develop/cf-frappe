@@ -611,7 +611,8 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       ...order,
       useDefaultFilters: savedFilter ? false : url.searchParams.get("default_filters") !== "0",
       ...(limit !== undefined ? { limit } : {}),
-      ...(offset !== undefined ? { offset } : {})
+      ...(offset !== undefined ? { offset } : {}),
+      withFieldStates: url.searchParams.get("field_states") === "1"
     });
     return c.json(result);
   });
@@ -794,8 +795,12 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
 
   app.get("/api/resource/:doctype/:name", async (c) => {
     const actor = await resolveActor(c.req.raw);
-    const data = await options.queries.getDocument(actor, c.req.param("doctype"), c.req.param("name"));
-    return c.json({ data });
+    const { document, fieldStates } = await options.queries.getDocumentWithFieldStates(
+      actor,
+      c.req.param("doctype"),
+      c.req.param("name")
+    );
+    return c.json({ data: document, fieldStates });
   });
 
   app.put("/api/resource/:doctype/:name", async (c) => {

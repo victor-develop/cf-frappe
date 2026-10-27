@@ -10,6 +10,7 @@ import type {
   DocumentFieldMergePlan
 } from "../core/document-merge.js";
 import { isListFilterGroup } from "../core/list-view.js";
+import { evaluatePredicateExpression } from "../core/predicates.js";
 import { compactData } from "../core/schema.js";
 import type {
   Actor,
@@ -27,6 +28,7 @@ import type {
   TenantId,
   ValidationIssue
 } from "../core/types.js";
+import { fieldIsReadOnlyForData } from "./document-field-policy.js";
 import type { RelatedDocTypeResolver } from "./document-reference-policy.js";
 
 const SYSTEM_ORDER_FIELDS = new Set(["name", "createdAt", "updatedAt", "version"]);
@@ -76,35 +78,148 @@ export function projectDocTypeForFieldAccess(
   return projectDocTypeFields(options.doctype, fields, options.actor);
 }
 
+/**
+ * What one caller may do with one field of one document, as the backend decides
+ * it.
+ *
+ * Exposed so a client renders what it is told instead of inferring it from a
+ * missing key or a write that comes back 403. A field the caller may not even
+ * know exists — one `canFieldAppearInMetadata` hides — has no entry at all, the
+ * same as in the doctype metadata, so naming it here would not leak it either.
+ *
+ * - `read`: the value is in the document the caller is handed.
+ * - `redacted`: set whenever `read` is false. The field is in the caller's schema
+ *   but its value was withheld, so an absent key is not "empty".
+ * - `write`: an update of this field, on the document as it stands, would pass
+ *   the field checks. It folds in everything a write enforces per field: the
+ *   document's update permission, docstatus (only `allowOnSubmit` fields once
+ *   submitted, nothing once cancelled), `readOnly` and `readOnlyDependsOn`, the
+ *   workflow state field, and field permission rules.
+ * - `hidden`: a display hint — `hidden` or a true `hiddenDependsOn`. It is not a
+ *   permission and says nothing about whether the value was sent.
+ */
+export interface DocumentFieldState {
+  readonly read: boolean;
+  readonly write: boolean;
+  readonly redacted?: true;
+  readonly hidden?: true;
+}
+
+export type DocumentFieldStates = Readonly<Record<string, DocumentFieldState>>;
+
+/**
+ * Field states for the top-level fields of `document`.
+ *
+ * `document` is the stored snapshot, not the redacted one — read and write
+ * rules may depend on values the caller is not shown, and the answer has to be
+ * the one enforcement would give. `hiddenDependsOn` is the exception: it is
+ * evaluated against the redacted data, because it is a display rule the client
+ * evaluates too, and evaluating it on a withheld value would leak that value
+ * one bit at a time.
+ */
+export function documentFieldStates(options: DocumentFormFieldAccessProjectionOptions): DocumentFieldStates {
+  return computeDocumentFieldStates(options, { conditionalReadOnly: true });
+}
+
+function computeDocumentFieldStates(
+  options: DocumentFormFieldAccessProjectionOptions,
+  rules: { readonly conditionalReadOnly: boolean }
+): DocumentFieldStates {
+  const tenantId = options.document.tenantId;
+  // Workflow state moves only through a transition. (A naming series' target
+  // field needs no entry: `defineDocType` requires it to be `readOnly`.)
+  const workflowStateFields = new Set((options.doctype.workflows ?? []).map((workflow) => workflow.stateField));
+  const fields = options.doctype.fields.filter((field) =>
+    canFieldAppearInMetadata({ actor: options.actor, action: "read", field })
+  );
+  const readable = new Map(fields.map((field) => {
+    const value = options.document.data[field.name];
+    return [field.name, canReadField({
+      actor: options.actor,
+      doctype: options.doctype,
+      field,
+      document: options.document,
+      tenantId,
+      ...(value === undefined ? {} : { value })
+    })] as const;
+  }));
+  // What the caller is shown, for evaluating display rules. Allow-listed, not
+  // deny-listed: a field missing from `readable` is one the caller's metadata
+  // hides, and its value must not reach `hiddenDependsOn` either.
+  const declared = new Set(options.doctype.fields.map((field) => field.name));
+  const shown: DocumentSnapshot = {
+    ...options.document,
+    data: Object.fromEntries(
+      Object.entries(options.document.data).filter(([name]) =>
+        declared.has(name) ? readable.get(name) === true : options.doctype.allowUnknownFields === true
+      )
+    ) as DocumentData
+  };
+  return Object.freeze(Object.fromEntries(fields.map((field) => {
+    const read = readable.get(field.name) === true;
+    const value = options.document.data[field.name];
+    const write = options.canUpdateDocument &&
+      documentStatusAllowsFieldUpdate(options.document, field) &&
+      !workflowStateFields.has(field.name) &&
+      !(field.readOnly === true ||
+        (rules.conditionalReadOnly && fieldIsReadOnlyForData(options.doctype, field, options.document.data))) &&
+      canWriteField({
+        actor: options.actor,
+        action: "update",
+        doctype: options.doctype,
+        field,
+        document: options.document,
+        tenantId,
+        ...(value === undefined ? {} : { value })
+      });
+    const state: DocumentFieldState = {
+      read,
+      write,
+      ...(read ? {} : { redacted: true as const }),
+      ...(fieldIsHidden(field, shown) ? { hidden: true as const } : {})
+    };
+    return [field.name, Object.freeze(state)] as const;
+  })));
+}
+
 export function projectDocTypeForDocumentFormAccess(
   options: DocumentFormFieldAccessProjectionOptions
 ): DocTypeDefinition {
+  // Without `readOnlyDependsOn`: Desk does not re-evaluate it as the user edits,
+  // and the save path drops read-only fields silently, so fixing it from the
+  // stored state would discard an edit made in the same save that unlocks it.
+  // The server still enforces it against the data being written.
+  const states = computeDocumentFieldStates(options, { conditionalReadOnly: false });
   const fields = options.doctype.fields
-    .filter((field) =>
-      canFieldAppearInMetadata({
-        actor: options.actor,
-        action: "read",
-        field
-      })
-    )
+    .filter((field) => states[field.name] !== undefined)
     .map((field) => {
-      const value = options.document.data[field.name];
-      const writable = options.canUpdateDocument &&
-        field.readOnly !== true &&
-        canWriteField({
-          actor: options.actor,
-          action: "update",
-          doctype: options.doctype,
-          field,
-          document: options.document,
-          tenantId: options.document.tenantId,
-          ...(value === undefined ? {} : { value })
-        });
-      return writable || field.readOnly === true
+      const state = states[field.name] as DocumentFieldState;
+      // Not editable in a form unless it is also readable: the input would
+      // render empty, and saving the form would overwrite the withheld value.
+      const editable = state.write && state.read;
+      return editable || field.readOnly === true
         ? field
         : Object.freeze({ ...field, readOnly: true });
     });
   return projectDocTypeFields(options.doctype, fields, options.actor);
+}
+
+function documentStatusAllowsFieldUpdate(document: DocumentSnapshot, field: FieldDefinition): boolean {
+  if (document.docstatus === "draft") {
+    return true;
+  }
+  return document.docstatus === "submitted" && field.allowOnSubmit === true;
+}
+
+function fieldIsHidden(field: FieldDefinition, document: DocumentSnapshot): boolean {
+  if (field.hidden === true) {
+    return true;
+  }
+  return field.hiddenDependsOn !== undefined && evaluatePredicateExpression(field.hiddenDependsOn, {
+    before: null,
+    after: document,
+    input: {}
+  });
 }
 
 export function projectDocTypeForFieldQueries(input: {
