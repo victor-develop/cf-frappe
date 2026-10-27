@@ -19,6 +19,7 @@ import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } fro
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { automationRunIndexUpsertStatement } from "./automation-run-index.js";
 import { D1_DOCUMENTS_TABLE, D1_EVENTS_TABLE } from "./tables.js";
+import { d1TypedProjectionRejectedField } from "./typed-projection-layout.js";
 import {
   d1TypedProjectionUpsertStatement,
   isD1CheckConstraintError,
@@ -75,12 +76,7 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
       // reporting it as a concurrency conflict would invite a retry that can
       // only fail the same way.
       if (this.typedProjections !== undefined && isD1CheckConstraintError(error)) {
-        throw new FrameworkError(
-          "D1_TYPED_PROJECTION_CONSTRAINT_FAILED",
-          `A typed projection column rejected '${projection.snapshot.doctype}/${projection.snapshot.name}': ` +
-            `a promoted field holds a value that does not fit its declared type (${errorMessage(error)})`,
-          { status: 409 }
-        );
+        throw this.typedProjectionConstraintError(snapshots, error);
       }
       if (isD1ConstraintError(error)) {
         throw conflict("One or more streams changed while committing");
@@ -89,6 +85,44 @@ export class D1DocumentStore implements DocumentStore, AuditEventStore {
     }
     await this.writeShadowTypedProjections(snapshots);
     return { events: saved, snapshot: projection.snapshot };
+  }
+
+  /**
+   * The 409 for a typed column's CHECK. D1's message quotes the CHECK
+   * expression, which names internal tables, columns and JSON paths, so it is
+   * logged for the operator and only the refused field reaches the caller.
+   */
+  private typedProjectionConstraintError(snapshots: readonly DocumentSnapshot[], error: unknown): FrameworkError {
+    const message = errorMessage(error);
+    let rejected: { readonly snapshot: DocumentSnapshot; readonly field: string } | undefined;
+    for (const snapshot of snapshots) {
+      const layout = this.typedProjections?.mode(snapshot.doctype) === "active"
+        ? this.typedProjections.layout(snapshot.doctype)
+        : undefined;
+      const field = layout === undefined ? undefined : d1TypedProjectionRejectedField(layout, message);
+      if (field !== undefined) {
+        rejected = { snapshot, field };
+        break;
+      }
+    }
+    const target = rejected?.snapshot ?? snapshots[0]!;
+    console.error("cf-frappe typed projection CHECK rejected a write", {
+      doctype: target.doctype,
+      name: target.name,
+      reason: message
+    });
+    const what = rejected === undefined ? "a promoted field" : `field '${rejected.field}'`;
+    return new FrameworkError(
+      "D1_TYPED_PROJECTION_CONSTRAINT_FAILED",
+      `A typed projection column rejected '${target.doctype}/${target.name}': ` +
+        `${what} holds a value that does not fit its declared type`,
+      {
+        status: 409,
+        issues: rejected === undefined
+          ? []
+          : [{ field: rejected.field, code: "TYPED_COLUMN_CHECK", message: `${what} does not fit its declared type` }]
+      }
+    );
   }
 
   private typedProjectionStatements(

@@ -7,6 +7,7 @@ import {
   D1EventStore,
   D1ProjectionStore,
   D1TypedProjectionStore,
+  planD1TypedProjectionLayout,
   planD1TypedProjectionMigrations,
   planD1TypedProjections,
   renderD1Migration,
@@ -93,7 +94,17 @@ export function buildReplayApp(
   const plan = typedMode === undefined
     ? undefined
     : planD1TypedProjections(registry.list(), {
-        mode: typedMode,
+        mode: typedMode === "active" ? "off" : typedMode,
+        // `active` must be pinned per DocType; the replay creates exactly the
+        // tables the current layouts plan, so it pins those.
+        ...(typedMode === "active"
+          ? {
+              doctypes: Object.fromEntries(registry.list().map((doctype) => [
+                doctype.name,
+                { mode: "active", table: planD1TypedProjectionLayout(doctype).table }
+              ]))
+            }
+          : {}),
         onShadowWriteFailure: (failure) => {
           throw new Error(`shadow write failed during a golden replay: ${JSON.stringify(failure)}`);
         }

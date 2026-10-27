@@ -202,7 +202,7 @@ describe("typed projection tables as a named, rebuilt, compared projection versi
     const ids = sequentialIds();
     await seed(new DocumentService({
       registry,
-      store: new D1DocumentStore(d1.database, { typedProjections: planD1TypedProjections([Task], { mode: "active" }) }),
+      store: new D1DocumentStore(d1.database, { typedProjections: planD1TypedProjections([Task], { doctypes: { Task: { mode: "active", table: v1.table } } }) }),
       clock,
       ids
     }), 7);
@@ -259,7 +259,7 @@ describe("typed projection tables as a named, rebuilt, compared projection versi
     await seed(context.documents, 13);
     await rebuildAll(context);
     const registry = createRegistry({ doctypes: [Task] });
-    const plan = planD1TypedProjections([Task], { mode: "active" });
+    const plan = planD1TypedProjections([Task], { doctypes: { Task: { mode: "active", table: planD1TypedProjectionLayout(Task).table } } });
     const viaShared = new QueryService({ registry, projections: context.shared });
     const viaTyped = new QueryService({
       registry,
@@ -291,7 +291,7 @@ describe("typed projection tables as a named, rebuilt, compared projection versi
     const d1 = createTestD1({
       schema: [...frameworkSchema(), ...planD1TypedProjectionMigrations([Task]).map(renderD1Migration)]
     });
-    const plan = planD1TypedProjections([Task], { doctypes: { Task: "active" } });
+    const plan = planD1TypedProjections([Task], { doctypes: { Task: { mode: "active", table: planD1TypedProjectionLayout(Task).table } } });
     const documents = new DocumentService({
       registry,
       store: new D1DocumentStore(d1.database, { typedProjections: plan }),

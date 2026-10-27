@@ -500,8 +500,10 @@ export function planD1TypedProjectionMigrations(
   doctypes: readonly DocTypeDefinition[],
   options: D1TypedProjectionPlanOptions = {}
 ): readonly D1Migration[] {
+  // Binary order, not localeCompare: the migration files must come out in the
+  // same order on every machine.
   const layouts = [...doctypes]
-    .sort((left, right) => left.name.localeCompare(right.name))
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
     .map((doctype) => planD1TypedProjectionLayout(doctype, options));
   const live = new Set(layouts.map((layout) => layout.table));
   const retired = new Set<string>();

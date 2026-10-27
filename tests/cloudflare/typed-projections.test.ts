@@ -131,7 +131,7 @@ describe("typed projection tables through the Worker and the aggregate coordinat
   });
 
   it("writes and reads an active DocType through its typed table", async () => {
-    const deployment = deploy(createRegistry({ doctypes: [Note] }), { doctypes: { Note: "active" } });
+    const deployment = deploy(createRegistry({ doctypes: [Note] }), { doctypes: { Note: { mode: "active", table: typedTable } } });
     await seed(deployment);
     expect(deployment.d1.query(`SELECT COUNT(*) AS n FROM ${typedTable}`)[0]!.n).toBe(4);
 
@@ -161,7 +161,7 @@ describe("typed projection tables through the Worker and the aggregate coordinat
   it("routes reads per DocType when one is active and another is in shadow", async () => {
     const Memo = defineDocType({ ...Note, name: "Memo" });
     const registry = createRegistry({ doctypes: [Note, Memo] });
-    const deployment = deploy(registry, { doctypes: { Note: "active", Memo: "shadow" } });
+    const deployment = deploy(registry, { doctypes: { Note: { mode: "active", table: typedTable }, Memo: "shadow" } });
     const memoTable = planD1TypedProjectionLayout(Memo).table;
     const created = await deployment.fetch("/api/resource/Memo", {
       method: "POST",
@@ -208,5 +208,19 @@ describe("typed projection tables through the Worker and the aggregate coordinat
       .toThrow(/not registered/);
     expect(() => createAggregateCoordinatorClass({ registry, typedProjections: { mode: "on" as never } }))
       .toThrow(/must be one of/);
+    expect(() => createCloudFrappeWorker({ registry, actor: () => actor, typedProjections: { doctypes: { Note: "active" } } }))
+      .toThrow(/names no table/);
+  });
+
+  it("refuses to start when an active DocType's layout no longer plans its pinned table", () => {
+    // The pin was taken on the table that was rebuilt and compared. Adding an
+    // index moves the layout digest; without the check, the Worker would read
+    // a new, empty table and the coordinator would write only there.
+    const pinned: CloudFrappeTypedProjectionOptions = { doctypes: { Note: { mode: "active", table: typedTable } } };
+    const indexed = createRegistry({ doctypes: [defineDocType({ ...Note, indexes: [["status"], ["status", "title"]] })] });
+    expect(() => createCloudFrappeWorker({ registry: indexed, actor: () => actor, typedProjections: pinned }))
+      .toThrow(expect.objectContaining({ code: "D1_TYPED_PROJECTION_LAYOUT_MISMATCH" }));
+    expect(() => createAggregateCoordinatorClass({ registry: indexed, typedProjections: pinned }))
+      .toThrow(expect.objectContaining({ code: "D1_TYPED_PROJECTION_LAYOUT_MISMATCH" }));
   });
 });

@@ -111,6 +111,22 @@ export function planD1TypedProjectionLayout(
   const declared = new Map(doctype.fields.map((field) => [field.name, field]));
   const promoted = new Map<string, FieldDefinition>();
   for (const fields of doctype.indexes ?? []) {
+    // The same rules `planD1Migrations` applies to the shared table's indexes,
+    // repeated here because the runtime plans layouts without it.
+    if (fields.length === 0) {
+      throw new FrameworkError(
+        "MIGRATION_INDEX_INVALID",
+        `D1 index on DocType '${doctype.name}' must include at least one field`,
+        { status: 400 }
+      );
+    }
+    if (new Set(fields).size !== fields.length) {
+      throw new FrameworkError(
+        "MIGRATION_INDEX_DUPLICATE",
+        `D1 index on DocType '${doctype.name}' repeats a field: ${fields.join(", ")}`,
+        { status: 409 }
+      );
+    }
     for (const field of fields) {
       promoted.set(field, promotableField(doctype, declared, field, "indexes"));
     }
@@ -210,6 +226,26 @@ export function d1TypedProjectionDdl(layout: D1TypedProjectionLayout): readonly 
         `(tenant_id, ${index.fields.map((field) => d1TypedProjectionColumn(layout, field)!).join(", ")}, updated_at);`
     }))
   ];
+}
+
+/**
+ * The promoted field whose CHECK a D1 error message reports, if it names one.
+ *
+ * SQLite reports a failed column CHECK by quoting its expression, which is
+ * internal (table, column and JSON path). This maps it back to the field, so a
+ * caller can be told which field was refused without seeing the schema. The
+ * longest match wins, so one field's expression appearing inside another's
+ * cannot misattribute it.
+ */
+export function d1TypedProjectionRejectedField(layout: D1TypedProjectionLayout, message: string): string | undefined {
+  let found: { readonly field: string; readonly length: number } | undefined;
+  for (const column of layout.columns) {
+    const check = typedColumnCheck(column);
+    if (message.includes(check) && (found === undefined || check.length > found.length)) {
+      found = { field: column.field, length: check.length };
+    }
+  }
+  return found?.field;
 }
 
 /**

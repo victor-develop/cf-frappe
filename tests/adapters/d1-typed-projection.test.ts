@@ -188,6 +188,13 @@ describe("typed projection layout: generated from DocType metadata", () => {
 });
 
 describe("typed projection layout: hot fields are declared once", () => {
+  it("refuses an empty index or one that repeats a field, as the shared-table planner does", () => {
+    expect(codeOf(() => planD1TypedProjectionLayout(defineDocType({ ...Ticket, indexes: [[]] }))))
+      .toBe("MIGRATION_INDEX_INVALID");
+    expect(codeOf(() => planD1TypedProjectionLayout(defineDocType({ ...Ticket, indexes: [["status", "status"]] }))))
+      .toBe("MIGRATION_INDEX_DUPLICATE");
+  });
+
   it("derives hot fields from indexes, so an indexed field needs no second declaration", () => {
     const Only = defineDocType({
       name: "Only",
@@ -554,6 +561,7 @@ describe("D1DocumentStore with typed projections", () => {
   }
 
   const table = planD1TypedProjectionLayout(Ticket).table;
+  const activeTicket = { doctypes: { Ticket: { mode: "active", table } } } as const;
 
   it("writes exactly what it always did when typed projections are off", async () => {
     const plain = createTestD1({ schema: typedSchema([Ticket]) });
@@ -572,7 +580,7 @@ describe("D1DocumentStore with typed projections", () => {
   it("writes an active table inside the commit's atomic batch", async () => {
     const d1 = createTestD1({ schema: typedSchema([Ticket]) });
     const store = new D1DocumentStore(d1.database, {
-      typedProjections: planD1TypedProjections([Ticket], { doctypes: { Ticket: "active" } })
+      typedProjections: planD1TypedProjections([Ticket], activeTicket)
     });
     await store.commit(STREAM, 0, [created("e1", { status: "Open" })], projectAt(1, { status: "Open" }));
     expect(d1.query(`SELECT name, f_status FROM ${table}`)).toEqual([{ name: "T-01", f_status: "Open" }]);
@@ -581,7 +589,7 @@ describe("D1DocumentStore with typed projections", () => {
     // Atomic: a failing typed write takes the events and the shared row with it.
     const failing = createTestD1({ schema: typedSchema([Ticket]), failSqlIncludes: `INSERT INTO ${table}` });
     const failingStore = new D1DocumentStore(failing.database, {
-      typedProjections: planD1TypedProjections([Ticket], { doctypes: { Ticket: "active" } })
+      typedProjections: planD1TypedProjections([Ticket], activeTicket)
     });
     await expect(
       failingStore.commit(STREAM, 0, [created("e1", { status: "Open" })], projectAt(1, { status: "Open" }))
@@ -594,12 +602,23 @@ describe("D1DocumentStore with typed projections", () => {
   it("reports a CHECK rejection on an active table as a typed-projection error, not a concurrency conflict", async () => {
     const d1 = createTestD1({ schema: typedSchema([Ticket]) });
     const store = new D1DocumentStore(d1.database, {
-      typedProjections: planD1TypedProjections([Ticket], { mode: "active" })
+      typedProjections: planD1TypedProjections([Ticket], activeTicket)
     });
     await expect(
       store.commit(STREAM, 0, [created("e1", { title: 5 })], projectAt(1, { title: 5 }))
-    ).rejects.toMatchObject({ code: "D1_TYPED_PROJECTION_CONSTRAINT_FAILED", status: 409 });
+    ).rejects.toMatchObject({
+      code: "D1_TYPED_PROJECTION_CONSTRAINT_FAILED",
+      status: 409,
+      issues: [expect.objectContaining({ field: "title" })]
+    });
     expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events")[0]!.n).toBe(0);
+    // The caller learns the field, not the schema: D1's own message quotes the
+    // CHECK expression, with the internal table, column and JSON path in it.
+    const error = (await store
+      .commit(STREAM, 0, [created("e1", { title: 5 })], projectAt(1, { title: 5 }))
+      .catch((caught: unknown) => caught)) as Error;
+    expect(error.message).toContain("field 'title'");
+    expect(error.message).not.toMatch(/cf_frappe_p_|json_type|CHECK constraint/);
     d1.close();
   });
 
@@ -635,7 +654,7 @@ describe("D1DocumentStore with typed projections", () => {
   it("leaves DocTypes without a typed table, and internal rows, on the shared table only", async () => {
     const d1 = createTestD1({ schema: typedSchema([Ticket]) });
     const store = new D1DocumentStore(d1.database, {
-      typedProjections: planD1TypedProjections([Ticket], { mode: "active" })
+      typedProjections: planD1TypedProjections([Ticket], activeTicket)
     });
     await store.commitBatch(
       [{ stream: STREAM, expectedVersion: 0, events: [created("e1", { status: "Open" })] }],
@@ -656,7 +675,10 @@ describe("D1DocumentStore with typed projections", () => {
 describe("planD1TypedProjections", () => {
   it("resolves a default mode with per-DocType overrides", () => {
     const Other = defineDocType({ name: "Other", fields: [] });
-    const plan = planD1TypedProjections([Ticket, Other], { mode: "shadow", doctypes: { Ticket: "active" } });
+    const plan = planD1TypedProjections([Ticket, Other], {
+      mode: "shadow",
+      doctypes: { Ticket: { mode: "active", table: planD1TypedProjectionLayout(Ticket).table } }
+    });
     expect(plan.mode("Ticket")).toBe("active");
     expect(plan.mode("Other")).toBe("shadow");
     expect(plan.mode("Unregistered")).toBe("off");
@@ -676,6 +698,48 @@ describe("planD1TypedProjections", () => {
       .toBe("MIGRATION_TYPED_PROJECTION_INVALID");
     expect(codeOf(() => planD1TypedProjections([Ticket], { doctypes: { Ticket: "yes" as never } })))
       .toBe("MIGRATION_TYPED_PROJECTION_INVALID");
+    expect(codeOf(() => planD1TypedProjections([Ticket], { doctypes: { Ticket: { mode: "active", table: 7 as never } } })))
+      .toBe("MIGRATION_TYPED_PROJECTION_INVALID");
+  });
+
+  it("refuses an active DocType that does not name the table it was verified on", () => {
+    const v1 = planD1TypedProjectionLayout(Ticket).table;
+    expect(codeOf(() => planD1TypedProjections([Ticket], { doctypes: { Ticket: "active" } })))
+      .toBe("D1_TYPED_PROJECTION_ACTIVE_UNPINNED");
+    // A default of `active` reaches every DocType, and each still needs its pin.
+    expect(codeOf(() => planD1TypedProjections([Ticket], { mode: "active" })))
+      .toBe("D1_TYPED_PROJECTION_ACTIVE_UNPINNED");
+    expect(() => planD1TypedProjections([Ticket], { doctypes: { Ticket: "active" } })).toThrow(v1);
+    // Shadow and off need no pin: nothing reads them.
+    expect(planD1TypedProjections([Ticket], { mode: "shadow" }).layout("Ticket")?.table).toBe(v1);
+    expect(planD1TypedProjections([Ticket], { doctypes: { Ticket: { mode: "off", table: "anything" } } }).mode("Ticket"))
+      .toBe("off");
+  });
+
+  it("refuses to follow an active DocType onto a new layout's table", () => {
+    // v1 was rebuilt, compared and pinned. Each routine layout change below
+    // moves the digest, so the DocType would silently read and write a new,
+    // empty table; planning must refuse instead.
+    const pin = { doctypes: { Ticket: { mode: "active", table: planD1TypedProjectionLayout(Ticket).table } } } as const;
+    expect(planD1TypedProjections([Ticket], pin).active.map((layout) => layout.table))
+      .toEqual([pin.doctypes.Ticket.table]);
+    const changed = [
+      defineDocType({ ...Ticket, indexes: [...(Ticket.indexes ?? []), ["priority"]] }),
+      defineDocType({ ...Ticket, promotedFields: [...(Ticket.promotedFields ?? []), "notes"] }),
+      defineDocType({
+        ...Ticket,
+        fields: Ticket.fields.map((field) => field.name === "priority" ? { ...field, type: "number" as const } : field)
+      })
+    ];
+    for (const doctype of changed) {
+      expect(planD1TypedProjectionLayout(doctype).table).not.toBe(pin.doctypes.Ticket.table);
+      expect(codeOf(() => planD1TypedProjections([doctype], pin)), JSON.stringify(doctype.indexes))
+        .toBe("D1_TYPED_PROJECTION_LAYOUT_MISMATCH");
+    }
+    // A pinned shadow DocType is checked the same way.
+    expect(codeOf(() => planD1TypedProjections([changed[0]!], {
+      doctypes: { Ticket: { mode: "shadow", table: pin.doctypes.Ticket.table } }
+    }))).toBe("D1_TYPED_PROJECTION_LAYOUT_MISMATCH");
   });
 });
 

@@ -261,12 +261,13 @@ cf-frappe migrate generate --typed-projections   # creates cf_frappe_p_<doctype>
 ```
 
 ```ts
-const typedProjections = { doctypes: { Ticket: "shadow" } } as const; // later: "active"
+const typedProjections = { doctypes: { Ticket: "shadow" } } as const;
+// later, once compared clean: { Ticket: { mode: "active", table: "cf_frappe_p_ticket_<digest>" } }
 export const AggregateCoordinator = createAggregateCoordinatorClass({ registry, typedProjections });
 export default createCloudFrappeWorker({ registry, actor, typedProjections });
 ```
 
-Run in `shadow`, rebuild and compare with `services.typedProjections`, then switch to `active`. Pass the same options to both. See [Typed Projection Tables](docs/typed-projection-tables.md) for the modes, the 100-column limit and how field changes migrate.
+Run in `shadow`, rebuild and compare with `services.typedProjections`, then switch to `active`, pinned to the table you compared. A later layout change (an index, a promoted field, a type) plans a new table; the pin makes startup refuse with `D1_TYPED_PROJECTION_LAYOUT_MISMATCH` instead of silently reading the new, empty one. Pass the same options to both. See [Typed Projection Tables](docs/typed-projection-tables.md) for the modes, the 100-column limit and how field changes migrate.
 
 ### Development Setup
 
@@ -574,12 +575,13 @@ cf-frappe migrate generate --typed-projections   # 生成 cf_frappe_p_<doctype>_
 ```
 
 ```ts
-const typedProjections = { doctypes: { Ticket: "shadow" } } as const; // 验证完改成 "active"
+const typedProjections = { doctypes: { Ticket: "shadow" } } as const;
+// 对照没有差异后：{ Ticket: { mode: "active", table: "cf_frappe_p_ticket_<digest>" } }
 export const AggregateCoordinator = createAggregateCoordinatorClass({ registry, typedProjections });
 export default createCloudFrappeWorker({ registry, actor, typedProjections });
 ```
 
-先用 `shadow` 跑，用 `services.typedProjections` 从事件流重建并逐行对照，没有差异再切到 `active`。两处要传同一份配置。模式说明、100 列上限、字段变更怎么迁移，见 [Typed Projection Tables](docs/typed-projection-tables.md)。
+先用 `shadow` 跑，用 `services.typedProjections` 从事件流重建并逐行对照，没有差异再切到 `active`，同时写明对照过的那张表。之后改了布局（加索引、加 promoted 字段、改字段类型）会生成一张新表；有这个表名在，启动时会直接报 `D1_TYPED_PROJECTION_LAYOUT_MISMATCH`，不会悄悄去读那张空表。两处要传同一份配置。模式说明、100 列上限、字段变更怎么迁移，见 [Typed Projection Tables](docs/typed-projection-tables.md)。
 
 ### 开发环境
 

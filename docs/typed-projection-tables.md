@@ -82,7 +82,7 @@ npm run d1:migrate:remote
 
 or `planD1Migrations(doctypes, { typedProjections: true })` (with `{ maxColumns }` if you raised the ceiling). Each DocType gets a `doctype_<slug>_typed_<digest>` migration. Without the flag the plan is unchanged.
 
-**2. Deploy in `shadow`, with the same options in both places.** The aggregate coordinator writes, the Worker reads, so they must agree:
+**2. Deploy in `shadow`, with the same options in both places.** The aggregate coordinator writes, the Worker reads, so they must agree. Nothing checks this across the two at runtime — they run in different isolates — so import one options object into both. During a rolling deploy an old coordinator instance can briefly still write in `shadow` while a new Worker reads `active`, which can show a stale read for a document written in that window:
 
 ```ts
 // src/typed-projections.ts
@@ -102,7 +102,7 @@ export default createCloudFrappeWorker({ registry, actor, typedProjections });
 | --- | --- | --- | --- |
 | `off` (default) | no | no | — |
 | `shadow` | after each commit, as its own batch | no | reported, the commit stands |
-| `active` | inside the commit's atomic batch | yes, for `get` and `list` | fails the command (`D1_TYPED_PROJECTION_CONSTRAINT_FAILED`, 409) |
+| `active` (pinned to a table) | inside the commit's atomic batch | yes, for `get` and `list` | fails the command (`D1_TYPED_PROJECTION_CONSTRAINT_FAILED`, 409, naming the field) |
 
 The shared table is written in every mode, so going back to `off` is a configuration change with nothing to rebuild. Internal DocTypes (`__AutomationRuns`, naming counters, unique reservations) and DocTypes not in the registry always live in the shared table only. Unknown DocType names and modes in the options are refused when the Worker or coordinator class is created.
 
@@ -117,15 +117,30 @@ const { differences } = await typed.compare(tenantId, "Ticket");
 
 The rebuild is the one from #11: resumable, paced by whoever calls `advance`, and it never touches the shared table. A historical value that does not fit the declared type — say, a field that used to be `text` and is now `integer` — is refused by the column's `CHECK`; the rebuild records it as a per-stream error and the comparison reports the row as `missing`. That is the point of the constraint: the bad row is found before anything reads the table, not afterwards.
 
-**4. Switch the DocType to `active`** once `differences` is empty for every tenant, and deploy. From then on its lists and reads come from the typed table, and its writes are checked by the column constraints inside the commit.
+Run the comparison again **immediately before** step 4. A shadow write runs after its commit in the same coordinator call; if the isolate dies between the two, the row is missed without `onShadowWriteFailure` ever being called, and only the comparison sees it.
+
+**4. Switch the DocType to `active`, pinned to the table you compared**, once `differences` is empty for every tenant, and deploy:
+
+```ts
+doctypes: { Ticket: { mode: "active", table: "cf_frappe_p_ticket_4c1d07a2" } }
+```
+
+The table name is in the generated migration, in `services.typedProjections.plan.layout("Ticket").table` while in shadow, and in the error you get if you write `"active"` without a pin (`D1_TYPED_PROJECTION_ACTIVE_UNPINNED`). The pin is what stops a later layout change from moving an active DocType onto a new, empty table: when the DocType's current layout no longer plans the pinned table, creating the Worker or coordinator class throws `D1_TYPED_PROJECTION_LAYOUT_MISMATCH`, so the deploy fails at startup instead of serving empty lists. A `shadow` DocType may be pinned too and is checked the same way.
+
+From then on its lists and reads come from the typed table, and its writes are checked by the column constraints inside the commit. The 409 names the refused field; the raw D1 message, which quotes internal table and column names, goes to the log only.
+
+Two behaviours differ from `off` once a DocType is active:
+
+- The `CHECK` re-checks the whole row on every write, not just the fields the command touched. A document that holds a value which no longer fits its field type — say, from before a type change — cannot be updated at all until the value is fixed with a data patch. The rebuild error and the comparison surface such rows before activation; fix them there.
+- An `integer` field accepts only values SQLite stores as an integer. Integers beyond int64 (`1e21`, `2**63`) pass `validateDocumentData` but are JSON `real`, so the column refuses them with a 409.
 
 ## Changing a DocType's fields
 
 The table name ends in a digest of the layout: the promoted columns, their types, and the index declarations. Field order, labels and unrelated metadata do not move it; promoting, demoting or retyping a field, or changing `indexes`, does. A layout change is therefore a **new table**, never an `ALTER` of a live one:
 
-1. Put the DocType back in `shadow` (reads return to the shared table, which is always current), change the DocType, regenerate migrations — a new `doctype_<slug>_typed_<digest>` migration creates the new table — and deploy.
+1. Put the DocType back in `shadow` (reads return to the shared table, which is always current), change the DocType, regenerate migrations — a new `doctype_<slug>_typed_<digest>` migration creates the new table — and deploy. If you forget the first part, the old pin no longer matches the new layout and the deploy refuses to start.
 2. Rebuild into it and compare, as above.
-3. Switch it to `active`.
+3. Switch it to `active`, pinned to the new table.
 4. Retire the superseded table: `planD1Migrations(doctypes, { typedProjections: { retiredTables: ["cf_frappe_p_ticket_4c1d07a2"] } })` plans a `typed_projection_retire_<table>` migration that drops it. A table a current layout still uses cannot be retired, and only names with the typed prefix are accepted.
 
 ## What this does not do

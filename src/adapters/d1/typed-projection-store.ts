@@ -55,11 +55,39 @@ export interface D1TypedProjectionShadowWriteFailure {
   readonly reason: string;
 }
 
+/**
+ * One DocType's typed projection setting: a bare mode, or a mode with the
+ * table it is pinned to.
+ *
+ * `active` must be pinned. The table name is derived from the DocType's
+ * layout (promoted columns, their types, its indexes), so a routine change
+ * such as adding an index moves the DocType to a *new*, empty table. Without
+ * a pin, an `active` DocType would follow it silently: lists would come back
+ * empty and every write would land in a table nobody rebuilt or compared. The
+ * pin names the table that was rebuilt and compared; when the DocType's
+ * current layout no longer plans that table, startup refuses
+ * (`D1_TYPED_PROJECTION_LAYOUT_MISMATCH`) instead of reading the wrong one.
+ *
+ * `shadow` may be pinned too, and is checked the same way when it is; it need
+ * not be, since nothing reads a shadow table.
+ */
+export type D1TypedProjectionDocTypeSetting =
+  | D1TypedProjectionMode
+  | {
+      readonly mode: D1TypedProjectionMode;
+      /** The typed table this DocType's layout must plan, e.g. `cf_frappe_p_ticket_4c1d07a2`. */
+      readonly table?: string;
+    };
+
 export interface D1TypedProjectionSettings {
-  /** Mode for every DocType not named in {@link doctypes}. Defaults to `off`. */
+  /**
+   * Mode for every DocType not named in {@link doctypes}. Defaults to `off`.
+   * `active` here still needs every DocType it reaches pinned in
+   * {@link doctypes}, so in practice it is `off` or `shadow`.
+   */
   readonly mode?: D1TypedProjectionMode;
   /** Per-DocType overrides, keyed by DocType name. Unknown names are refused. */
-  readonly doctypes?: Readonly<Record<string, D1TypedProjectionMode>>;
+  readonly doctypes?: Readonly<Record<string, D1TypedProjectionDocTypeSetting>>;
   /** Column ceiling handed to the layout planner. Must match what the migrations were planned with. */
   readonly maxColumns?: number;
   /**
@@ -84,8 +112,11 @@ export interface D1TypedProjectionPlan {
 
 /**
  * Plans the typed tables the runtime will touch. Throws on an unknown DocType
- * name or mode, and on any layout the migration planner would also refuse, so a
- * misconfiguration fails at startup rather than on the first write.
+ * name or mode, on any layout the migration planner would also refuse, on an
+ * `active` DocType with no pinned table, and on a pinned table the DocType's
+ * current layout no longer plans — so a misconfiguration, or a layout change
+ * deployed without its rebuild, fails at startup rather than reading or
+ * writing the wrong table.
  */
 export function planD1TypedProjections(
   doctypes: readonly DocTypeDefinition[],
@@ -93,8 +124,9 @@ export function planD1TypedProjections(
 ): D1TypedProjectionPlan {
   const fallbackMode = assertMode(settings.mode ?? "off", "default");
   const known = new Map(doctypes.map((doctype) => [doctype.name, doctype]));
-  for (const [name, mode] of Object.entries(settings.doctypes ?? {})) {
-    assertMode(mode, name);
+  const overrides = new Map<string, { readonly mode: D1TypedProjectionMode; readonly table?: string }>();
+  for (const [name, setting] of Object.entries(settings.doctypes ?? {})) {
+    overrides.set(name, normalizeDocTypeSetting(setting, name));
     if (!known.has(name)) {
       throw new FrameworkError(
         "D1_TYPED_PROJECTION_UNKNOWN_DOCTYPE",
@@ -106,13 +138,35 @@ export function planD1TypedProjections(
   const modes = new Map<string, D1TypedProjectionMode>();
   const layouts = new Map<string, D1TypedProjectionLayout>();
   for (const doctype of doctypes) {
-    const mode = settings.doctypes?.[doctype.name] ?? fallbackMode;
+    const override = overrides.get(doctype.name);
+    const mode = override?.mode ?? fallbackMode;
     modes.set(doctype.name, mode);
-    if (mode !== "off") {
-      layouts.set(doctype.name, planD1TypedProjectionLayout(doctype, {
-        ...(settings.maxColumns === undefined ? {} : { maxColumns: settings.maxColumns })
-      }));
+    if (mode === "off") {
+      continue;
     }
+    const layout = planD1TypedProjectionLayout(doctype, {
+      ...(settings.maxColumns === undefined ? {} : { maxColumns: settings.maxColumns })
+    });
+    const pinned = override?.table;
+    if (pinned === undefined && mode === "active") {
+      throw new FrameworkError(
+        "D1_TYPED_PROJECTION_ACTIVE_UNPINNED",
+        `Typed projection for DocType '${doctype.name}' is active but names no table. Pin the table that was ` +
+          `rebuilt and compared in shadow: doctypes: { ${JSON.stringify(doctype.name)}: { mode: "active", ` +
+          `table: ${JSON.stringify(layout.table)} } } — if that is the table you verified.`,
+        { status: 400 }
+      );
+    }
+    if (pinned !== undefined && pinned !== layout.table) {
+      throw new FrameworkError(
+        "D1_TYPED_PROJECTION_LAYOUT_MISMATCH",
+        `Typed projection for DocType '${doctype.name}' is pinned to table '${pinned}', but its current layout ` +
+          `plans '${layout.table}'. The promoted fields, their types or the indexes changed. Put the DocType in ` +
+          "shadow, apply the new table's migration, rebuild and compare it, then pin the new table.",
+        { status: 409 }
+      );
+    }
+    layouts.set(doctype.name, layout);
   }
   const byMode = (wanted: D1TypedProjectionMode) =>
     Object.freeze([...layouts.values()].filter((layout) => modes.get(layout.doctype) === wanted));
@@ -307,6 +361,24 @@ type TypedDocumentRow = Omit<DocumentRow, "doctype">;
 function typedDocumentFromRow(layout: D1TypedProjectionLayout, row: TypedDocumentRow): DocumentSnapshot {
   // One table per DocType, so the DocType is the table's, not the row's.
   return documentFromRow({ ...row, doctype: layout.doctype });
+}
+
+function normalizeDocTypeSetting(
+  setting: unknown,
+  label: string
+): { readonly mode: D1TypedProjectionMode; readonly table?: string } {
+  if (typeof setting === "object" && setting !== null) {
+    const { mode, table } = setting as { mode?: unknown; table?: unknown };
+    if (table !== undefined && typeof table !== "string") {
+      throw new FrameworkError(
+        "MIGRATION_TYPED_PROJECTION_INVALID",
+        `Typed projection table for '${label}' must be a string, got ${typeof table}`,
+        { status: 400 }
+      );
+    }
+    return table === undefined ? { mode: assertMode(mode, label) } : { mode: assertMode(mode, label), table };
+  }
+  return { mode: assertMode(setting, label) };
 }
 
 function assertMode(mode: unknown, label: string): D1TypedProjectionMode {
