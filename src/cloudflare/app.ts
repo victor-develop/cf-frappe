@@ -30,6 +30,16 @@ import {
   DocumentDeliveryOutboxConsumer
 } from "../application/document-delivery-outbox-consumer.js";
 import { DocumentDeliveryOutboxService } from "../application/document-delivery-outbox-service.js";
+import { ProjectionBackfillService } from "../application/projection-backfill.js";
+import {
+  PROJECTION_DELIVERY_DRAIN_JOB_NAME,
+  type ProjectionDeliveryConsumer
+} from "../application/projection-delivery.js";
+import {
+  createProjectionRuntime,
+  projectionDocumentStoreOptions,
+  type CloudFrappeProjectionDatabaseOptions
+} from "./projection-database.js";
 import { KanbanService } from "../application/kanban-service.js";
 import { NamingService } from "../application/naming-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
@@ -154,6 +164,15 @@ export interface CloudFrappeRuntimeServices {
   readonly dataPatches?: DataPatchAdminPort;
   readonly documentDeliveryOutbox?: DocumentDeliveryOutboxService;
   readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
+  /**
+   * Folds streams on the primary into whichever projection table reads come
+   * from in this layout — the projection database when the split is on, the
+   * primary's own table when it is off. That is what makes it the tool for both
+   * directions of the switch; see `docs/projection-database.md`.
+   */
+  readonly projectionBackfill: ProjectionBackfillService;
+  /** Present only with `projectionDatabase`: drains the projection channel and reports its lag. */
+  readonly projectionDelivery?: ProjectionDeliveryConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -271,6 +290,11 @@ export interface CloudFrappeWorkerOptions<
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly documentDeliveryOutbox?: boolean | CloudFrappeDocumentDeliveryOutboxOptions<TEnv>;
+  /**
+   * Moves projections to their own D1 database (issue #13). Off by default; pass
+   * the same object to `createAggregateCoordinatorClass`.
+   */
+  readonly projectionDatabase?: CloudFrappeProjectionDatabaseOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
@@ -365,9 +389,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   if (cached) {
     return cached;
   }
-  const projections = new D1ProjectionStore(env.DB);
   const events = new D1EventStore(env.DB);
-  const automationRunStore = new D1DocumentStore(env.DB);
+  const projectionRuntime = options.projectionDatabase === undefined
+    ? undefined
+    : createProjectionRuntime(env, options.projectionDatabase);
+  const projections = projectionRuntime?.projections ?? new D1ProjectionStore(env.DB);
+  const projectionBackfill = projectionRuntime?.backfill ??
+    new ProjectionBackfillService({ events, streams: events, target: new D1ProjectionStore(env.DB) });
+  const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
+  const automationRunStore = new D1DocumentStore(env.DB, documentStoreOptions);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -408,7 +438,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const naming = new NamingService({
     registry: options.registry,
     events,
-    store: new D1DocumentStore(env.DB),
+    store: new D1DocumentStore(env.DB, documentStoreOptions),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNamingDocTypeResolver: preNamingDocType
   });
@@ -579,7 +609,9 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     roles,
     savedReports,
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
-    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
+    projectionBackfill,
+    ...(projectionRuntime === undefined ? {} : { projectionDelivery: projectionRuntime.delivery })
   };
   const files = options.files
     ? new FileService({
@@ -622,6 +654,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     documentDeliveryOutboxConsumer !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME);
+  const projectionDeliveryDrainQueueEnabled =
+    projectionRuntime !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(PROJECTION_DELIVERY_DRAIN_JOB_NAME);
   const automationRunDrainQueueEnabled =
     jobOptions !== undefined &&
     jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
@@ -638,6 +674,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         additionalJobResources<TJobResources>({
           ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
           ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
+          ...(projectionDeliveryDrainQueueEnabled ? { projectionDelivery: projectionRuntime.delivery } : {}),
           ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
         })
       )
@@ -731,6 +768,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    ...(projectionRuntime?.readYourWrites === undefined ? {} : { readYourWrites: projectionRuntime.readYourWrites }),
     notifications
   });
   const desk = createDeskApp({
