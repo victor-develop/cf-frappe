@@ -170,6 +170,17 @@ const custom = await scatter.gather({ tenants, run: ({ tenantId, shard }) => sha
 
 These read projections directly, **without row-level permissions**. They are system tools; an application building an endpoint on them must put its own authorization in front.
 
+## What it costs
+
+- **One directory read per tenant per isolate per `cacheTtlMs`**, on `DB`. With `newTenants: "home"` the "not registered yet, read from home" answer is cached too; with `"place"` it cannot be (the first write may put the tenant anywhere), so a tenant that has never written costs a directory read on every read until it does.
+- **One primary-key probe per event insert** for the fence trigger, on every database the migration reaches — including deployments that never switch sharding on.
+- **Cross-tenant questions become one query per tenant**, bounded as above. This is the cost the issue says is permanent.
+- **A move** costs reading the tenant's events once in full, re-reading each catch-up window, and a fold per touched stream; plus one write stall of one invocation at the cutover.
+
+## Moving under the split layout
+
+With `projectionDatabase` on, a move rebuilds the target's **projection database**. The target's own `cf_frappe_documents` — which only the rollback drain writes — is not rebuilt, and the rollback cursor came across with the events. So for a tenant moved while the split was on, switching the split off later must use the documented fallback rather than the rollback drain: fold its streams into the primary's table with `ProjectionBackfillService` (see [Separate Projection Database](projection-database.md), "Turning it off").
+
 ## What stays on `DB`
 
 The directory, the move journal, the data-patch journal and the job execution log stay on `DB`: they are deployment state, not tenant data, and they grow with operations rather than with writes.

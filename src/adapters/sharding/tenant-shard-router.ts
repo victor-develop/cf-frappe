@@ -32,6 +32,15 @@ export interface TenantShardRouterOptions<S> {
    */
   readonly provision: (tenantId: TenantId) => Promise<TenantShardAssignment>;
   readonly cacheTtlMs?: number;
+  /**
+   * Cache "no assignment, read from home" too. Only safe when an unassigned
+   * tenant's first write also lands on home (`newTenants: "home"`): then the
+   * cached answer and the eventual assignment agree, and a deployment that
+   * switched sharding on without registering its existing tenants does not pay
+   * a directory query on every read. Under placement it must stay off — the
+   * first write may put the tenant anywhere, and a cached "home" would hide it.
+   */
+  readonly cacheUnassigned?: boolean;
   readonly fenceWaitMs?: number;
   /** Milliseconds now. Injected for tests. */
   readonly now?: () => number;
@@ -54,10 +63,14 @@ export interface TenantShardRouterOptions<S> {
  *   tenant's data exactly as it was when the move fenced it, so a read routed
  *   there sees a consistent, slightly old state — never a partial one.
  *
- * Unassigned tenants are never cached: the next write may assign them anywhere.
+ * Unassigned tenants are not cached unless `cacheUnassigned` says their first
+ * write lands on home anyway: otherwise the next write may assign them anywhere.
  */
 export class TenantShardRouter<S> implements TenantShardResolver<S> {
-  private readonly cache = new Map<TenantId, { readonly shardId: ShardId; readonly expiresAt: number }>();
+  private readonly cache = new Map<
+    TenantId,
+    { readonly shardId: ShardId; readonly assigned: boolean; readonly expiresAt: number }
+  >();
   private readonly cacheTtlMs: number;
   private readonly now: () => number;
 
@@ -133,18 +146,24 @@ export class TenantShardRouter<S> implements TenantShardResolver<S> {
       return this.options.home;
     }
     const cached = this.cache.get(tenantId);
-    if (cached !== undefined && cached.expiresAt > this.now()) {
+    // A cached "unassigned" answer serves reads only: a write still has to
+    // record the tenant, or the directory would never learn it exists.
+    if (cached !== undefined && cached.expiresAt > this.now() && (cached.assigned || !forWrite)) {
       return cached.shardId;
     }
     let assignment = await this.options.directory.get(tenantId);
     if (assignment === null) {
       if (!forWrite) {
-        this.cache.delete(tenantId);
+        if (this.options.cacheUnassigned === true) {
+          this.cache.set(tenantId, { shardId: this.options.home, assigned: false, expiresAt: this.now() + this.cacheTtlMs });
+        } else {
+          this.cache.delete(tenantId);
+        }
         return this.options.home;
       }
       assignment = await this.options.provision(tenantId);
     }
-    this.cache.set(tenantId, { shardId: assignment.shardId, expiresAt: this.now() + this.cacheTtlMs });
+    this.cache.set(tenantId, { shardId: assignment.shardId, assigned: true, expiresAt: this.now() + this.cacheTtlMs });
     return assignment.shardId;
   }
 }

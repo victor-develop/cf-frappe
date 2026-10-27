@@ -298,6 +298,23 @@ describe("tenant routing", () => {
     expect(reads).toBe(5);
   });
 
+  it("caches 'unassigned, read home' only when the first write would land on home anyway", async () => {
+    const w = world();
+    const homeFirst = w.runtime();
+    const placing = w.runtime({ newTenants: "place", accepting: ["east"] });
+    const stream = documentStream("acme", "Ticket", "T-1");
+
+    await homeFirst.events.currentVersion(stream);
+    await placing.events.currentVersion(stream);
+    const reads = () => w.home.statements.filter((statement) => statement.sql.includes("FROM cf_frappe_tenant_shards")).length;
+    const before = reads();
+    await homeFirst.events.currentVersion(stream);
+    expect(reads()).toBe(before);
+    await placing.events.currentVersion(stream);
+    expect(reads()).toBe(before + 1);
+    w.close();
+  });
+
   it("refuses to route to a shard this deployment has no binding for", async () => {
     const w = world();
     const runtime = w.runtime();

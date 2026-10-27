@@ -167,6 +167,7 @@ export function createTenantShardingRuntime<TEnv extends { readonly DB: D1Databa
     shards,
     home,
     provision: (tenantId: TenantId) => provisioner.provision(tenantId),
+    cacheUnassigned: (options.newTenants ?? "home") === "home",
     ...(options.cacheTtlMs === undefined ? {} : { cacheTtlMs: options.cacheTtlMs }),
     ...(options.fenceWaitMs === undefined ? {} : { fenceWaitMs: options.fenceWaitMs })
   });
