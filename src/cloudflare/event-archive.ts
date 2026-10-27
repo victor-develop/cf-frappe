@@ -30,6 +30,8 @@ export interface CloudFrappeEventArchiveOptions<TEnv = unknown> {
   readonly bucket: (env: TEnv) => R2Bucket;
   /** Archived events cached per isolate. See `D1ArchivedEventsOptions.cacheEvents`. */
   readonly cacheEvents?: number;
+  /** Archived segments one audit search may read. See `D1ArchivedEventsOptions.maxSearchSegments`. */
+  readonly maxSearchSegments?: number;
   /**
    * Called after every read that needed archived segments, with how many and how
    * long it took — the way to see what archiving costs the paths that still
@@ -63,6 +65,7 @@ export function createCloudFrappeEventArchiveRuntime<TEnv extends { readonly DB:
   const archived = new D1ArchivedEvents(env.DB, {
     storage,
     ...(options.cacheEvents === undefined ? {} : { cacheEvents: options.cacheEvents }),
+    ...(options.maxSearchSegments === undefined ? {} : { maxSearchSegments: options.maxSearchSegments }),
     ...(onColdRead === undefined ? {} : { observer: (metrics: ColdEventReadMetrics) => onColdRead(metrics, env) })
   });
   const service = new EventArchiveService({

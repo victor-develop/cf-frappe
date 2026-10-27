@@ -6,6 +6,7 @@ import {
   D1_DATA_PATCHES_TABLE,
   D1_EVENT_ARCHIVE_DOCUMENTS_TABLE,
   D1_EVENT_ARCHIVE_SEGMENTS_TABLE,
+  D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER,
   D1_DOCUMENTS_TABLE,
   D1_EVENTS_TABLE,
   D1_JOB_EXECUTIONS_TABLE,
@@ -413,6 +414,29 @@ export const D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
       "seq_start INTEGER NOT NULL, " +
       "PRIMARY KEY (stream, document_name, seq_start)" +
       ");"
+  },
+  {
+    // `UNIQUE(stream, sequence)` is the last check an append's optimistic
+    // concurrency relies on: two writers that both read version N race on the
+    // insert of N+1, and one of them fails. Archiving deletes rows from the hot
+    // table, so it would also delete them from that constraint — a writer whose
+    // version read went stale while an archive moved N+1 away could insert a
+    // second N+1, and the merge would have two events at one sequence.
+    //
+    // This puts the archived prefix back under the constraint, in SQL, for
+    // every insert path. It costs one primary-key range read per inserted
+    // event, on a table that is empty unless the archive is on. The message
+    // says "constraint" so `isD1ConstraintError` maps it to the same
+    // concurrency conflict a duplicate sequence raises.
+    name: "guard_cf_frappe_events_archived_sequences",
+    sql:
+      `CREATE TRIGGER IF NOT EXISTS ${D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER} ` +
+      `BEFORE INSERT ON ${D1_EVENTS_TABLE} ` +
+      `WHEN NEW.sequence <= (SELECT COALESCE(MAX(seq_end), 0) FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
+      "WHERE stream = NEW.stream) " +
+      "BEGIN " +
+      "SELECT RAISE(ABORT, 'constraint failed: cf_frappe_events sequence is already archived'); " +
+      "END;"
   }
 ];
 

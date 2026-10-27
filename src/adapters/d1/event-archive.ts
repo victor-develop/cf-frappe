@@ -44,6 +44,12 @@ export const DEFAULT_EVENT_ARCHIVE_SEGMENT_EVENTS = 500;
 /**
  * Ceiling on `maxSegmentEvents`. A restore inserts one segment in one batch,
  * and a batch is one transaction holding D1's single writer.
+ *
+ * Checked against D1's published limits: a `batch()` counts as one query
+ * toward the 1,000 (Paid) / 50 (Free) queries per invocation however many
+ * statements it holds, and each insert binds 11 parameters, under the 100 per
+ * statement. What bounds this is the batch's time inside one transaction, and
+ * 5,000 single-row primary-key inserts stay far inside it.
  */
 export const MAX_EVENT_ARCHIVE_SEGMENT_EVENTS = 5_000;
 
@@ -117,10 +123,11 @@ export class D1EventArchive implements EventArchive {
    *
    * Newest first keeps the archived part of the stream a prefix at every step,
    * which is the shape the read path and the next archive both assume. Each
-   * segment is one batch: the events go back and the index rows go away
-   * together, and the inserts are guarded on that index row still being the
-   * stream's newest — so two restores racing on one stream cannot insert the
-   * same segment twice, and a failure leaves the segment archived and intact.
+   * segment is one batch: the index rows go away only if that segment is still
+   * the stream's newest, and the events go back in the same transaction behind
+   * the archived-sequence trigger — so two restores racing on one stream cannot
+   * insert the same segment twice, and a failure leaves the segment archived
+   * and intact.
    *
    * The objects stay in cold storage. Re-archiving the same range later writes
    * the same bytes to the same key.
@@ -155,18 +162,36 @@ export class D1EventArchive implements EventArchive {
         sha256: top.sha256
       });
       const isNewest =
-        `EXISTS (SELECT 1 FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
-        "WHERE stream = ? AND seq_start = ? AND seq_end = ? AND sha256 = ? " +
-        `AND seq_end = (SELECT MAX(seq_end) FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} WHERE stream = ?))`;
-      const guard = [stream, Number(top.seq_start), Number(top.seq_end), top.sha256, stream];
+        `seq_end = (SELECT MAX(seq_end) FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} WHERE stream = ?)`;
+      const segmentKey = [stream, Number(top.seq_start), Number(top.seq_end), top.sha256];
       try {
+        // The index rows go first and the events after them, because the
+        // archived-sequence trigger refuses any insert at or below the stream's
+        // archived high-water mark: the inserts can only land once this
+        // segment is no longer indexed. That makes the trigger the guard. If
+        // the deletes matched nothing — another restore got here first, or an
+        // archive appended a newer segment, so this one is no longer the
+        // stream's newest — the first insert raises and the batch rolls back
+        // with the segment still indexed. The inserts carry no WHERE of their
+        // own on purpose: a guard that could skip them silently would leave a
+        // segment unindexed and its events nowhere hot.
         await this.db.batch([
+          this.db
+            .prepare(
+              `DELETE FROM ${D1_EVENT_ARCHIVE_DOCUMENTS_TABLE} WHERE stream = ? AND seq_start = ? AND EXISTS (` +
+                `SELECT 1 FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
+                `WHERE stream = ? AND seq_start = ? AND seq_end = ? AND sha256 = ? AND ${isNewest})`
+            )
+            .bind(stream, Number(top.seq_start), ...segmentKey, stream),
+          this.db
+            .prepare(
+              `DELETE FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
+                `WHERE stream = ? AND seq_start = ? AND seq_end = ? AND sha256 = ? AND ${isNewest}`
+            )
+            .bind(...segmentKey, stream),
           ...rows.map((row) =>
             this.db
-              .prepare(
-                `INSERT INTO ${D1_EVENTS_TABLE} (${EVENT_COLUMNS}) ` +
-                  `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${isNewest}`
-              )
+              .prepare(`INSERT INTO ${D1_EVENTS_TABLE} (${EVENT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
               .bind(
                 row.id,
                 row.tenant_id,
@@ -178,26 +203,16 @@ export class D1EventArchive implements EventArchive {
                 row.actor_id,
                 row.occurred_at,
                 row.payload_json,
-                row.metadata_json,
-                ...guard
+                row.metadata_json
               )
-          ),
-          this.db
-            .prepare(`DELETE FROM ${D1_EVENT_ARCHIVE_DOCUMENTS_TABLE} WHERE stream = ? AND seq_start = ? AND ${isNewest}`)
-            .bind(stream, Number(top.seq_start), ...guard),
-          // Last, so the guard above still sees the row while the inserts run.
-          this.db
-            .prepare(
-              `DELETE FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
-                "WHERE stream = ? AND seq_start = ? AND seq_end = ? AND sha256 = ?"
-            )
-            .bind(stream, Number(top.seq_start), Number(top.seq_end), top.sha256)
+          )
         ]);
       } catch (error) {
         if (isD1ConstraintError(error)) {
           throw new FrameworkError(
             "EVENT_ARCHIVE_CONFLICT",
-            `Stream '${stream}' already has hot events in ${top.seq_start}-${top.seq_end}; the segment stays archived`,
+            `Stream '${stream}' changed while restoring ${top.seq_start}-${top.seq_end} (hot events already in ` +
+              "that range, or the segment is no longer the newest); the segment stays archived",
             { status: 409 }
           );
         }

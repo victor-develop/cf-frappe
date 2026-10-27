@@ -518,9 +518,21 @@ function normalizeSql(sql: string): string {
 }
 
 function splitSqlStatements(sql: string): readonly string[] {
-  return sql
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0)
-    .map((statement) => normalizeSql(`${statement};`));
+  // A trigger body holds its own `;`, so a `CREATE TRIGGER` piece is joined
+  // with the ones after it up to its `END` — the same rule Wrangler's splitter
+  // (a port of `sqlite3_complete`) applies.
+  const statements: string[] = [];
+  let pending = "";
+  for (const piece of sql.split(";")) {
+    pending = pending.length === 0 ? piece : `${pending};${piece}`;
+    const trimmed = pending.trim();
+    if (/^CREATE\s+TRIGGER\b/i.test(trimmed) && !/\bEND$/i.test(trimmed)) {
+      continue;
+    }
+    if (trimmed.length > 0) {
+      statements.push(normalizeSql(`${trimmed};`));
+    }
+    pending = "";
+  }
+  return statements;
 }

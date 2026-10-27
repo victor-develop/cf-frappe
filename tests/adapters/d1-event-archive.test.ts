@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER,
   D1ArchivedEvents,
   D1DocumentStore,
   D1EventArchive,
   D1EventStore,
   InMemoryColdEventStorage,
+  compareAuditEvents,
   documentStream,
   fixedClock,
   namingSeriesStream,
@@ -14,6 +16,7 @@ import type {
   ColdEventPutOptions,
   ColdEventReadMetrics,
   ColdEventStorage,
+  D1ArchivedEventsOptions,
   DocumentEventPayload,
   NewDomainEvent,
   ReadStreamOptions,
@@ -34,11 +37,21 @@ import { createTestD1, frameworkSchema, type TestD1Options } from "../d1-engine.
 const TENANT = "acme";
 const NOW = "2026-03-01T00:00:00.000Z";
 
-function harness(options: { readonly storage?: ColdEventStorage; readonly d1?: TestD1Options } = {}) {
+function harness(
+  options: {
+    readonly storage?: ColdEventStorage;
+    readonly d1?: TestD1Options;
+    readonly archived?: Omit<D1ArchivedEventsOptions, "storage" | "observer">;
+  } = {}
+) {
   const d1 = createTestD1({ ...options.d1, schema: frameworkSchema() });
   const storage = options.storage ?? new InMemoryColdEventStorage();
   const metrics: ColdEventReadMetrics[] = [];
-  const archived = new D1ArchivedEvents(d1.database, { storage, observer: (entry) => metrics.push(entry) });
+  const archived = new D1ArchivedEvents(d1.database, {
+    ...options.archived,
+    storage,
+    observer: (entry) => metrics.push(entry)
+  });
   return {
     d1,
     storage,
@@ -333,6 +346,34 @@ describe("D1EventArchive", () => {
       d1.close();
     });
 
+    it("orders a merged audit page by the same byte order as the SQL", async () => {
+      // Hot and archived events are merged in JavaScript; on a tie in time the
+      // stream decides, and SQLite compares streams with BINARY collation.
+      // `localeCompare` would put "a" before "B" and keep a different event on
+      // a page cut to `limit`.
+      const { d1, hot, events, archive } = harness();
+      const lower = documentStream(TENANT, "Note", "a");
+      const upper = documentStream(TENANT, "Note", "B");
+      const at = "2026-04-01T00:00:00.000Z";
+      for (const stream of [lower, upper]) {
+        for (let index = 1; index <= 2; index += 1) {
+          await hot.append(stream, index - 1, [event(stream, index, { documentName: stream.split(":").at(-1)!, occurredAt: at })]);
+        }
+      }
+      const queries = [{ tenantId: TENANT }, { tenantId: TENANT, limit: 1 }, { tenantId: TENANT, limit: 3 }];
+      const before = await Promise.all(queries.map((query) => hot.searchEvents(query)));
+      expect(before[1]!.map((entry) => entry.stream)).toEqual([upper]);
+      expect([...before[0]!].sort(compareAuditEvents)).toEqual(before[0]);
+
+      await archive.archive(lower, { through: 1 });
+      await archive.archive(upper, { through: 1 });
+
+      for (const [index, query] of queries.entries()) {
+        expect(await events.searchEvents(query), JSON.stringify(query)).toEqual(before[index]);
+      }
+      d1.close();
+    });
+
     it("lists a stream whose every event is archived", async () => {
       // A rebuild enumerates streams before folding them; one with no hot row
       // left would otherwise drop its document from the rebuild entirely.
@@ -526,6 +567,10 @@ describe("D1EventArchive", () => {
       const { d1, hot, archive } = harness();
       await seed(hot, NOTE, 4);
       await archive.archive(NOTE, { through: 4 });
+      // The archived-sequence trigger refuses this insert, so "somehow" means
+      // a database that lost the trigger: the restore must still not insert
+      // the segment a second time, and UNIQUE(stream, sequence) is what stops it.
+      d1.query(`DROP TRIGGER ${D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER}`);
       d1.query(
         "INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json) VALUES ('dup', ?, ?, 2, 'DocumentUpdated', 'Note', 'One', 'x', ?, '{\"kind\":\"DocumentUpdated\",\"patch\":{}}')",
         TENANT,
@@ -550,6 +595,294 @@ describe("D1EventArchive", () => {
       await expect(archive.restore(NOTE)).rejects.toMatchObject({ code: "EVENT_ARCHIVE_INTEGRITY" });
       expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_event_archive_segments")).toEqual([{ n: 1 }]);
       expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events")).toEqual([{ n: 0 }]);
+      d1.close();
+    });
+  });
+
+  describe("archived sequences stay unique", () => {
+    /**
+     * Archiving deletes rows from the hot table, and with them their place in
+     * UNIQUE(stream, sequence) — the constraint an append's optimistic
+     * concurrency falls back on when two writers read the same version. A
+     * writer whose version read went stale while an archive moved the head
+     * away must still lose the race, not insert a second event at that
+     * sequence.
+     */
+    class StaleWriter extends D1EventStore {
+      constructor(
+        db: D1Database,
+        private readonly staleVersion: number
+      ) {
+        super(db);
+      }
+
+      override async currentVersion(): Promise<number> {
+        return this.staleVersion;
+      }
+    }
+
+    it("refuses a stale writer's append at a sequence the archive already holds", async () => {
+      // Writers A and B both read version 4. A commits 5; an archive pass with
+      // no hot tail moves 1..5; then B's insert lands.
+      const { d1, hot, events, archive } = harness();
+      await seed(hot, NOTE, 5);
+      await archive.archive(NOTE, { through: 5 });
+      const stale = new StaleWriter(d1.database, 4);
+
+      await expect(stale.append(NOTE, 4, [event(NOTE, 5, { id: "b5" })])).rejects.toMatchObject({
+        code: "DOCUMENT_CONFLICT"
+      });
+      await expect(stale.appendBatch([{ stream: NOTE, expectedVersion: 4, events: [event(NOTE, 5, { id: "b5" })] }]))
+        .rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ?", NOTE)).toEqual([{ n: 0 }]);
+      const read = await events.readStream(NOTE);
+      expect(read.map((entry) => [entry.sequence, entry.id])).toEqual(
+        [1, 2, 3, 4, 5].map((sequence) => [sequence, `${NOTE}#${sequence}`])
+      );
+      // The next sequence above the archive is still free.
+      await expect(events.append(NOTE, 5, [event(NOTE, 6)])).resolves.toHaveLength(1);
+      d1.close();
+    });
+
+    it("refuses a stale document commit the same way", async () => {
+      const { d1, hot, archive } = harness();
+      await seed(hot, NOTE, 3);
+      await archive.archive(NOTE, { through: 3 });
+      class StaleDocuments extends D1DocumentStore {
+        override async currentVersion(): Promise<number> {
+          return 2;
+        }
+      }
+      const stale = new StaleDocuments(d1.database);
+      const project = () => ({
+        tenantId: TENANT,
+        doctype: "Note",
+        name: "One",
+        version: 3,
+        docstatus: "draft" as const,
+        data: {},
+        createdAt: NOW,
+        updatedAt: NOW
+      });
+
+      await expect(stale.commit(NOTE, 2, [event(NOTE, 3, { id: "b3" })], project)).rejects.toMatchObject({
+        code: "DOCUMENT_CONFLICT"
+      });
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ?", NOTE)).toEqual([{ n: 0 }]);
+      d1.close();
+    });
+
+    it("reports two different events at one sequence instead of picking one", async () => {
+      // Only reachable on a database that lost the trigger; the merge must not
+      // silently drop either event from history.
+      const { d1, hot, events, archive } = harness();
+      await seed(hot, NOTE, 4);
+      await archive.archive(NOTE, { through: 4 });
+      d1.query(`DROP TRIGGER ${D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER}`);
+      d1.query(
+        "INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json) VALUES ('b4', ?, ?, 4, 'DocumentUpdated', 'Note', 'One', 'x', ?, '{\"kind\":\"DocumentUpdated\",\"patch\":{}}')",
+        TENANT,
+        NOTE,
+        NOW
+      );
+
+      await expect(events.readStream(NOTE)).rejects.toMatchObject({ code: "EVENT_ARCHIVE_INTEGRITY" });
+      await expect(
+        events.readDocumentEvents({ tenantId: TENANT, doctype: "Note", documentName: "One", stream: NOTE })
+      ).rejects.toMatchObject({ code: "EVENT_ARCHIVE_INTEGRITY" });
+      d1.close();
+    });
+
+    /**
+     * Cold storage that runs `race` on the first read after `arm()` — the
+     * restore's object fetch, which sits between its read of the newest segment
+     * and its batch. A `beforeSql` hook would run inside the batch's
+     * transaction, and the rollback under test would undo the race with it.
+     */
+    class RacingStorage extends InMemoryColdEventStorage {
+      private armed: (() => void) | undefined;
+
+      arm(race: () => void): void {
+        this.armed = race;
+      }
+
+      override async get(key: string): Promise<string | null> {
+        const race = this.armed;
+        this.armed = undefined;
+        race?.();
+        return super.get(key);
+      }
+    }
+
+    it("loses a restore race without inserting the segment twice", async () => {
+      // Another restore of the same stream commits between this one's read of
+      // the newest segment and its batch. This batch's deletes then match
+      // nothing, and its inserts must fail rather than land a second copy.
+      const storage = new RacingStorage();
+      const { d1, hot, archive } = harness({ storage });
+      await seed(hot, NOTE, 4);
+      const original = d1.query("SELECT * FROM cf_frappe_events ORDER BY sequence");
+      await archive.archive(NOTE, { through: 4 });
+      storage.arm(() => {
+        d1.query("DELETE FROM cf_frappe_event_archive_documents WHERE stream = ?", NOTE);
+        d1.query("DELETE FROM cf_frappe_event_archive_segments WHERE stream = ?", NOTE);
+        for (const row of original) {
+          d1.query(
+            "INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row["id"],
+            row["tenant_id"],
+            row["stream"],
+            row["sequence"],
+            row["type"],
+            row["doctype"],
+            row["document_name"],
+            row["actor_id"],
+            row["occurred_at"],
+            row["payload_json"],
+            row["metadata_json"]
+          );
+        }
+      });
+
+      await expect(archive.restore(NOTE)).rejects.toMatchObject({ code: "EVENT_ARCHIVE_CONFLICT" });
+      expect(d1.query("SELECT * FROM cf_frappe_events ORDER BY sequence")).toEqual(original);
+      d1.close();
+    });
+
+    it("keeps an older segment archived when a newer one appeared before the restore batch", async () => {
+      // An archive appends a newer segment between the restore's read of the
+      // top segment and its batch. Restoring the older one now would leave a
+      // hole under the newer one, so the batch must change nothing.
+      const storage = new RacingStorage();
+      const { d1, hot, archive } = harness({ storage });
+      await seed(hot, NOTE, 6);
+      await archive.archive(NOTE, { through: 4 });
+      storage.arm(() => {
+        d1.query(
+          "INSERT INTO cf_frappe_event_archive_segments VALUES (?, 5, 6, ?, 'Note', ?, ?, 2, 'newer', 'newer', 1, ?)",
+          NOTE,
+          TENANT,
+          NOW,
+          NOW,
+          NOW
+        );
+        d1.query("DELETE FROM cf_frappe_events WHERE stream = ? AND sequence IN (5, 6)", NOTE);
+      });
+
+      await expect(archive.restore(NOTE)).rejects.toMatchObject({ code: "EVENT_ARCHIVE_CONFLICT" });
+      expect(
+        d1.query("SELECT seq_start FROM cf_frappe_event_archive_segments WHERE stream = ? ORDER BY seq_start", NOTE)
+      ).toEqual([{ seq_start: 1 }, { seq_start: 5 }]);
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_event_archive_documents WHERE stream = ?", NOTE)).toEqual([
+        { n: 1 }
+      ]);
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ?", NOTE)).toEqual([{ n: 0 }]);
+      d1.close();
+    });
+  });
+
+  describe("bounded cold reads", () => {
+    const OUTBOX = documentStream(TENANT, "__DocumentDeliveryOutbox", "deliveries");
+    const outboxEvent = (index: number, documentName: string) =>
+      event(OUTBOX, index, { doctype: "__DocumentDeliveryOutbox", documentName });
+
+    it("answers a newest-first document lookup from the hot rows without touching a segment", async () => {
+      // The delivery outbox looks up its newest checkpoint, newest-first with
+      // limit 1, on every enqueue, claim and delivery. Nearly every archived
+      // outbox segment holds a checkpoint, so a lookup that read the per-name
+      // index's segments would read the whole archived outbox each time.
+      const { d1, hot, events, archive, metrics } = harness({ archived: { cacheEvents: 0 } });
+      for (let index = 1; index <= 40; index += 1) {
+        await hot.append(OUTBOX, index - 1, [outboxEvent(index, index % 2 === 0 ? "__checkpoint" : `record-${index}`)]);
+      }
+      await archive.archive(OUTBOX, { through: 36, maxSegmentEvents: 4 });
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_event_archive_segments")).toEqual([{ n: 9 }]);
+      const lookup = {
+        tenantId: TENANT,
+        doctype: "__DocumentDeliveryOutbox",
+        documentName: "__checkpoint",
+        stream: OUTBOX
+      };
+
+      const [newest] = await events.readDocumentEvents({ ...lookup, order: "desc", limit: 1 });
+
+      expect(newest!.sequence).toBe(40);
+      expect(metrics).toEqual([]);
+      d1.close();
+    });
+
+    it("walks only as many segments as a limited document lookup needs, from the end the page starts at", async () => {
+      const { d1, hot, events, archive, metrics } = harness({ archived: { cacheEvents: 0 } });
+      for (let index = 1; index <= 40; index += 1) {
+        await hot.append(OUTBOX, index - 1, [outboxEvent(index, index % 2 === 0 ? "__checkpoint" : `record-${index}`)]);
+      }
+      const before = {
+        desc: await hot.readDocumentEvents({
+          tenantId: TENANT,
+          doctype: "__DocumentDeliveryOutbox",
+          documentName: "__checkpoint",
+          stream: OUTBOX,
+          order: "desc",
+          limit: 4
+        }),
+        asc: await hot.readDocumentEvents({
+          tenantId: TENANT,
+          doctype: "__DocumentDeliveryOutbox",
+          documentName: "__checkpoint",
+          stream: OUTBOX,
+          limit: 3
+        })
+      };
+      await archive.archive(OUTBOX, { through: 36, maxSegmentEvents: 4 });
+      const query = { tenantId: TENANT, doctype: "__DocumentDeliveryOutbox", documentName: "__checkpoint", stream: OUTBOX };
+
+      // Two hot checkpoints (38, 40); two more from the newest segment (33..36).
+      expect(await events.readDocumentEvents({ ...query, order: "desc", limit: 4 })).toEqual(before.desc);
+      // Oldest three: segments 1..4 and 5..8 hold 2, 4, 6, 8.
+      expect(await events.readDocumentEvents({ ...query, limit: 3 })).toEqual(before.asc);
+      expect(metrics.map((entry) => entry.segments)).toEqual([1, 2]);
+      d1.close();
+    });
+
+    it("stops an audit search once the page is full and the next segment is older than it", async () => {
+      // A narrow actor filter cannot be pushed into the segment index, which
+      // knows only tenant, doctype and time. The walk must still stop at the
+      // page rather than read the tenant's whole archive.
+      const { d1, hot, events, archive, metrics } = harness({ archived: { cacheEvents: 0 } });
+      for (let index = 1; index <= 60; index += 1) {
+        await hot.append(NOTE, index - 1, [event(NOTE, index, { actorId: index >= 55 ? "rare" : "busy" })]);
+      }
+      const query = { tenantId: TENANT, actorId: "rare", limit: 3 };
+      const before = await hot.searchEvents(query);
+      await archive.archive(NOTE, { through: 60, maxSegmentEvents: 5 });
+      expect(d1.query("SELECT COUNT(*) AS n FROM cf_frappe_event_archive_segments")).toEqual([{ n: 12 }]);
+
+      expect(await events.searchEvents(query)).toEqual(before);
+      // 56..60 fills the page from the newest segment; 51..55 ends at an event
+      // older than the page's last match, so nothing past it is read.
+      expect(metrics).toEqual([expect.objectContaining({ operation: "searchEvents", segments: 1 })]);
+      d1.close();
+    });
+
+    it("refuses an audit search that would read more segments than the bound", async () => {
+      const { d1, hot, events, archive, metrics } = harness({ archived: { cacheEvents: 0, maxSearchSegments: 4 } });
+      for (let index = 1; index <= 60; index += 1) {
+        await hot.append(NOTE, index - 1, [event(NOTE, index, { actorId: index === 2 ? "rare" : "busy" })]);
+      }
+      await archive.archive(NOTE, { through: 60, maxSegmentEvents: 5 });
+
+      await expect(events.searchEvents({ tenantId: TENANT, actorId: "rare", limit: 3 })).rejects.toMatchObject({
+        code: "EVENT_ARCHIVE_SEARCH_TOO_BROAD"
+      });
+      // Narrowed by time it fits, and finds the event.
+      const narrowed = await events.searchEvents({
+        tenantId: TENANT,
+        actorId: "rare",
+        until: "2026-01-01T00:10:00.000Z",
+        limit: 3
+      });
+      expect(narrowed.map((entry) => entry.id)).toEqual([`${NOTE}#2`]);
+      expect(metrics.at(-1)).toMatchObject({ segments: 2 });
       d1.close();
     });
   });

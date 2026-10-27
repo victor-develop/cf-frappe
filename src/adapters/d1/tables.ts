@@ -13,6 +13,11 @@ export const D1_AUTOMATION_RUNS_TABLE = "cf_frappe_automation_runs";
 export const D1_FOLD_SNAPSHOTS_TABLE = "cf_frappe_fold_snapshots";
 export const D1_EVENT_ARCHIVE_SEGMENTS_TABLE = "cf_frappe_event_archive_segments";
 export const D1_EVENT_ARCHIVE_DOCUMENTS_TABLE = "cf_frappe_event_archive_documents";
+/**
+ * Refuses an insert into `cf_frappe_events` at a sequence the archive already
+ * holds. A trigger, not a table, so it is not in {@link D1_TABLES}.
+ */
+export const D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER = "trg_cf_frappe_events_not_archived";
 
 /** Every framework-owned table, in migration order. */
 export const D1_TABLES: readonly string[] = [

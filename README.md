@@ -264,7 +264,7 @@ export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
 export default createCloudFrappeWorker<Env>({ registry, actor, eventArchive });
 ```
 
-Without the option the framework behaves exactly as before. See [Cold Event Archive](docs/event-archive.md) for the cut policies, the costs, and how to switch it off again.
+Without the option the framework behaves exactly as before. **Upgrading: apply migration `0009_cf_frappe_event_archive` before deploying, even with the archive off** — every write now reads its segments table to compute the stream version. See [Cold Event Archive](docs/event-archive.md) for the cut policies, the costs, and how to switch it off again.
 
 ### Development Setup
 
@@ -575,7 +575,7 @@ export class AggregateCoordinator extends createAggregateCoordinatorClass<Env>({
 export default createCloudFrappeWorker<Env>({ registry, actor, eventArchive });
 ```
 
-不配置这个选项时，框架行为和以前完全一样。切分规则、代价，以及怎么再关掉，见 [Cold Event Archive](docs/event-archive.md)。
+不配置这个选项时，框架行为和以前完全一样。**升级时先跑迁移 `0009_cf_frappe_event_archive` 再部署，归档不开也要跑**：现在每次写入都会读它的 segments 表来算 stream 版本，表不在就所有写入都会报 `no such table`。切分规则、代价，以及怎么再关掉，见 [Cold Event Archive](docs/event-archive.md)。
 
 ### 开发环境
 

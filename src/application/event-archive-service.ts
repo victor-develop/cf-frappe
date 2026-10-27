@@ -3,7 +3,7 @@ import { foldDocumentFrom } from "../core/events.js";
 import { documentDeliveryOutboxStream, isArchivableStream, parseStreamName, type ParsedStreamName } from "../core/streams.js";
 import type { DocumentSnapshot, StreamName } from "../core/types.js";
 import type { AuditEventStore } from "../ports/audit-event-store.js";
-import type { EventArchive } from "../ports/event-archive.js";
+import type { EventArchive, EventArchiveRestoreResult } from "../ports/event-archive.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { SnapshotStore } from "../ports/snapshot-store.js";
 import { DOCUMENT_FOLD_NAME, DOCUMENT_FOLD_VERSION } from "./document-fold-snapshots.js";
@@ -120,8 +120,11 @@ export const userNotificationsCutPolicy: EventArchiveCutPolicy = snapshotCutPoli
  * operation into a cold read. With no checkpoint the outbox folds the whole
  * stream, and nothing is cut.
  *
- * The checkpoint event itself sits at `upToSequence + 1`, above the cut, so the
- * lookup that finds it stays a hot read.
+ * The checkpoint event itself sits at `upToSequence + 1`, above the cut. The
+ * newest-first, limit-1 lookup that finds it — run inside every enqueue, claim
+ * and delivery — is answered from the hot rows whenever a checkpoint is there,
+ * and otherwise reads archived segments newest-first only until it finds one,
+ * because archived events are always a prefix of the stream.
  */
 export const deliveryOutboxCutPolicy: EventArchiveCutPolicy = {
   name: "documentDeliveryOutbox",
@@ -213,6 +216,15 @@ export type EventArchiveStreamResult =
       readonly reason: EventArchiveSkipReason;
       readonly archivedThrough: number;
     }
+  | {
+      readonly stream: StreamName;
+      readonly status: "failed";
+      readonly error: string;
+    };
+
+/** A stream restored in full, or the reason it was not; see `restorePass`. */
+export type EventArchiveRestoreStreamResult =
+  | (EventArchiveRestoreResult & { readonly status: "restored" })
   | {
       readonly stream: StreamName;
       readonly status: "failed";
@@ -340,16 +352,28 @@ export class EventArchiveService {
    * Restores up to `limit` archived streams. Run it to completion before
    * switching the archive off: a store without an archive refuses a stream
    * whose oldest events are missing, rather than reading half of it.
+   *
+   * Like `archivePass`, a failure on one stream is recorded and the pass moves
+   * on, so one bad segment cannot stop the cursor short of the streams after
+   * it. A failed restore leaves its segment archived and intact; the stream is
+   * still listed by the next pass from the start, which is how an operator
+   * knows the restore is not finished.
    */
-  async restorePass(input: { readonly after?: StreamName; readonly limit?: number } = {}) {
+  async restorePass(input: { readonly after?: StreamName; readonly limit?: number } = {}): Promise<
+    EventArchivePassResult<EventArchiveRestoreStreamResult>
+  > {
     const limit = passLimit(input.limit);
     const streams = await this.options.archive.archivedStreams({
       ...(input.after === undefined ? {} : { after: input.after }),
       limit
     });
-    const results = [];
+    const results: EventArchiveRestoreStreamResult[] = [];
     for (const stream of streams) {
-      results.push(await this.options.archive.restore(stream));
+      try {
+        results.push({ ...(await this.options.archive.restore(stream)), status: "restored" });
+      } catch (error) {
+        results.push({ stream, status: "failed", error: errorMessage(error) });
+      }
     }
     const last = streams.at(-1);
     return { results, ...(streams.length === limit && last !== undefined ? { next: last } : {}) };

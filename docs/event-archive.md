@@ -51,7 +51,10 @@ Every `EventStore`, `DocumentStore` and `AuditEventStore` read goes through `D1A
 | Timeline / audit history | the user scrolls past `keepHotEvents` | one R2 read per segment |
 | `cancel`, `amend`, `merge`, assign, tag, follow | always — they still fold the whole stream | one R2 read per segment, then cached in the isolate |
 | Historic version folds (`maxSequence`) | the version is archived | as above |
-| Audit search (`searchEvents`) | archived events fall in the window | one R2 read per candidate segment |
+| Audit search (`searchEvents`) | archived events could rank on the page | segments newest-first, stopping once the page is full and the next segment ends before it; more than `maxSearchSegments` (default 100) is refused with `EVENT_ARCHIVE_SEARCH_TOO_BROAD` |
+| Delivery outbox: checkpoint lookup on every enqueue, claim, delivery | only when no checkpoint is in the hot tail | segments newest-first until one holds a checkpoint — usually none |
+| Delivery outbox: re-enqueue of an archived record | the record's events are archived | one R2 read per segment that holds the record (per-name index) |
+| Share permission checks (`DocumentShareService`) | the document's share events are archived | reads the whole document stream: one R2 read per segment, then cached |
 | #11 rebuild, #12 replay parity | always | minutes for a large tenant |
 
 Archived segments are immutable, so `D1ArchivedEvents` keeps up to `cacheEvents` (default 10,000) parsed rows per isolate. Pass `onColdRead` to see every read that reached R2 — the operation, the stream, how many segments, how many came from the cache, and how long it took. That is the number to watch after turning archiving on.
@@ -61,6 +64,10 @@ Archived segments are immutable, so `D1ArchivedEvents` keeps up to `cacheEvents`
 Optimistic concurrency compares `expectedVersion` with the stream's version. Once a stream's hot tail is empty, `MAX(sequence)` of the hot table is 0, and the next append would write sequence 1 again. The version is therefore `MAX(hot MAX(sequence), archived MAX(seq_end))`, read in one statement.
 
 This is read **even with the archive off.** It is one primary-key seek into a table that is empty unless the archive has run, and it is what keeps a misconfigured deployment from corrupting a stream.
+
+The version check and the insert are separate statements, so the last line of optimistic concurrency is `UNIQUE(stream, sequence)`: two writers that read the same version race on the insert, and one loses. Archiving deletes hot rows, and with them their entries in that constraint. Migration 0009 therefore adds a `BEFORE INSERT` trigger on `cf_frappe_events` that refuses any sequence at or below the stream's archived high-water mark, so a writer whose version read went stale while an archive moved the head still gets `DOCUMENT_CONFLICT`. That is also why `keepHotEvents: 0` is safe. Restore deletes a segment's index rows before reinserting its events in the same batch, so the same trigger is what refuses a restore that lost a race.
+
+**Apply migration 0009 before deploying this version, even if the archive stays off.** `currentVersion` reads the segments table on every write, so code running against a database without it fails every write with `no such table`.
 
 ## Storage layout
 
@@ -133,13 +140,13 @@ Each pass archives up to `limit` streams and returns a cursor. A failure on one 
 
 ## Switching it off
 
-Run `restorePass()` until it returns no cursor, then remove the option from both places.
+Run `restorePass()` until it returns no cursor, then remove the option from both places. A stream that fails to restore (a missing or altered object, or a conflict) is reported as `status: "failed"` and the pass moves on; it stays archived, so `archive.archivedStreams()` still lists it and switching off must wait until it is fixed.
 
 A store without the archive refuses a stream whose oldest events are missing (`EVENT_ARCHIVE_REQUIRED`) rather than folding half of it. It cannot detect every case — a read filtered by payload kind, or a stream whose every event is archived, comes back empty rather than failing — but the version check above still sees the archive, so no write can reuse a sequence. Configure both places, or neither.
 
 ## Limits
 
 - A segment is filed under one tenant and one doctype; a stream that mixes them is refused (`EVENT_ARCHIVE_INVALID`). Every stream the framework writes satisfies this.
-- Restoring a segment is one D1 batch of one insert per event, so `maxSegmentEvents` is capped at 5,000 (default 500).
-- Every R2 read is a subrequest. A rebuild or an audit search that spans thousands of archived segments in one invocation can reach the Workers subrequest limit; drive rebuilds in batches (`ProjectionRebuildService.advance` already is) and keep audit windows bounded.
+- Restoring a segment is one D1 batch of one insert per event, so `maxSegmentEvents` is capped at 5,000 (default 500). A batch counts as one query toward D1's per-invocation limit however many statements it holds; what bounds it is the time of one transaction.
+- Every R2 read is a subrequest. A rebuild that spans thousands of archived segments in one invocation can reach the Workers subrequest limit; drive rebuilds in batches (`ProjectionRebuildService.advance` already is). The audit search is bounded by `maxSearchSegments` and refuses rather than fanning out; narrow it with a doctype, document or time window.
 - `cancel`, `amend` and the collaboration commands still fold whole streams, so on an archived document they read R2 (then the isolate cache). Snapshotting the assignment, tag and follower folds, as #18 suggests, would remove that; it is a latency improvement, not a correctness one, and is not done here.

@@ -26,3 +26,10 @@ CREATE TABLE IF NOT EXISTS cf_frappe_event_archive_documents (
   seq_start INTEGER NOT NULL,
   PRIMARY KEY (stream, document_name, seq_start)
 );
+
+CREATE TRIGGER IF NOT EXISTS trg_cf_frappe_events_not_archived
+  BEFORE INSERT ON cf_frappe_events
+  WHEN NEW.sequence <= (SELECT COALESCE(MAX(seq_end), 0) FROM cf_frappe_event_archive_segments WHERE stream = NEW.stream)
+BEGIN
+  SELECT RAISE(ABORT, 'constraint failed: cf_frappe_events sequence is already archived');
+END;

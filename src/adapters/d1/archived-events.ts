@@ -37,6 +37,13 @@ export interface D1ArchivedEventsOptions {
    * otherwise fetch the same cold objects on every call.
    */
   readonly cacheEvents?: number;
+  /**
+   * Most archived segments one audit search may read before it is refused with
+   * `EVENT_ARCHIVE_SEARCH_TOO_BROAD`. Defaults to 100. Each is a cold-storage
+   * GET on a cache miss, so this is what keeps a search inside a Worker
+   * invocation's subrequest and memory budget.
+   */
+  readonly maxSearchSegments?: number;
   /** Called once per read that needed archived segments. See {@link ColdEventReadMetrics}. */
   readonly observer?: ColdEventReadObserver;
   /** Milliseconds, for the observer's `durationMs`. Defaults to `Date.now`. */
@@ -44,6 +51,7 @@ export interface D1ArchivedEventsOptions {
 }
 
 export const DEFAULT_ARCHIVED_EVENT_CACHE_EVENTS = 10_000;
+export const DEFAULT_ARCHIVED_EVENT_MAX_SEARCH_SEGMENTS = 100;
 
 /**
  * The read side of the event archive (issue #18): hot events from D1, archived
@@ -67,6 +75,7 @@ export class D1ArchivedEvents {
   private readonly cache: SegmentCache;
   private readonly observer: ColdEventReadObserver | undefined;
   private readonly now: () => number;
+  private readonly maxSearchSegments: number;
 
   constructor(
     private readonly db: D1Database,
@@ -76,6 +85,13 @@ export class D1ArchivedEvents {
     this.cache = new SegmentCache(options.cacheEvents ?? DEFAULT_ARCHIVED_EVENT_CACHE_EVENTS);
     this.observer = options.observer;
     this.now = options.now ?? Date.now;
+    const maxSearchSegments = options.maxSearchSegments ?? DEFAULT_ARCHIVED_EVENT_MAX_SEARCH_SEGMENTS;
+    if (!Number.isSafeInteger(maxSearchSegments) || maxSearchSegments < 1) {
+      throw new FrameworkError("EVENT_ARCHIVE_INVALID", "'maxSearchSegments' must be a positive integer", {
+        status: 400
+      });
+    }
+    this.maxSearchSegments = maxSearchSegments;
   }
 
   async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
@@ -161,17 +177,32 @@ export class D1ArchivedEvents {
     if (segments.length === 0) {
       return hot;
     }
+    // Archived events are always a prefix of the stream, so every archived
+    // match is older than every hot one. The walk goes from the end the page
+    // starts at and stops once the page is full — so newest-first with a limit
+    // the hot rows already fill, which is the outbox's checkpoint lookup on
+    // every operation, reads no segment at all. Without this, that lookup would
+    // read every archived outbox segment, since nearly all hold a checkpoint.
+    const desc = query.order === "desc";
+    const limit = query.limit;
+    const needed = limit === undefined ? undefined : desc ? limit - hot.length : limit;
     const stats = { segments: 0, cachedSegments: 0 };
     const cold: DomainEvent[] = [];
-    for (const segment of segments) {
-      cold.push(
-        ...(await this.segmentEvents(segment, stats)).filter(
-          (event) =>
-            event.tenantId === query.tenantId &&
-            event.doctype === query.doctype &&
-            event.documentName === query.documentName
-        )
+    for (const segment of desc ? [...segments].reverse() : segments) {
+      if (needed !== undefined && cold.length >= needed) {
+        break;
+      }
+      const events = (await this.segmentEvents(segment, stats)).filter(
+        (event) =>
+          event.tenantId === query.tenantId &&
+          event.doctype === query.doctype &&
+          event.documentName === query.documentName
       );
+      if (desc) {
+        cold.unshift(...events);
+      } else {
+        cold.push(...events);
+      }
     }
     const merged = mergeBySequence(cold, hot);
     const ordered = query.order === "desc" ? [...merged].reverse() : merged;
@@ -189,6 +220,15 @@ export class D1ArchivedEvents {
    * index second — is the safe one. An archive committing in between makes an
    * event appear in both reads, which the merge deduplicates by id; the reverse
    * order could make it appear in neither.
+   *
+   * The index knows a segment's tenant, doctype and time range, not its actors
+   * or event kinds, so a narrow `actorId` or `payloadKinds` filter cannot be
+   * pushed into it. The walk therefore goes newest segment first and stops as
+   * soon as the page is full and the next segment ends before the page's oldest
+   * match — nothing in it, or in any segment after it, could rank higher. A
+   * search that still has to read more than `maxSearchSegments` segments is
+   * refused with `EVENT_ARCHIVE_SEARCH_TOO_BROAD` rather than fanned out
+   * without bound inside one Worker invocation.
    */
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
     const started = this.now();
@@ -235,16 +275,32 @@ export class D1ArchivedEvents {
       return hot;
     }
     const stats = { segments: 0, cachedSegments: 0 };
-    const cold: DomainEvent[][] = [];
+    const byId = new Map<string, DomainEvent>(hot.map((event) => [event.id, event]));
+    let merged: readonly DomainEvent[] = [...byId.values()].sort(compareAuditEvents);
     for (const segment of segments) {
-      cold.push([...(await this.segmentEvents(segment, stats))]);
+      if (query.limit !== undefined && merged.length >= query.limit) {
+        // `last_occurred_at` is the newest event in the segment, and segments
+        // come newest-first, so once it is strictly older than the page's last
+        // match no remaining segment can place an event on the page. Equal is
+        // not enough to stop: a tie is broken by stream, which may favour it.
+        const boundary = merged[query.limit - 1]!.occurredAt;
+        if (segment.last_occurred_at < boundary) {
+          break;
+        }
+      }
+      if (stats.segments >= this.maxSearchSegments) {
+        throw new FrameworkError(
+          "EVENT_ARCHIVE_SEARCH_TOO_BROAD",
+          `This audit search would read more than ${this.maxSearchSegments} archived segments; ` +
+            "narrow it with a doctype, document, or a since/until window",
+          { status: 400 }
+        );
+      }
+      for (const event of searchInMemoryAuditEvents([await this.segmentEvents(segment, stats)], query)) {
+        byId.set(event.id, event);
+      }
+      merged = [...byId.values()].sort(compareAuditEvents);
     }
-    const matched = searchInMemoryAuditEvents(cold, query);
-    const byId = new Map<string, DomainEvent>();
-    for (const event of [...matched, ...hot]) {
-      byId.set(event.id, event);
-    }
-    const merged = [...byId.values()].sort(compareAuditEvents);
     const result = query.limit === undefined ? merged : merged.slice(0, query.limit);
     const hotIds = new Set(hot.map((event) => event.id));
     this.report(
@@ -340,13 +396,25 @@ export class D1ArchivedEvents {
   }
 }
 
-/** Ascending by sequence; on a duplicate sequence the hot copy wins. */
+/**
+ * Ascending by sequence. The same event seen on both sides — one id, one
+ * sequence — appears once. Two *different* events at one sequence is never a
+ * state the framework can reach (the archived-sequence trigger refuses the
+ * insert that would cause it), so it is reported rather than resolved by
+ * quietly picking one: either choice would drop a committed event from history.
+ */
 function mergeBySequence(cold: readonly DomainEvent[], hot: readonly DomainEvent[]): readonly DomainEvent[] {
   const bySequence = new Map<number, DomainEvent>();
-  for (const event of cold) {
-    bySequence.set(event.sequence, event);
-  }
-  for (const event of hot) {
+  for (const event of [...cold, ...hot]) {
+    const existing = bySequence.get(event.sequence);
+    if (existing !== undefined && existing.id !== event.id) {
+      throw new FrameworkError(
+        "EVENT_ARCHIVE_INTEGRITY",
+        `Stream '${event.stream}' has two different events at sequence ${event.sequence} ` +
+          `('${existing.id}' archived, '${event.id}' hot)`,
+        { status: 500 }
+      );
+    }
     bySequence.set(event.sequence, event);
   }
   return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence);

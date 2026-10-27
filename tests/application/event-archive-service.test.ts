@@ -67,13 +67,19 @@ interface RigOptions {
   readonly policies?: readonly EventArchiveCutPolicy[];
   /** The snapshot store the document service resumes from; none by default. */
   readonly documentSnapshots?: "none" | "fallback";
+  /** The archived-event cache size; the adapter's default when absent. */
+  readonly cacheEvents?: number;
 }
 
 function rig(options: RigOptions = {}) {
   const d1 = createTestD1({ schema: frameworkSchema() });
   const storage = new InMemoryColdEventStorage();
   const metrics: ColdEventReadMetrics[] = [];
-  const archived = new D1ArchivedEvents(d1.database, { storage, observer: (entry) => metrics.push(entry) });
+  const archived = new D1ArchivedEvents(d1.database, {
+    storage,
+    observer: (entry) => metrics.push(entry),
+    ...(options.cacheEvents === undefined ? {} : { cacheEvents: options.cacheEvents })
+  });
   const events = new D1EventStore(d1.database, { archive: archived });
   const store = new D1DocumentStore(d1.database, { archive: archived });
   const projections = new D1ProjectionStore(d1.database);
@@ -244,11 +250,31 @@ describe("EventArchiveService", () => {
     const restored = await target.service.restorePass();
 
     expect(restored.results).toEqual([
-      { stream: documentStream(TENANT, "Note", "Note A"), segments: 1, events: 5 },
-      { stream: documentStream(TENANT, "Note", "Note B"), segments: 1, events: 5 }
+      { stream: documentStream(TENANT, "Note", "Note A"), status: "restored", segments: 1, events: 5 },
+      { stream: documentStream(TENANT, "Note", "Note B"), status: "restored", segments: 1, events: 5 }
     ]);
     const plain = new D1EventStore(target.d1.database);
     expect((await plain.readStream(documentStream(TENANT, "Note", "Note A"))).length).toBe(5);
+    target.d1.close();
+  });
+
+  it("records a stream whose restore fails and carries on with the rest of the pass", async () => {
+    const target = rig();
+    await noteWithHistory(target, "Note A", 4);
+    await noteWithHistory(target, "Note B", 4);
+    await target.service.archivePass();
+    const streamA = documentStream(TENANT, "Note", "Note A");
+    const [segmentA] = await target.archive.segments(streamA);
+    target.storage.objects.delete(segmentA!.objectKey);
+
+    const restored = await target.service.restorePass();
+
+    expect(restored.results).toEqual([
+      { stream: streamA, status: "failed", error: expect.stringContaining("missing from cold storage") },
+      { stream: documentStream(TENANT, "Note", "Note B"), status: "restored", segments: 1, events: 5 }
+    ]);
+    // The failed stream stays archived and is what the next pass finds.
+    await expect(target.archive.archivedStreams({ limit: 10 })).resolves.toEqual([streamA]);
     target.d1.close();
   });
 
@@ -481,6 +507,41 @@ describe("EventArchiveService", () => {
       expect(target.metrics.every((entry) => entry.operation === "readDocumentEvents")).toBe(true);
       await deliver(6);
       await expect(outbox.record(TENANT, "evt_pending:email")).resolves.toMatchObject({ status: "claimed" });
+      target.d1.close();
+    });
+
+    it("keeps every per-delivery outbox operation off the archive once the outbox is archived", async () => {
+      // `lastCheckpoint()` runs inside every enqueue, claim, delivery and list,
+      // newest-first with limit 1. Nearly every archived outbox segment holds a
+      // checkpoint, so a lookup that walked the per-name index would read the
+      // whole archived outbox on every operation. With the cache off, any cold
+      // read at all shows up as a metric.
+      const target = rig({ cacheEvents: 0, maxSegmentEvents: 2 });
+      const outbox = new DocumentDeliveryOutboxService({
+        events: target.events,
+        clock: fixedClock("2026-02-01T00:00:00.000Z"),
+        ids: sequentialIds()
+      });
+      const deliver = async (round: number) => {
+        await outbox.enqueueFromDomainEvent({ event: sourceEvent(`evt_round_${String(round)}`), targets: ["email"] });
+        const [claimed] = await outbox.claimPending({ tenantId: TENANT, claimId: `claim-${String(round)}`, now: "2026-02-01T00:00:00.000Z" });
+        await outbox.markDelivered({ tenantId: TENANT, outboxId: claimed!.id, claimId: `claim-${String(round)}` });
+      };
+      for (let round = 1; round <= 8; round += 1) {
+        await deliver(round);
+      }
+      const stream = documentDeliveryOutboxStream(TENANT);
+      const listBefore = await outbox.list(TENANT);
+      const result = await target.service.archiveStream(stream);
+      expect(result).toMatchObject({ status: "archived" });
+      expect((result as { segments: number }).segments).toBeGreaterThan(3);
+      target.metrics.length = 0;
+
+      await expect(outbox.list(TENANT)).resolves.toEqual(listBefore);
+      await deliver(9);
+      await deliver(10);
+
+      expect(target.metrics).toEqual([]);
       target.d1.close();
     });
   });

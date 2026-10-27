@@ -49,13 +49,22 @@ export function readInMemoryAuditDocumentEvents(
  * that merges hot and archived results sorts them exactly as one query would.
  */
 export function compareAuditEvents(left: DomainEvent, right: DomainEvent): number {
-  const time = right.occurredAt.localeCompare(left.occurredAt);
+  // Plain code-unit comparison, not `localeCompare`: the D1 audit query orders
+  // with SQLite's BINARY collation, and a hot page merged with archived events
+  // must come out in the order one SQL query over both would give. UTF-16
+  // code-unit order and SQLite's UTF-8 byte order disagree only between an
+  // astral character and one in U+E000–U+FFFF.
+  const time = compareBinary(right.occurredAt, left.occurredAt);
   if (time !== 0) {
     return time;
   }
-  const stream = left.stream.localeCompare(right.stream);
+  const stream = compareBinary(left.stream, right.stream);
   if (stream !== 0) {
     return stream;
   }
   return right.sequence - left.sequence;
+}
+
+function compareBinary(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
