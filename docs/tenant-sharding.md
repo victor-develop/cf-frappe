@@ -34,7 +34,7 @@ Each isolate caches answers for `cacheTtlMs` (5 s). What that cache can get wron
 
 `cf_frappe_tenant_fences` and a `BEFORE INSERT` trigger on `cf_frappe_events` exist in every database (migration `0009`). A row in the fence table makes the trigger raise `CF_FRAPPE_TENANT_FENCED` for any event insert of that tenant, which rolls back the whole batch — events, inline projection rows, projection handoff — whichever code path issued it — except on `__global__:` streams, which live on `home` whatever tenant id their rows carry (above). It is a trigger rather than a check in the adapters because a check would read and then write (a race) and would have to be in every writer. Verified on workerd's D1 (`wrangler dev`) and on `node:sqlite`; D1 reports it as `D1_ERROR: CF_FRAPPE_TENANT_FENCED: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`, which `isD1TenantFencedError` recognizes and the D1 stores rethrow as is instead of reporting a version conflict.
 
-With no fence rows — every deployment that never moves a tenant — the trigger costs one primary-key probe of an empty table per event insert.
+With no fence rows — every deployment that never moves a tenant — the trigger costs one primary-key probe of an empty table per event insert. The table and trigger are there whether sharding is on or off, so with the switch off the behaviour is the same as without this feature but the schema is not.
 
 ## Turning it on
 
@@ -123,11 +123,21 @@ Why it cannot lose an event: an event committed before a pass started is found b
 
 Each step is bounded: `pagesPerAdvance` (5) pages of `pageSize` (100) events, at three queries a page plus the refolds — inside Workers Paid's per-invocation query limit with the job's default 10 steps. On Workers Free, lower both.
 
-Journaled in `cf_frappe_tenant_moves` with a revision compare-and-swap, so two drivers advancing the same move (an overlapping cron tick, a retried message, an operator's `mover.run` next to the job) cannot both apply a step, and a stale driver can never flip the directory. The fence follows the journal, never the other way round: a cutover claims its attempt (a journal write) before it fences, so a second driver holding the same revision stops before it touches anything; and the fence comes off only after the journal write that goes back to catching up — or aborts — has succeeded, and only while the directory still points at the source. A driver that loses a race leaves the fence alone, because the move is either completed (the fence must stay) or in another driver's hands.
+Journaled in `cf_frappe_tenant_moves` with a revision compare-and-swap, so two drivers advancing the same move (an overlapping cron tick, a retried message, an operator's `mover.run` next to the job) cannot both apply a step, and a stale driver can never flip the directory. A cutover claims its attempt (a journal write) before it fences, so a second driver holding the same revision stops before it touches anything.
+
+**The fence belongs to one cutover attempt, not to the move.** Every attempt of a move shares its move id, so a fence row keyed only by move could not tell a live attempt from a dead one: a driver whose back-off journaled could lift the fence a newer attempt of the same move was about to flip under, and a write routed to the source by a stale cache in that window would be acknowledged and then left behind. So the fence row also carries the attempt — the journal revision that attempt's claim produced:
+
+- A later attempt takes the row over (`ON CONFLICT … DO UPDATE … WHERE attempt < excluded.attempt`); an earlier one never does, so a stale driver arriving late cannot mistake a live fence for its own.
+- Right after fencing, the cutover re-reads the journal; if an abort or a later claim landed in between, it lifts its own attempt's fence and stops.
+- Right before the flip, it checks the fence is still its own attempt's, and stops if not.
+- A back-off deletes only its own attempt's row, and only after its journal write succeeded and while the directory still points at the source.
+- An abort lifts the move's fence whichever attempt holds it: the move is over, and nothing else would.
+
+A driver that loses a race leaves the fence alone, because the move is either completed (the fence must stay) or in another driver's hands.
 
 `mover.abort(moveId, reason)` abandons a move before its cutover lands: the journal records the abort, then the fence comes off and the tenant stays where it was. An abort that loses to a completing cutover fails with a conflict and leaves the source fenced.
 
-**If a tenant is stuck on `503 TENANT_MOVING`.** An invocation that dies between fencing and its journal write leaves the fence on. If the move is still in `cutover`, the next `advance` takes it from there (it either completes or lifts it). If the move was aborted meanwhile, call `mover.abort(moveId, reason)` again: on an aborted move it lifts that move's leftover fence, provided the directory still points at the source. A cutover that keeps failing — a final pass that never fits in one invocation, for a tenant too large or too busy — can be stopped the same way, with `abort`, and retried at a quieter time; the move's `state.cutovers` lists every attempt and its outcome.
+**If a tenant is stuck on `503 TENANT_MOVING`.** An invocation that dies between fencing and its journal write leaves the fence on. If the move is still in `cutover`, the next `advance` takes it from there (it either completes or lifts it). If the move is back in `catching-up` — a back-off whose journal write committed but whose lift never ran — the next catch-up pass lifts that dead attempt's fence by itself. If the move was aborted meanwhile, call `mover.abort(moveId, reason)` again: on an aborted move it lifts that move's leftover fence, provided the directory still points at the source. A cutover that keeps failing — a final pass that never fits in one invocation, for a tenant too large or too busy — can be stopped the same way, with `abort`, and retried at a quieter time; the move's `state.cutovers` lists every attempt and its outcome.
 
 A move refuses: a target that is behind the source on migrations (roll them out first), a tenant already moving, the shard the tenant is on, and `__global__`.
 
@@ -136,6 +146,10 @@ A move refuses: a target that is behind the source on migrations (roll them out 
 **Nothing is deleted.** The source keeps the tenant's events and projection rows exactly as they were at the fence, and keeps the fence, so no stale cache can ever write there again. That is deliberate: deleting events is the one thing #5 rules out, and a frozen copy costs storage, not correctness. Scatter-gather goes by the directory, so it never double-counts the copy.
 
 It also means moving a tenant **off** a shard stops that shard's growth from that tenant but does not shrink it. The framework does not reclaim that space, and #5's rule against deleting events applies to a frozen copy as much as to anything else: if the space is needed, archive the copy to R2 (#18) — a human decision, made after checking that the target holds every event (the cutover report journaled with the move records both counts).
+
+**After a move, a tenant's audit trail on its new shard does not include its `__global__` rows.** Runtime job schedule definitions it saved stay on `home` (above), and the event log, audit and `searchEvents` route by tenant, so they read the tenant's shard and no longer show those rows. They are still on `home`, readable there by an operator.
+
+**Switching sharding off after the first move needs every tenant moved back to `home` first.** The unsharded stores only read `DB`: for a moved tenant that is the frozen copy, and every write to it hits the fence and fails with a 500. Move each tenant back (and wait for its move to complete), then switch off.
 
 Moving a tenant **back** onto a shard holding its frozen copy works: the copy is a prefix of the tenant's history (events never change, ids are unique), so the move copies on top of it. Its fence is lifted at the start of the move, but only once the move away from it finished more than `staleFenceAgeMs` (10 s, twice the cache lifetime) ago — measured from when the directory flipped, not from when that move's cutover began — so no isolate can still be routing writes there.
 

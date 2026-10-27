@@ -298,14 +298,24 @@ export class D1TenantShardDirectory implements TenantShardDirectory {
 export interface D1TenantFence {
   readonly tenantId: TenantId;
   readonly moveId: string;
+  /**
+   * The cutover attempt that put the fence there: the move's journal revision
+   * its claim produced. Every attempt of one move shares the move id, so the
+   * move id alone cannot tell a live attempt's fence from a dead one's.
+   */
+  readonly attempt: number;
   readonly fencedAt: string;
 }
 
 /**
- * Fences `tenantId` on this database: from the moment the insert commits, the
+ * Fences `tenantId` on this database: from the moment the write commits, the
  * trigger refuses every event insert for the tenant here, from any writer.
- * Idempotent for the same move; a fence left by a different move stays and is
- * returned, so the caller can see it is not its own.
+ *
+ * A later attempt of the same move takes the row over — its claim is the only
+ * one the journal still honours — and an earlier one never does, so a stale
+ * driver arriving late cannot make a live attempt's fence look like its own. A
+ * fence left by a different move stays. Either way the stored fence is
+ * returned, so the caller can see whether it is its own.
  */
 export async function fenceD1Tenant(
   db: D1Database,
@@ -313,32 +323,51 @@ export async function fenceD1Tenant(
 ): Promise<D1TenantFence> {
   await db
     .prepare(
-      `INSERT INTO ${D1_TENANT_FENCES_TABLE} (tenant_id, move_id, fenced_at) VALUES (?, ?, ?)
-       ON CONFLICT(tenant_id) DO NOTHING`
+      `INSERT INTO ${D1_TENANT_FENCES_TABLE} (tenant_id, move_id, attempt, fenced_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET attempt = excluded.attempt, fenced_at = excluded.fenced_at
+       WHERE ${D1_TENANT_FENCES_TABLE}.move_id = excluded.move_id AND ${D1_TENANT_FENCES_TABLE}.attempt < excluded.attempt`
     )
-    .bind(fence.tenantId, fence.moveId, fence.fencedAt)
+    .bind(fence.tenantId, fence.moveId, fence.attempt, fence.fencedAt)
     .run();
   const stored = await readD1TenantFence(db, fence.tenantId);
-  // The insert above either created the row or found one; it cannot be absent.
+  // The write above either created the row or found one; it cannot be absent.
   return stored!;
 }
 
 export async function readD1TenantFence(db: D1Database, tenantId: TenantId): Promise<D1TenantFence | null> {
   const row = await db
-    .prepare(`SELECT tenant_id, move_id, fenced_at FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = ?`)
+    .prepare(`SELECT tenant_id, move_id, attempt, fenced_at FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = ?`)
     .bind(tenantId)
-    .first<{ tenant_id: string; move_id: string; fenced_at: string }>();
-  return row === null ? null : { tenantId: row.tenant_id, moveId: row.move_id, fencedAt: row.fenced_at };
+    .first<{ tenant_id: string; move_id: string; attempt: number; fenced_at: string }>();
+  return row === null
+    ? null
+    : { tenantId: row.tenant_id, moveId: row.move_id, attempt: Number(row.attempt), fencedAt: row.fenced_at };
 }
 
 /**
- * Lifts one move's fence. Keyed by tenant *and* move, so lifting can never
- * remove a fence some other move put there.
+ * Lifts a fence. Keyed by tenant *and* move, so lifting can never remove a
+ * fence some other move put there; with `attempt`, also by cutover attempt, so
+ * a driver backing off removes only the fence it put there and never the one a
+ * later attempt of the same move now depends on. Without `attempt` it lifts the
+ * move's fence whichever attempt holds it — for a move that is over (aborted,
+ * or the frozen copy of one that completed long enough ago).
  */
-export async function liftD1TenantFence(db: D1Database, tenantId: TenantId, moveId: string): Promise<void> {
+export async function liftD1TenantFence(
+  db: D1Database,
+  tenantId: TenantId,
+  moveId: string,
+  attempt?: number
+): Promise<void> {
+  if (attempt === undefined) {
+    await db
+      .prepare(`DELETE FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = ? AND move_id = ?`)
+      .bind(tenantId, moveId)
+      .run();
+    return;
+  }
   await db
-    .prepare(`DELETE FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = ? AND move_id = ?`)
-    .bind(tenantId, moveId)
+    .prepare(`DELETE FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = ? AND move_id = ? AND attempt = ?`)
+    .bind(tenantId, moveId, attempt)
     .run();
 }
 

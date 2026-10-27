@@ -51,6 +51,9 @@ export interface D1ShardMigrationsOptions {
 
 export const DEFAULT_WRANGLER_MIGRATIONS_TABLE = "d1_migrations";
 
+/** How many times `ensureCurrent` re-reads the journal after losing a race to another isolate migrating the same shard. */
+const ENSURE_CURRENT_ATTEMPTS = 3;
+
 /**
  * Per-shard migration tracking and rolling upgrades.
  *
@@ -127,12 +130,33 @@ export class D1ShardMigrations {
    * Brings one shard up to the plan, once per isolate. What provisioning runs
    * before it places a tenant: a new tenant must never land on a shard whose
    * schema is behind the code.
+   *
+   * Two isolates placing tenants on a fresh shard at once both find the same
+   * migrations pending, and the slower one's batch fails — on the journal's
+   * primary key, or on a statement the faster one already ran. That is not a
+   * failure of the shard: the slower one reads the journal again and applies
+   * what is still pending, if anything, and fails only if a migration it then
+   * runs alone fails.
    */
   async ensureCurrent(shardId: ShardId): Promise<void> {
     if (this.current.has(shardId)) {
       return;
     }
-    await this.runner(shardId).apply(await this.pending(shardId, this.options.migrations()));
+    const plan = this.options.migrations();
+    for (let attempt = 1; ; attempt += 1) {
+      const pending = await this.pending(shardId, plan);
+      if (pending.length === 0) {
+        break;
+      }
+      try {
+        await this.runner(shardId).apply(pending);
+        break;
+      } catch (error) {
+        if (attempt >= ENSURE_CURRENT_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
     this.current.add(shardId);
   }
 

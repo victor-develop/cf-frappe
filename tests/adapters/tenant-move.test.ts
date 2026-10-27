@@ -6,6 +6,7 @@ import {
   documentStream,
   fenceD1Tenant,
   JobScheduleService,
+  liftD1TenantFence,
   jobScheduleDefinitionsStream,
   readD1TenantFence,
   SYSTEM_MANAGER_ROLE,
@@ -242,7 +243,7 @@ describe("moving a tenant between shards", () => {
     const docs = world.documents();
     await docs.create({ actor: acme, doctype: "Ticket", data: { subject: "a" } });
     const move = await world.operator.services.mover.start("acme", "east");
-    await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, fencedAt: world.time.clock.now() });
+    await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, attempt: 1, fencedAt: world.time.clock.now() });
 
     const aborted = await world.operator.services.mover.abort(move.moveId, "operator changed their mind");
 
@@ -415,8 +416,11 @@ describe("moving a tenant between shards", () => {
       await world.operator.services.mover.abort(move.moveId, "operator");
       return claimed;
     });
+    const completeMove = vi.spyOn(directory, "completeMove");
 
     await expect(world.operator.services.mover.advance(move.moveId)).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+    // It noticed right after fencing, not only when its flip failed.
+    expect(completeMove).not.toHaveBeenCalled();
 
     expect(await world.operator.services.mover.status(move.moveId)).toMatchObject({ phase: "aborted" });
     expect(await world.operator.services.directory.get("acme")).toMatchObject({ shardId: "home" });
@@ -483,7 +487,7 @@ describe("moving a tenant between shards", () => {
     const move = await world.operator.services.mover.start("acme", "east");
     await world.operator.services.mover.abort(move.moveId, "first");
     // What an invocation that fenced and then died, after the abort, leaves.
-    await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, fencedAt: world.time.clock.now() });
+    await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, attempt: 1, fencedAt: world.time.clock.now() });
     await expect(docs.create({ actor: acme, doctype: "Ticket", data: { subject: "b" } })).rejects.toMatchObject({
       code: "TENANT_MOVING"
     });
@@ -495,6 +499,173 @@ describe("moving a tenant between shards", () => {
 
     expect(await readD1TenantFence(world.home.database, "acme")).toBeNull();
     await docs.create({ actor: acme, doctype: "Ticket", data: { subject: "b" } });
+    world.close();
+  });
+
+  it("never lets a back-off lift the fence a later cutover attempt of the same move completes under", async () => {
+    const world = setup();
+    const docs = world.documents();
+    await docs.create({ actor: acme, doctype: "Ticket", data: { subject: "a" } });
+    const slow = world.runtime({ moves: { pageSize: 2, maxCutoverPages: 1, cutoverThreshold: 1_000, catchUpMarginMs: 60_000 } });
+    const fast = world.runtime({ moves: { pageSize: 100, cutoverThreshold: 1_000, catchUpMarginMs: 60_000 } });
+    const move = await fast.services.mover.start("acme", "east");
+    let current = move;
+    while (current.phase !== "cutover") {
+      current = await fast.services.mover.advance(move.moveId);
+    }
+    // Enough new events that the slow driver's one-page final pass runs out.
+    for (let index = 0; index < 4; index += 1) {
+      await docs.create({ actor: acme, doctype: "Ticket", data: { subject: `b${index}` } });
+    }
+
+    // The fast driver stops right before its flip.
+    let reachedFlip!: () => void;
+    const atFlip = new Promise<void>((resolve) => (reachedFlip = resolve));
+    let releaseFlip!: () => void;
+    const flipGate = new Promise<void>((resolve) => (releaseFlip = resolve));
+    const fastDirectory = fast.services.directory;
+    const completeMove = fastDirectory.completeMove.bind(fastDirectory);
+    vi.spyOn(fastDirectory, "completeMove").mockImplementation(async (record, state) => {
+      reachedFlip();
+      await flipGate;
+      return completeMove(record, state);
+    });
+    // The slow driver backs off (too many pages) and journals it; before it
+    // lifts its fence, the fast driver catches up, claims a new attempt, runs
+    // its final pass and reaches its flip.
+    let fastCutover: Promise<unknown> | undefined;
+    const slowDirectory = slow.services.directory;
+    const get = slowDirectory.get.bind(slowDirectory);
+    let paused = false;
+    vi.spyOn(slowDirectory, "get").mockImplementation(async (tenantId) => {
+      if (!paused) {
+        paused = true;
+        expect((await fast.services.mover.advance(move.moveId)).phase).toBe("cutover");
+        fastCutover = fast.services.mover.advance(move.moveId);
+        await atFlip;
+      }
+      return get(tenantId);
+    });
+
+    const backedOff = await slow.services.mover.advance(move.moveId);
+    expect(backedOff.state.cutovers.at(-1)).toMatchObject({ outcome: "too-many-pages" });
+
+    // A write routed to home by a stale cache, between the fast driver's count and its flip.
+    expect(() =>
+      world.home.query(
+        `INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
+         VALUES ('lost-1', 'acme', ?, 1, 'DocumentCreated', 'Ticket', 'LOST-1', 'a', ?, '{"kind":"DocumentCreated"}', '{}')`,
+        documentStream("acme", "Ticket", "LOST-1"),
+        world.time.clock.now()
+      )
+    ).toThrow(/CF_FRAPPE_TENANT_FENCED/);
+
+    releaseFlip();
+    expect(await fastCutover).toMatchObject({ phase: "completed" });
+    expect(await world.operator.services.directory.get("acme")).toMatchObject({ shardId: "east" });
+    expect(await readD1TenantFence(world.home.database, "acme")).toMatchObject({ moveId: move.moveId });
+    expect(tenantEvents(world.home, "acme")).toEqual(tenantEvents(world.east, "acme"));
+    world.close();
+  });
+
+  it("lets a later attempt take the fence over, and never an earlier one", async () => {
+    const db = createTestD1({ schema: wranglerMigratedSchema() });
+    const at = "2026-03-01T00:00:00.000Z";
+    await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", attempt: 3, fencedAt: at });
+
+    expect(await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", attempt: 2, fencedAt: at })).toMatchObject({ attempt: 3 });
+    expect(await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_2", attempt: 9, fencedAt: at })).toMatchObject({
+      moveId: "move_1",
+      attempt: 3
+    });
+    expect(await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", attempt: 5, fencedAt: at })).toMatchObject({ attempt: 5 });
+
+    await liftD1TenantFence(db.database, "acme", "move_1", 3);
+    expect(await readD1TenantFence(db.database, "acme")).toMatchObject({ attempt: 5 });
+    await liftD1TenantFence(db.database, "acme", "move_1", 5);
+    expect(await readD1TenantFence(db.database, "acme")).toBeNull();
+    db.close();
+  });
+
+  it("refuses a stale cutover driver whose claim was overtaken before it fenced, and leaves the live fence alone", async () => {
+    const world = setup();
+    await world.documents().create({ actor: acme, doctype: "Ticket", data: { subject: "a" } });
+    const move = await world.operator.services.mover.start("acme", "east");
+    let current = move;
+    while (current.phase !== "cutover") {
+      current = await world.operator.services.mover.advance(move.moveId);
+    }
+    const directory = world.operator.services.directory;
+    const saveMove = directory.saveMove.bind(directory);
+    // Right after this driver's claim, a later attempt of the same move is
+    // claimed and fences the source first.
+    vi.spyOn(directory, "saveMove").mockImplementationOnce(async (record, next) => {
+      const claimed = await saveMove(record, next);
+      const later = await saveMove(claimed, { phase: "catching-up", state: claimed.state });
+      const relaunched = await saveMove(later, { phase: "cutover", state: later.state });
+      const reclaimed = await saveMove(relaunched, { phase: "cutover", state: relaunched.state });
+      await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, attempt: reclaimed.revision, fencedAt: world.time.clock.now() });
+      return claimed;
+    });
+
+    await expect(world.operator.services.mover.advance(move.moveId)).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+
+    const live = await world.operator.services.mover.status(move.moveId);
+    expect(await readD1TenantFence(world.home.database, "acme")).toMatchObject({ moveId: move.moveId, attempt: live.revision });
+    world.close();
+  });
+
+  it("refuses to flip when its own fence is gone by the time the final pass is done", async () => {
+    const world = setup();
+    await world.documents().create({ actor: acme, doctype: "Ticket", data: { subject: "a" } });
+    const move = await world.operator.services.mover.start("acme", "east");
+    let current = move;
+    while (current.phase !== "cutover") {
+      current = await world.operator.services.mover.advance(move.moveId);
+    }
+    const directory = world.operator.services.directory;
+    const getMove = directory.getMove.bind(directory);
+    // Right after the cutover fenced and checked the journal, the fence row disappears.
+    let lifted = false;
+    vi.spyOn(directory, "getMove").mockImplementation(async (moveId) => {
+      const read = await getMove(moveId);
+      if (!lifted && (await readD1TenantFence(world.home.database, "acme")) !== null) {
+        lifted = true;
+        await liftD1TenantFence(world.home.database, "acme", move.moveId);
+      }
+      return read;
+    });
+
+    await expect(world.operator.services.mover.advance(move.moveId)).rejects.toMatchObject({ code: "DOCUMENT_CONFLICT" });
+
+    expect(await world.operator.services.directory.get("acme")).toMatchObject({ shardId: "home", moveId: move.moveId });
+    expect((await world.operator.services.mover.run(move.moveId)).phase).toBe("completed");
+    expect(await readD1TenantFence(world.home.database, "acme")).toMatchObject({ moveId: move.moveId });
+    world.close();
+  });
+
+  it("lifts the leftover fence of an attempt whose back-off committed but never lifted it, on the next catch-up pass", async () => {
+    const world = setup({ fenceWaitMs: 50 });
+    const docs = world.documents();
+    await docs.create({ actor: acme, doctype: "Ticket", data: { subject: "a" } });
+    const move = await world.operator.services.mover.start("acme", "east");
+    let current = move;
+    while (current.phase !== "cutover") {
+      current = await world.operator.services.mover.advance(move.moveId);
+    }
+    const directory = world.operator.services.directory;
+    // A claimed attempt that fenced, journaled its back-off, and died before its lift.
+    const claimed = await directory.saveMove(current, { phase: "cutover", state: current.state });
+    await fenceD1Tenant(world.home.database, { tenantId: "acme", moveId: move.moveId, attempt: claimed.revision, fencedAt: world.time.clock.now() });
+    await directory.saveMove(claimed, { phase: "catching-up", state: claimed.state });
+    await expect(docs.create({ actor: acme, doctype: "Ticket", data: { subject: "b" } })).rejects.toMatchObject({ code: "TENANT_MOVING" });
+
+    await world.operator.services.mover.advance(move.moveId);
+
+    expect(await readD1TenantFence(world.home.database, "acme")).toBeNull();
+    await docs.create({ actor: acme, doctype: "Ticket", data: { subject: "b" } });
+    expect((await world.operator.services.mover.run(move.moveId)).phase).toBe("completed");
+    expect(tenantEvents(world.home, "acme")).toEqual(tenantEvents(world.east, "acme"));
     world.close();
   });
 

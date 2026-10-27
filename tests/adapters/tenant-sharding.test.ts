@@ -161,7 +161,7 @@ describe("the tenant fence trigger", () => {
     const events = new D1EventStore(db.database);
     const base = { type: "Note", doctype: "Note", actorId: "a", occurredAt: "2026-03-01T00:00:00.000Z", payload: { kind: "Noted" }, metadata: {} };
     await events.append("acme:Note:1", 0, [{ ...base, id: "e1", tenantId: "acme", stream: "acme:Note:1", documentName: "1" } as never]);
-    await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", fencedAt: "2026-03-01T00:00:00.000Z" });
+    await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", attempt: 1, fencedAt: "2026-03-01T00:00:00.000Z" });
 
     const refused = await events
       .append("acme:Note:1", 1, [{ ...base, id: "e2", tenantId: "acme", stream: "acme:Note:1", documentName: "1" } as never])
@@ -179,7 +179,7 @@ describe("the tenant fence trigger", () => {
   it("rolls back the whole commit batch — projection rows included — when one event is fenced", async () => {
     const db = createTestD1({ schema: frameworkSchema() });
     const documents = new DocumentService({ registry, store: new D1DocumentStore(db.database), clock, ids: ids() });
-    await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", fencedAt: "2026-03-01T00:00:00.000Z" });
+    await fenceD1Tenant(db.database, { tenantId: "acme", moveId: "move_1", attempt: 1, fencedAt: "2026-03-01T00:00:00.000Z" });
 
     await expect(documents.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "x" } })).rejects.toSatisfy(
       isD1TenantFencedError
@@ -339,7 +339,7 @@ describe("fenced writes", () => {
         ...Object.values(row)
       );
     }
-    await fenceD1Tenant(w.home.database, { tenantId: "acme", moveId: "move_x", fencedAt: clock.now() });
+    await fenceD1Tenant(w.home.database, { tenantId: "acme", moveId: "move_x", attempt: 1, fencedAt: clock.now() });
     let flipped = false;
     setTimeout(() => {
       w.home.query("UPDATE cf_frappe_tenant_shards SET shard_id = 'east', epoch = 2 WHERE tenant_id = 'acme'");
@@ -362,7 +362,7 @@ describe("fenced writes", () => {
     const runtime = w.runtime({ fenceWaitMs: 100 });
     const documents = w.documents(runtime);
     await documents.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "A" } });
-    await fenceD1Tenant(w.home.database, { tenantId: "acme", moveId: "move_x", fencedAt: clock.now() });
+    await fenceD1Tenant(w.home.database, { tenantId: "acme", moveId: "move_x", attempt: 1, fencedAt: clock.now() });
 
     await expect(documents.create({ actor: agent("acme"), doctype: "Ticket", data: { subject: "B" } })).rejects.toMatchObject({
       code: "TENANT_MOVING",
@@ -514,6 +514,20 @@ describe("per-shard migrations", () => {
       ["b", "applied"],
       ["c", "applied"]
     ]);
+  });
+
+  it("brings a shard current when two isolates migrate it at once, without failing the second", async () => {
+    const db = createTestD1();
+    const plan = () => [
+      defineD1Migration({ id: "0100_one", statements: [{ name: "one", sql: "CREATE TABLE IF NOT EXISTS one (id TEXT PRIMARY KEY);" }] }),
+      defineD1Migration({ id: "0101_two", statements: [{ name: "two", sql: "ALTER TABLE one ADD COLUMN two TEXT;" }] })
+    ];
+    const isolate = () => new D1ShardMigrations({ shards: new Map([["a", db.database]]), migrations: plan });
+
+    await Promise.all([isolate().ensureCurrent("a"), isolate().ensureCurrent("a"), isolate().ensureCurrent("a")]);
+
+    const [status] = await isolate().status();
+    expect(status).toMatchObject({ applied: ["0100_one", "0101_two"], pending: [] });
   });
 
   it("names a shard whose applied migration no longer matches the plan", async () => {

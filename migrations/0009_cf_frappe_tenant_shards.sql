@@ -29,6 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_cf_frappe_tenant_moves_tenant
 CREATE TABLE IF NOT EXISTS cf_frappe_tenant_fences (
   tenant_id TEXT PRIMARY KEY,
   move_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
   fenced_at TEXT NOT NULL
 );
 

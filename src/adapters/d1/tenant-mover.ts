@@ -159,9 +159,15 @@ interface PassPage {
  *    target. Unequal counts — an event committed later than the margin assumed —
  *    or a final pass longer than `maxCutoverPages` go back to catching up (from
  *    the tenant's first event, after a count mismatch) and then lift the fence.
- *    The fence only ever comes off after a journal write this driver won, and
- *    only while the directory points at the source. The write stall is one
- *    invocation, not a pass over the tenant.
+ *    The write stall is one invocation, not a pass over the tenant.
+ *
+ * The fence belongs to one cutover attempt, not to the whole move: its row
+ * carries the journal revision the attempt's claim produced. A later attempt
+ * takes the row over and an earlier one never does, and a driver backing off
+ * deletes only the row of its own attempt — so a slow driver that already lost
+ * the move can never lift the fence a newer attempt is about to complete
+ * under. A move that is over (aborted) lifts whichever attempt holds it. Every
+ * lift also requires the directory to still point at the source.
  *
  * Why the passes cannot lose an event: an event committed before a pass started
  * is found by that pass's scan, and an event committed after it started was
@@ -368,6 +374,7 @@ export class D1TenantMover {
   }
 
   private async catchUp(move: TenantMove): Promise<TenantMove> {
+    await this.liftDeadAttemptFence(move);
     let state = move.state;
     for (let page = 0; page < this.pagesPerAdvance; page += 1) {
       const result = await this.copyPage(move, state.windowFrom, state.cursor, true);
@@ -397,9 +404,11 @@ export class D1TenantMover {
     // `run` next to the job — cannot both get past this: the loser stops here
     // with a conflict, before it has fenced, copied or lifted anything.
     const move = await this.options.directory.saveMove(read, { phase: "cutover", state: read.state });
+    const attempt = move.revision;
     const fence = await fenceD1Tenant(source.database, {
       tenantId: move.tenantId,
       moveId: move.moveId,
+      attempt,
       fencedAt: this.clock.now()
     });
     if (fence.moveId !== move.moveId) {
@@ -408,6 +417,15 @@ export class D1TenantMover {
         `Tenant '${move.tenantId}' is fenced on '${move.sourceShardId}' by another move, '${fence.moveId}'`,
         { status: 409 }
       );
+    }
+    // An abort, or a later claim, that landed between this claim and the
+    // fence: this attempt can never complete, so take its own fence off now
+    // (if a later attempt took the row over, that lift is a no-op) rather than
+    // leave the tenant on TENANT_MOVING until its journal write fails.
+    const afterFence = await this.options.directory.getMove<TenantMoveState>(move.moveId);
+    if (afterFence?.revision !== move.revision) {
+      await this.liftSourceFence(move, attempt);
+      throw conflict(`Tenant move '${move.moveId}' changed while this cutover was fencing`);
     }
     // From here the source is frozen for this tenant: the trigger refuses every
     // event insert for it, whichever isolate or cached route issued it.
@@ -426,6 +444,7 @@ export class D1TenantMover {
     if (!done) {
       return this.backOff(
         move,
+        attempt,
         this.newPass(
           { ...move.state, copied: move.state.copied + copied, cutovers: [...move.state.cutovers, { at, outcome: "too-many-pages", pages }] },
           move.state.nextWindowFrom
@@ -441,6 +460,7 @@ export class D1TenantMover {
       // the rows the target already has cost a read, not a write.
       return this.backOff(
         move,
+        attempt,
         this.newPass(
           {
             ...move.state,
@@ -456,6 +476,15 @@ export class D1TenantMover {
       copied: move.state.copied + copied,
       cutovers: [...move.state.cutovers, { at, outcome: "completed", sourceEvents, targetEvents, pages }]
     };
+    // Only flip under this attempt's own fence. Nothing but an abort or a
+    // later claim can have removed or taken it over, and either makes the
+    // journal write below fail too; checking first keeps the flip from
+    // depending on that alone.
+    const fenceNow = await readD1TenantFence(source.database, move.tenantId);
+    if (fenceNow?.moveId !== move.moveId || fenceNow.attempt !== attempt) {
+      await this.liftAfterLostRace(move);
+      throw conflict(`Tenant move '${move.moveId}' lost its cutover fence before the flip`);
+    }
     let assignment: TenantShardAssignment;
     try {
       assignment = await this.options.directory.completeMove(move, finalState);
@@ -469,11 +498,12 @@ export class D1TenantMover {
 
   /**
    * A cutover that cannot finish goes back to catching up, and only then
-   * unfences. Journal first: if the step is not this driver's to record —
-   * someone completed, aborted or re-claimed the move since — the fence is
-   * left to whoever now owns it.
+   * unfences — its own attempt's fence, never a later attempt's. Journal
+   * first: if the step is not this driver's to record — someone completed,
+   * aborted or re-claimed the move since — the fence is left to whoever now
+   * owns it.
    */
-  private async backOff(move: TenantMove, state: TenantMoveState): Promise<TenantMove> {
+  private async backOff(move: TenantMove, attempt: number, state: TenantMoveState): Promise<TenantMove> {
     let saved: TenantMove;
     try {
       saved = await this.options.directory.saveMove(move, { phase: "catching-up", state });
@@ -481,7 +511,7 @@ export class D1TenantMover {
       await this.liftAfterLostRace(move);
       throw error;
     }
-    await this.liftSourceFence(saved);
+    await this.liftSourceFence(saved, attempt);
     return saved;
   }
 
@@ -499,12 +529,29 @@ export class D1TenantMover {
   }
 
   /**
-   * Lifts this move's fence on its source, but never while the directory
-   * points the tenant anywhere other than the source, or names another move:
-   * a fence on a shard the tenant has left is what keeps stale-cached writes
-   * from landing there, and lifting it loses them.
+   * A fence of this move left on the source by an attempt that can no longer
+   * complete — one claimed at a revision older than the catching-up record in
+   * hand, whose back-off committed but whose lift never ran — keeps every write
+   * of the tenant on TENANT_MOVING through the catch-up passes. Lift it. Any
+   * attempt that could still complete claimed at a later revision than this
+   * record, and the lift is keyed by the dead attempt, so it cannot touch a
+   * live one's fence.
    */
-  private async liftSourceFence(move: TenantMove): Promise<void> {
+  private async liftDeadAttemptFence(move: TenantMove): Promise<void> {
+    const fence = await readD1TenantFence(this.shard(move.sourceShardId).database, move.tenantId);
+    if (fence !== null && fence.moveId === move.moveId && fence.attempt < move.revision) {
+      await this.liftSourceFence(move, fence.attempt);
+    }
+  }
+
+  /**
+   * Lifts this move's fence on its source — only `attempt`'s, when given — but
+   * never while the directory points the tenant anywhere other than the
+   * source, or names another move: a fence on a shard the tenant has left is
+   * what keeps stale-cached writes from landing there, and lifting it loses
+   * them.
+   */
+  private async liftSourceFence(move: TenantMove, attempt?: number): Promise<void> {
     const assignment = await this.options.directory.get(move.tenantId);
     if (
       assignment === null ||
@@ -513,7 +560,7 @@ export class D1TenantMover {
     ) {
       return;
     }
-    await liftD1TenantFence(this.shard(move.sourceShardId).database, move.tenantId, move.moveId);
+    await liftD1TenantFence(this.shard(move.sourceShardId).database, move.tenantId, move.moveId, attempt);
   }
 
   /**

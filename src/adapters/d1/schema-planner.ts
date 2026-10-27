@@ -419,6 +419,7 @@ export const D1_TENANT_SHARD_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] =
       `CREATE TABLE IF NOT EXISTS ${D1_TENANT_FENCES_TABLE} (` +
       "tenant_id TEXT PRIMARY KEY, " +
       "move_id TEXT NOT NULL, " +
+      "attempt INTEGER NOT NULL, " +
       "fenced_at TEXT NOT NULL" +
       ");"
   },
