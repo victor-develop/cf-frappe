@@ -63,7 +63,7 @@ import type { DocumentCommandExecutor } from "../application/document-service.js
 import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
 import {
-  D1SnapshotStore, D1DataPatchLog, D1DocumentStore, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
+  D1SnapshotStore, D1DataPatchLog, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
 import {
   cloudflareAccessAccountSyncActorResolver,
@@ -110,6 +110,14 @@ import {
   type ScheduledJobDefinition
 } from "./scheduled-jobs.js";
 import { toErrorResponse } from "../adapters/http/index.js";
+import {
+  d1DocumentStoreFor,
+  readProjectionStoreFor,
+  typedProjectionPlanFor,
+  typedProjectionServicesFor,
+  type CloudFrappeTypedProjectionOptions,
+  type CloudFrappeTypedProjectionServices
+} from "./typed-projections.js";
 
 export interface CloudFrappeEnv {
   readonly DB: D1Database;
@@ -156,6 +164,8 @@ export interface CloudFrappeRuntimeServices {
   readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
+  /** Rebuild and compare handles for typed projection tables, when configured. */
+  readonly typedProjections?: CloudFrappeTypedProjectionServices;
 }
 
 export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
@@ -274,6 +284,11 @@ export interface CloudFrappeWorkerOptions<
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
+  /**
+   * Typed per-DocType projection tables (issue #15). Off when omitted. Pass the
+   * same value to `createAggregateCoordinatorClass`.
+   */
+  readonly typedProjections?: CloudFrappeTypedProjectionOptions;
   readonly webFormServerSuppliedData?: (
     request: Request,
     webFormName: string,
@@ -293,6 +308,8 @@ export function createCloudFrappeWorker<
 >(options: CloudFrappeWorkerOptions<TEnv, TJobResources, TDataPatchResources>): ExportedHandler<TEnv, JobMessage> {
   const runtimeApps = new WeakMap<object, RuntimeApps>();
   const jobRuntimes = new WeakMap<object, JobRuntime<TJobResources>>();
+  // Resolved here so a bad setting fails the deploy's first load, not a request.
+  typedProjectionPlanFor(options.registry, options.typedProjections);
   const handler: ExportedHandler<TEnv, JobMessage> = {
     fetch(request, env) {
       if (options.realtime && isRealtimePath(new URL(request.url).pathname, options.realtime.route)) {
@@ -365,9 +382,15 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   if (cached) {
     return cached;
   }
+  const typedProjectionPlan = typedProjectionPlanFor(options.registry, options.typedProjections);
+  // The shared table, which internal DocTypes (automation runs, naming
+  // counters) always live in. `documentProjections` is what document reads go
+  // through: the same store unless a DocType has a typed table switched on.
   const projections = new D1ProjectionStore(env.DB);
+  const documentProjections = readProjectionStoreFor(env.DB, projections, typedProjectionPlan);
+  const typedProjections = typedProjectionServicesFor(env.DB, projections, typedProjectionPlan, options.typedProjections);
   const events = new D1EventStore(env.DB);
-  const automationRunStore = new D1DocumentStore(env.DB);
+  const automationRunStore = d1DocumentStoreFor(env.DB, typedProjectionPlan);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -408,7 +431,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const naming = new NamingService({
     registry: options.registry,
     events,
-    store: new D1DocumentStore(env.DB),
+    store: d1DocumentStoreFor(env.DB, typedProjectionPlan),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNamingDocTypeResolver: preNamingDocType
   });
@@ -452,7 +475,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     : undefined;
   const restrictedQueries = new QueryService({
     registry: options.registry,
-    projections,
+    projections: documentProjections,
     doctypeResolver: effectiveDocType,
     userPermissions,
     documentShares
@@ -579,7 +602,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     roles,
     savedReports,
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
-    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
+    ...(typedProjections === undefined ? {} : { typedProjections })
   };
   const files = options.files
     ? new FileService({

@@ -48,7 +48,12 @@ import type {
   UpdateDocumentCommand
 } from "../application/document-service.js";
 import type { ExecuteDomainCommand } from "../application/document-service.js";
-import { D1DocumentStore, D1EventStore } from "../adapters/d1/index.js";
+import { D1EventStore } from "../adapters/d1/index.js";
+import {
+  d1DocumentStoreFor,
+  typedProjectionPlanFor,
+  type CloudFrappeTypedProjectionOptions
+} from "./typed-projections.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -113,6 +118,12 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
     readonly targets?: readonly DocumentDeliveryOutboxTarget[];
   };
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+  /**
+   * Typed per-DocType projection tables (issue #15): which ones every commit
+   * also writes, and how. Off when omitted. Pass the same value to
+   * `createCloudFrappeWorker`, which reads them.
+   */
+  readonly typedProjections?: CloudFrappeTypedProjectionOptions;
 }
 
 export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> = new (
@@ -126,6 +137,9 @@ export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = Aggr
 export function createAggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv>(
   options: AggregateCoordinatorOptions<Env>
 ): AggregateCoordinatorClass<Env> {
+  // Resolved once, at class creation, so a bad setting fails the deploy's first
+  // load instead of a write.
+  const typedProjectionPlan = typedProjectionPlanFor(options.registry, options.typedProjections);
   return class CloudFrappeAggregateCoordinator extends DurableObject<Env> {
     private readonly service: DocumentService;
 
@@ -155,7 +169,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       const naming = new NamingService({
         registry: options.registry,
         events,
-        store: new D1DocumentStore(env.DB),
+        store: d1DocumentStoreFor(env.DB, typedProjectionPlan),
         preNamingDocTypeResolver: preNamingDocType
       });
       const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
@@ -223,7 +237,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           });
       this.service = new DocumentService({
         registry: options.registry,
-        store: new D1DocumentStore(env.DB),
+        store: d1DocumentStoreFor(env.DB, typedProjectionPlan),
         // In-memory is enough here because losing a snapshot costs a cold fold
         // and nothing else — issue #17's rule is that a snapshot may always be
         // ignored. That is why this is one line rather than a table, a migration
