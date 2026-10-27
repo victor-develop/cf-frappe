@@ -37,17 +37,49 @@ export interface D1ProjectionListQuery {
  */
 export const D1_PROJECTION_TEXT_PATTERN_MAX_BYTES = 4096;
 
-const D1_PROJECTION_COLUMNS =
-  "tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at";
+/**
+ * The physical table a list query is compiled against.
+ *
+ * The compiler's rules — the null-safe negation, the GLOB folding, the ordering
+ * fallbacks — are about what a predicate *means*, and must be identical whichever
+ * table answers it. Only two things differ between the shared `data_json` table
+ * and a typed per-DocType table (issue #15): whether rows must be pinned to a
+ * DocType, and how a field is read. Both live here, so a typed table reuses this
+ * compiler instead of growing a second one that could drift from it.
+ */
+export interface D1ProjectionTableShape {
+  readonly table: string;
+  /** The select list. A shape without a `doctype` column leaves it for the caller to attach. */
+  readonly columns: string;
+  /** True for the shared table, whose rows must be pinned with `doctype = ?`. */
+  readonly scopedByDoctype: boolean;
+  /**
+   * SQL reading a DocType field. Must be value-identical to {@link d1JsonExtract}
+   * for every row — a typed table returns its generated column, which is that
+   * same expression evaluated at write.
+   */
+  readonly fieldExpression: (field: string) => string;
+}
+
+/** The shared `cf_frappe_documents` table: every field read from `data_json`. */
+export const D1_SHARED_PROJECTION_SHAPE: D1ProjectionTableShape = Object.freeze({
+  table: D1_DOCUMENTS_TABLE,
+  columns: "tenant_id, doctype, name, version, docstatus, data_json, created_at, updated_at",
+  scopedByDoctype: true,
+  fieldExpression: d1JsonExtract
+});
 
 /**
  * SQL for a projection list page. The `LIMIT`/`OFFSET` placeholders are bound
  * after {@link D1ProjectionListQuery.params}.
  */
-export function d1ProjectionListSql(query: D1ProjectionListQuery): string {
+export function d1ProjectionListSql(
+  query: D1ProjectionListQuery,
+  shape: D1ProjectionTableShape = D1_SHARED_PROJECTION_SHAPE
+): string {
   return (
-    `SELECT ${D1_PROJECTION_COLUMNS}\n` +
-    `         FROM ${D1_DOCUMENTS_TABLE}\n` +
+    `SELECT ${shape.columns}\n` +
+    `         FROM ${shape.table}\n` +
     `         WHERE ${query.where}\n` +
     `         ORDER BY ${query.orderBy}\n` +
     `         LIMIT ? OFFSET ?`
@@ -55,20 +87,30 @@ export function d1ProjectionListSql(query: D1ProjectionListQuery): string {
 }
 
 /** SQL for the total that accompanies a projection list page. */
-export function d1ProjectionCountSql(query: D1ProjectionListQuery): string {
-  return `SELECT COUNT(*) AS total FROM ${D1_DOCUMENTS_TABLE} WHERE ${query.where}`;
+export function d1ProjectionCountSql(
+  query: D1ProjectionListQuery,
+  shape: D1ProjectionTableShape = D1_SHARED_PROJECTION_SHAPE
+): string {
+  return `SELECT COUNT(*) AS total FROM ${shape.table} WHERE ${query.where}`;
 }
 
-export function d1ProjectionListQuery(query: ListDocumentsQuery): D1ProjectionListQuery {
+export function d1ProjectionListQuery(
+  query: ListDocumentsQuery,
+  shape: D1ProjectionTableShape = D1_SHARED_PROJECTION_SHAPE
+): D1ProjectionListQuery {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
-  const filtered = predicateWhere(query.predicate);
+  const filtered = predicateWhere(query.predicate, shape);
   return {
     limit,
     offset,
-    where: ["tenant_id = ?", "doctype = ?", ...filtered.conditions].join(" AND "),
-    params: [query.tenantId, query.doctype, ...filtered.params],
-    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc")
+    where: [
+      "tenant_id = ?",
+      ...(shape.scopedByDoctype ? ["doctype = ?"] : []),
+      ...filtered.conditions
+    ].join(" AND "),
+    params: [query.tenantId, ...(shape.scopedByDoctype ? [query.doctype] : []), ...filtered.params],
+    orderBy: listOrderExpression(query.orderBy ?? "updatedAt", query.order ?? "desc", shape)
   };
 }
 
@@ -89,20 +131,23 @@ interface PredicateWhere {
   readonly complete: boolean;
 }
 
-function predicateWhere(expression: PredicateExpression | undefined): PredicateWhere {
+function predicateWhere(
+  expression: PredicateExpression | undefined,
+  shape: D1ProjectionTableShape
+): PredicateWhere {
   return expression === undefined
     ? { conditions: [], params: [], complete: true }
-    : predicateExpressionWhere(expression);
+    : predicateExpressionWhere(expression, shape);
 }
 
-function predicateExpressionWhere(expression: PredicateExpression): PredicateWhere {
+function predicateExpressionWhere(expression: PredicateExpression, shape: D1ProjectionTableShape): PredicateWhere {
   if (expression.kind === "group") {
-    return predicateGroupWhere(expression);
+    return predicateGroupWhere(expression, shape);
   }
   if (expression.kind === "not") {
-    return predicateNotWhere(expression.predicate);
+    return predicateNotWhere(expression.predicate, shape);
   }
-  return predicateComparisonWhere(expression);
+  return predicateComparisonWhere(expression, shape);
 }
 
 /**
@@ -118,8 +163,8 @@ function predicateExpressionWhere(expression: PredicateExpression): PredicateWhe
  * a negation is rarely selective enough for an index to help anyway, and paying
  * a scan beats pulling every candidate row into the Worker.
  */
-function predicateNotWhere(inner: PredicateExpression): PredicateWhere {
-  const compiled = predicateExpressionWhere(inner);
+function predicateNotWhere(inner: PredicateExpression, shape: D1ProjectionTableShape): PredicateWhere {
+  const compiled = predicateExpressionWhere(inner, shape);
   assertPushedDownExactly(compiled, "a negated predicate");
   return {
     conditions: [`(${compiled.conditions.join(" AND ")}) IS NOT 1`],
@@ -128,8 +173,11 @@ function predicateNotWhere(inner: PredicateExpression): PredicateWhere {
   };
 }
 
-function predicateGroupWhere(expression: Extract<PredicateExpression, { readonly kind: "group" }>): PredicateWhere {
-  const children = expression.predicates.map(predicateExpressionWhere);
+function predicateGroupWhere(
+  expression: Extract<PredicateExpression, { readonly kind: "group" }>,
+  shape: D1ProjectionTableShape
+): PredicateWhere {
+  const children = expression.predicates.map((predicate) => predicateExpressionWhere(predicate, shape));
   if (children.length === 0) {
     // Validation rejects an empty group ("Predicate group must include at least
     // one predicate"), but this compiler is exported and takes a raw query, and
@@ -168,10 +216,11 @@ function assertPushedDownExactly(compiled: PredicateWhere, context: string): voi
 }
 
 function predicateComparisonWhere(
-  predicate: Extract<PredicateExpression, { readonly kind: "compare" }>
+  predicate: Extract<PredicateExpression, { readonly kind: "compare" }>,
+  shape: D1ProjectionTableShape
 ): PredicateWhere {
   const field = predicateField(predicate.left);
-  const expression = listFilterExpression(field);
+  const expression = listFilterExpression(field, shape);
   const value = predicateLiteral(predicate.right);
   const operator = predicate.operator;
   switch (operator) {
@@ -397,14 +446,21 @@ function predicateLiteral(operand: PredicateOperand): JsonValue {
   return operand.value;
 }
 
-function listFilterExpression(field: string): string {
+function listFilterExpression(field: string, shape: D1ProjectionTableShape): string {
   const systemExpression = systemFilterExpression(field);
   if (systemExpression) {
     return systemExpression;
   }
-  return d1JsonExtract(field);
+  return shape.fieldExpression(field);
 }
 
+/**
+ * `eq null` means "present and JSON null", which a missing key is not. Neither
+ * `json_extract` nor a promoted column can tell those apart — both are SQL NULL
+ * — so this always asks `data_json` for the JSON type, promoted field or not.
+ * A typed table keeps the whole document in `data_json` for exactly this kind of
+ * question; it costs one parse per candidate row on a rare operator.
+ */
 function nullEqualityExpression(field: string, expression: string): string {
   return systemFilterExpression(field) === undefined
     ? `${d1JsonType(field)} = 'null'`
@@ -478,7 +534,11 @@ function sqliteJsonValue(value: JsonPrimitive): JsonPrimitive {
   return typeof value === "boolean" ? Number(value) : value;
 }
 
-function listOrderExpression(orderBy: string, order: ListOrderDirection): string {
+function listOrderExpression(
+  orderBy: string,
+  order: ListOrderDirection,
+  shape: D1ProjectionTableShape
+): string {
   const direction = order === "asc" ? "ASC" : "DESC";
   const systemExpression = systemOrderExpression(orderBy);
   if (systemExpression) {
@@ -494,7 +554,7 @@ function listOrderExpression(orderBy: string, order: ListOrderDirection): string
         : "updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC";
     return `${systemExpression} COLLATE BINARY ${direction}, ${fallbacks}`;
   }
-  const expression = d1JsonExtract(orderBy);
+  const expression = shape.fieldExpression(orderBy);
   return `${expression} IS NULL ASC, ${expression} COLLATE BINARY ${direction}, updated_at COLLATE BINARY DESC, name COLLATE BINARY ASC`;
 }
 
