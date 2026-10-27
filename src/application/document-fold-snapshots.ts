@@ -38,15 +38,23 @@ export class DocumentFoldSnapshots {
    */
   async resume(stream: StreamName): Promise<DocumentSnapshot | null> {
     const base = await this.read(stream);
-    if (base === null) {
-      return foldDocument(await this.store.readStream(stream));
+    if (base !== null) {
+      try {
+        // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the
+        // last event it already folded, `+ 2` skips one.
+        // Copied for the same reason as in `record`: the store may hand back
+        // the object it keeps, and the folded result reaches callers.
+        return foldDocumentFrom(
+          structuredClone(base.state),
+          await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 })
+        );
+      } catch {
+        // A stored state this fold cannot consume must degrade to a cold fold.
+        // A snapshot that can fail the caller is not ignorable, which is the one
+        // thing the design forbids.
+      }
     }
-    // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the last
-    // event it already folded, `+ 2` skips one.
-    return foldDocumentFrom(
-      base.state,
-      await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 })
-    );
+    return foldDocument(await this.store.readStream(stream));
   }
 
   /**
@@ -80,7 +88,13 @@ export class DocumentFoldSnapshots {
         foldName: DOCUMENT_FOLD_NAME,
         foldVersion: DOCUMENT_FOLD_VERSION,
         uptoSequence,
-        state: commit.snapshot
+        // A deep copy, because a store is allowed to keep what it is handed
+        // rather than copying it, and the after-commit hooks are handed this
+        // same `commit.snapshot` next. `data` is JSON and nests (`json` and
+        // `table` fields), so a shallow copy would let a hook that edits a
+        // nested value rewrite what later writes resume from. Unlike an
+        // unbounded fold, a document's state is bounded, so the copy is cheap.
+        state: structuredClone(commit.snapshot)
       });
     } catch {
       // Deliberately ignored — see the doc comment.

@@ -8,6 +8,7 @@ import { CustomFieldService } from "../application/custom-field-service.js";
 import { DocumentShareService } from "../application/document-share-service.js";
 import { DocumentService } from "../application/document-service.js";
 import { InMemorySnapshotStore } from "../adapters/in-memory/snapshot-store.js";
+import { D1SnapshotStore } from "../adapters/d1/snapshot-store.js";
 import { bulkDocumentFailure, bulkFailureDocumentName } from "../application/document-bulk-policy.js";
 import { FieldPropertyService } from "../application/field-property-service.js";
 import { NotificationRuleService } from "../application/notification-rule-service.js";
@@ -176,6 +177,11 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         : new UserNotificationService({
             events,
             notificationRules,
+            // D1-backed, unlike the document snapshots above. This coordinator
+            // is addressed per document, so the notification fold for one user
+            // is written from many different instances — an in-memory snapshot
+            // would miss nearly every time.
+            snapshots: new D1SnapshotStore(env.DB),
             ...(options.clock ? { clock: options.clock } : {})
       });
       const emailNotifications = options.emailNotifications?.(env, { events, notificationRules });

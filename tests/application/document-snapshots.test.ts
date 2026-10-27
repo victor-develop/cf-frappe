@@ -315,16 +315,60 @@ describe("document fold snapshots", () => {
     await expect(snapshots.read(key("d"))).resolves.toMatchObject({ state: { name: "d" } });
   });
 
-  it("does not hand out state a caller can mutate", async () => {
-    // Two readers fold onto the same stored state; if one could mutate it, the
-    // snapshot would stop agreeing with the events it claims to summarise.
-    const snapshots = new InMemorySnapshotStore();
-    const key = { stream: "acme:Note:One" as StreamName, foldName: "document", foldVersion: 1 };
-    await snapshots.write({ ...key, uptoSequence: 1, state: { data: { title: "original" } } });
+  it("does not let one read's state leak into a later one", async () => {
+    // The contract used to sit on the store, which deep-copied on both sides.
+    // That was free for a document snapshot and ruinous for an unbounded fold —
+    // it made a 600-notification delivery 1.9x slower than having no snapshot at
+    // all — so it moved to the writer: hand the store a fresh object, and the
+    // store keeps what it is handed.
+    //
+    // Asserted end to end rather than on the store, because that is where it
+    // matters: two folds resuming from one snapshot must not see each other's
+    // edits.
+    const store = new InMemoryDocumentStore();
+    const documents = service(store, new InMemorySnapshotStore());
+    const created = await documents.create({ actor: ACTOR, doctype: "Note", data: { title: "t0", body: "b" } });
 
-    const first = await snapshots.read<{ data: { title: string } }>(key);
-    first!.state.data.title = "mutated";
+    const first = await documents.update({ actor: ACTOR, doctype: "Note", name: created.name, patch: { title: "t1" } });
+    (first.data as { title: string }).title = "mutated by the caller";
+    const second = await documents.update({ actor: ACTOR, doctype: "Note", name: created.name, patch: { body: "b2" } });
 
-    await expect(snapshots.read(key)).resolves.toMatchObject({ state: { data: { title: "original" } } });
+    expect(second.data).toEqual({ title: "t1", body: "b2" });
+  });
+
+  it("does not let an after-commit hook's edit to a nested value leak into the snapshot", async () => {
+    // `DocumentData` is JSON, so a `json` or `table` field nests. The snapshot is
+    // recorded before the after-commit hooks run and they are handed the same
+    // `commit.snapshot`, so copying only one level of `data` would let a hook
+    // that mutates a nested value rewrite what every later write resumes from.
+    const Settings = defineDocType({
+      name: "Settings",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "config", type: "json" }
+      ]
+    });
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Settings] }),
+      store: new InMemoryDocumentStore(),
+      clock: fixedClock(NOW),
+      ids: deterministicIds(Array.from({ length: 100 }, (_unused, index) => `evt_${index}`)),
+      snapshots: new InMemorySnapshotStore(),
+      afterCommit: ({ snapshot }) => {
+        const config = snapshot?.data.config as { limits: { max: number } } | undefined;
+        if (config !== undefined) {
+          config.limits.max += 100;
+        }
+      }
+    });
+    const created = await documents.create({
+      actor: ACTOR,
+      doctype: "Settings",
+      data: { title: "t0", config: { limits: { max: 1 } } }
+    });
+    await documents.update({ actor: ACTOR, doctype: "Settings", name: created.name, patch: { title: "t1" } });
+    const latest = await documents.update({ actor: ACTOR, doctype: "Settings", name: created.name, patch: { title: "t2" } });
+
+    expect(latest.data).toEqual({ title: "t2", config: { limits: { max: 1 } } });
   });
 });
