@@ -252,6 +252,8 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
+**Analytical reads (optional, off by default).** A report or dashboard can declare `queryPath: "analytical"` so its whole-DocType scan reads an exported copy of the projection — Cloudflare Pipelines into R2, queried with R2 SQL, or a second D1 database — instead of the D1 database serving the Desk. Nothing changes until the Worker gets an `analytics` option and the per-tenant export job is scheduled; until then every report runs on the projection whatever it declares. Results carry `analytics.completeThrough`, admins see per-DocType lag at `GET /api/analytics/exports`, and an analytics outage fails only analytical reads (503) — never lists, forms or writes. Setup, guarantees and limits: [Analytical Query Path](docs/analytics.md).
+
 ### Development Setup
 
 Work on the framework:
@@ -298,6 +300,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
+- [Analytical Query Path](docs/analytics.md): moving report and dashboard scans off D1 onto an exported copy (R2 SQL or a second D1), how fresh it is, and why both paths give the same answer.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
@@ -548,6 +551,8 @@ npm run deploy
 
 委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
+**分析查询（可选，默认关闭）。** 报表或仪表板可以声明 `queryPath: "analytical"`，让整个 DocType 的扫描改读投影的导出副本 —— 经 Cloudflare Pipelines 写入 R2、用 R2 SQL 查询，或者放在第二个 D1 数据库 —— 而不是服务 Desk 的那个 D1。在 Worker 配上 `analytics` 选项、并按租户排好导出 job 之前，什么都不会变：无论声明了什么，所有报表都照旧跑在投影上。分析结果带 `analytics.completeThrough`，管理员可以在 `GET /api/analytics/exports` 看到每个 DocType 的延迟；分析存储出故障时只有分析读取会失败（503），列表、表单和写入都不受影响。配置方法、保证与限制见 [Analytical Query Path](docs/analytics.md)。
+
 ### 开发环境
 
 开发框架本身：
@@ -594,6 +599,7 @@ See [English TODO](#todo).
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
 - [Document Delivery Outbox](docs/delivery-outbox.md)：outbox 的工作集如何随投递历史增长而保持有界，以及单记录读依赖的那条索引。
+- [Analytical Query Path](docs/analytics.md)：把报表和仪表板的扫描从 D1 挪到导出副本（R2 SQL 或第二个 D1）、副本有多新，以及为什么两条路径的结果一致。
 - [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。
