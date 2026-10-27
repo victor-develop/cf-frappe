@@ -335,4 +335,40 @@ describe("document fold snapshots", () => {
 
     expect(second.data).toEqual({ title: "t1", body: "b2" });
   });
+
+  it("does not let an after-commit hook's edit to a nested value leak into the snapshot", async () => {
+    // `DocumentData` is JSON, so a `json` or `table` field nests. The snapshot is
+    // recorded before the after-commit hooks run and they are handed the same
+    // `commit.snapshot`, so copying only one level of `data` would let a hook
+    // that mutates a nested value rewrite what every later write resumes from.
+    const Settings = defineDocType({
+      name: "Settings",
+      fields: [
+        { name: "title", type: "text" },
+        { name: "config", type: "json" }
+      ]
+    });
+    const documents = new DocumentService({
+      registry: createRegistry({ doctypes: [Settings] }),
+      store: new InMemoryDocumentStore(),
+      clock: fixedClock(NOW),
+      ids: deterministicIds(Array.from({ length: 100 }, (_unused, index) => `evt_${index}`)),
+      snapshots: new InMemorySnapshotStore(),
+      afterCommit: ({ snapshot }) => {
+        const config = snapshot?.data.config as { limits: { max: number } } | undefined;
+        if (config !== undefined) {
+          config.limits.max += 100;
+        }
+      }
+    });
+    const created = await documents.create({
+      actor: ACTOR,
+      doctype: "Settings",
+      data: { title: "t0", config: { limits: { max: 1 } } }
+    });
+    await documents.update({ actor: ACTOR, doctype: "Settings", name: created.name, patch: { title: "t1" } });
+    const latest = await documents.update({ actor: ACTOR, doctype: "Settings", name: created.name, patch: { title: "t2" } });
+
+    expect(latest.data).toEqual({ title: "t2", config: { limits: { max: 1 } } });
+  });
 });

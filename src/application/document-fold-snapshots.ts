@@ -42,8 +42,10 @@ export class DocumentFoldSnapshots {
       try {
         // Inclusive lower bound of one past the snapshot: `+ 0` reapplies the
         // last event it already folded, `+ 2` skips one.
+        // Copied for the same reason as in `record`: the store may hand back
+        // the object it keeps, and the folded result reaches callers.
         return foldDocumentFrom(
-          base.state,
+          structuredClone(base.state),
           await this.store.readStream(stream, { minSequence: base.uptoSequence + 1 })
         );
       } catch {
@@ -86,11 +88,13 @@ export class DocumentFoldSnapshots {
         foldName: DOCUMENT_FOLD_NAME,
         foldVersion: DOCUMENT_FOLD_VERSION,
         uptoSequence,
-        // A fresh object, because a store is now allowed to keep what it is
-        // handed rather than copying it — deep-copying an unbounded fold's state
-        // cost more than the snapshot saved. A `DocumentSnapshot` is flat, so
-        // one level plus its `data` is the whole of it.
-        state: { ...commit.snapshot, data: { ...commit.snapshot.data } }
+        // A deep copy, because a store is allowed to keep what it is handed
+        // rather than copying it, and the after-commit hooks are handed this
+        // same `commit.snapshot` next. `data` is JSON and nests (`json` and
+        // `table` fields), so a shallow copy would let a hook that edits a
+        // nested value rewrite what later writes resume from. Unlike an
+        // unbounded fold, a document's state is bounded, so the copy is cheap.
+        state: structuredClone(commit.snapshot)
       });
     } catch {
       // Deliberately ignored — see the doc comment.

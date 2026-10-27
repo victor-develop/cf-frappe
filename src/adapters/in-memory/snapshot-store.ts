@@ -22,10 +22,12 @@ import type { FoldSnapshot, FoldSnapshotKey, SnapshotStore } from "../../ports/s
  * snapshot at all, because the state itself is O(history) and got deep-copied
  * twice per write. Removing it made the same case 8x faster than the baseline.
  *
- * The isolation now comes from `StreamFold.codec`, which sits between the fold
- * and any store: `encode` produces a fresh plain structure and `decode` rebuilds
- * the state on every read. The contract that replaces the clone is therefore on
- * `encode` — it must not hand over anything its caller goes on to mutate.
+ * The isolation now comes from the writer. For a stream fold that is
+ * `StreamFold.codec`: `encode` produces a fresh plain structure and `decode`
+ * rebuilds the state on every read. A document's state is bounded, so
+ * `DocumentFoldSnapshots` simply deep-copies on both sides. Either way the
+ * contract that replaces the clone is on the writer — it must not hand over
+ * anything its caller goes on to mutate.
  */
 export class InMemorySnapshotStore implements SnapshotStore {
   private readonly snapshots = new Map<string, FoldSnapshot>();
