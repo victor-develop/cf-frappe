@@ -5,7 +5,6 @@ import {
   D1EventStore,
   D1ProjectionStore,
   defineDocType,
-  DocumentDeliveryOutboxService,
   DocumentService,
   documentDeliveryOutboxStream,
   documentStream,
@@ -15,6 +14,7 @@ import {
   ProjectionBackfillService,
   ProjectionDeliveryConsumer,
   ProjectionOutboxHandoff,
+  projectionDeliveryCursorStream,
   QueryService,
   type Actor,
   type DocumentSnapshot,
@@ -60,7 +60,6 @@ interface Layout {
   readonly reads: ConsistentProjectionStore;
   readonly projections: D1ProjectionStore;
   readonly queries: QueryService;
-  readonly outbox: DocumentDeliveryOutboxService;
   readonly events: D1EventStore;
   close(): void;
 }
@@ -93,15 +92,9 @@ function split(options: {
     clock: fixedClock(options.clock ?? NOW),
     ids: sequentialIds()
   });
-  const outbox = new DocumentDeliveryOutboxService({
-    events,
-    channel: PROJECTION_OUTBOX_CHANNEL,
-    claimLeaseSeconds: 60,
-    clock: fixedClock(options.clock ?? NOW),
-    ids: sequentialIds("o")
-  });
   const consumer = new ProjectionDeliveryConsumer({
-    outbox,
+    events,
+    ids: sequentialIds("c"),
     projections: options.projections?.(projections) ?? projections,
     clock: fixedClock(options.clock ?? NOW),
     ...(options.lag ? { lag: options.lag } : {}),
@@ -120,7 +113,6 @@ function split(options: {
     reads,
     projections,
     events,
-    outbox,
     queries: new QueryService({ registry, projections: reads }),
     close() {
       primary.close();
@@ -221,20 +213,20 @@ describe("projections in a separate D1 (issue #13)", () => {
 
     const drained = await layout.consumer.drain({ tenantId: "acme" });
 
-    expect(drained).toMatchObject({ claimed: 1, delivered: 1, failed: 0 });
+    expect(drained).toMatchObject({ delivered: 1, skipped: 0, cursor: 1, contended: false });
     expect(documentRows(layout.primary)).toEqual([]);
     await expect(layout.queries.listDocuments(agent, "Ticket")).resolves.toMatchObject({
       total: 1,
       data: [{ name: "TICK-0001", data: { subject: "Printer" } }]
     });
     await expect(layout.consumer.lag("acme")).resolves.toMatchObject({ inFlight: 0, ageSeconds: 0 });
-    // Delivered in one completion: one Delivered event per record, no per-record folds.
-    expect(projectionOutboxEvents(layout.primary).map((row) => row.type)).toEqual([
-      "DocumentDeliveryOutboxEnqueued",
-      "DocumentDeliveryOutboxClaimed",
-      "DocumentDeliveryOutboxCheckpointed",
-      "DocumentDeliveryOutboxDelivered"
-    ]);
+    // The consumer writes nothing to the channel — one event per write, ever —
+    // and one cursor event per round to a stream only consumers append to.
+    expect(projectionOutboxEvents(layout.primary).map((row) => row.type)).toEqual(["DocumentDeliveryOutboxEnqueued"]);
+    expect(layout.primary.query(
+      "SELECT sequence, type FROM cf_frappe_events WHERE stream = ?",
+      projectionDeliveryCursorStream("acme")
+    )).toEqual([{ sequence: 1, type: "ProjectionDeliveryCursorAdvanced" }]);
     layout.close();
   });
 
@@ -270,6 +262,30 @@ describe("projections in a separate D1 (issue #13)", () => {
     expect(documentRows(layout.projectionDb)).toEqual(documentRows(reference.primary));
     layout.close();
     reference.primary.close();
+  });
+
+  it("backfills page by page with a keyset query, never listing the whole doctype", async () => {
+    const layout = split();
+    for (const subject of ["A", "B", "C", "D", "E"]) {
+      await layout.documents.create({ actor: agent, doctype: "Ticket", data: { subject } });
+    }
+    const backfill = new ProjectionBackfillService({ events: layout.events, streams: layout.events, target: layout.projections });
+    const listed = () => layout.primary.statements.filter((entry) => entry.sql.includes("SELECT DISTINCT stream"));
+
+    const first = await backfill.advance({ tenantId: "acme", doctype: "Ticket", batchSize: 2 });
+    const second = await backfill.advance({ tenantId: "acme", doctype: "Ticket", batchSize: 2, after: first.cursor! });
+    const third = await backfill.advance({ tenantId: "acme", doctype: "Ticket", batchSize: 2, after: second.cursor! });
+
+    expect([first, second, third].map((result) => [result.applied, result.more])).toEqual([[2, true], [2, true], [1, false]]);
+    expect(third.cursor).toBe(documentStream("acme", "Ticket", "TICK-0005"));
+    // Each page asks for one more than the batch, after the previous cursor.
+    expect(listed().map((entry) => entry.params)).toEqual([
+      ["acme", "Ticket", 3],
+      ["acme", "Ticket", first.cursor, 3],
+      ["acme", "Ticket", second.cursor, 3]
+    ]);
+    expect(documentRows(layout.projectionDb).filter((row) => row.doctype === "Ticket")).toHaveLength(5);
+    layout.close();
   });
 
   it("keeps the newest row whatever order deliveries and backfills land in", async () => {
@@ -337,10 +353,8 @@ describe("projections in a separate D1 (issue #13)", () => {
     layout.close();
   });
 
-  it("fails a claim whose apply throws, then delivers it on the retry", async () => {
+  it("does not advance past a round whose apply throws, and delivers it on the next drain", async () => {
     let failures = 1;
-    const primary = createTestD1({ schema: frameworkSchema() });
-    const projectionDb = createTestD1({ schema: frameworkSchema() });
     const flaky = (store: D1ProjectionStore): MonotonicProjectionWriter => ({
       async saveNewest(snapshots) {
         if (failures > 0) {
@@ -350,66 +364,106 @@ describe("projections in a separate D1 (issue #13)", () => {
         await store.saveNewest(snapshots);
       }
     });
-    const first = split({ primary, projectionDb, projections: flaky });
-    await first.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Printer" } });
-
-    await expect(first.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 0, failed: 1 });
-    await expect(first.consumer.lag("acme")).resolves.toMatchObject({ inFlight: 1, failed: 1, maxAttempts: 1 });
-    // Not due yet: the retry waits out its backoff.
-    await expect(first.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ claimed: 0 });
-
-    const later = split({ primary, projectionDb, projections: flaky, clock: LATER });
-    await expect(later.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 1 });
-    expect(documentRows(projectionDb).map((row) => row.name)).toContain("TICK-0001");
-    first.close();
-  });
-
-  it("claims a record again once a dead consumer's lease runs out", async () => {
-    const primary = createTestD1({ schema: frameworkSchema() });
-    const projectionDb = createTestD1({ schema: frameworkSchema() });
-    const layout = split({ primary, projectionDb });
+    const layout = split({ projections: flaky });
     await layout.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Printer" } });
-    // A consumer claims and dies before applying.
-    await layout.outbox.claimPending({ tenantId: "acme", now: NOW });
-    await expect(layout.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ claimed: 0 });
 
-    const later = split({ primary, projectionDb, clock: LATER });
-    await expect(later.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ claimed: 1, delivered: 1 });
+    await expect(layout.consumer.drain({ tenantId: "acme" })).rejects.toThrow(/unavailable/);
+    await expect(layout.consumer.lag("acme")).resolves.toMatchObject({ inFlight: 1, cursor: 0, head: 1 });
+
+    await expect(layout.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 1, cursor: 1 });
+    expect(documentRows(layout.projectionDb).map((row) => row.name)).toContain("TICK-0001");
     layout.close();
   });
 
-  it("retries a claim that loses its compare-and-swap to a commit's head append", async () => {
-    let injected = false;
-    const primary = createTestD1({
+  it("redoes a round whose drain died after applying but before advancing", async () => {
+    const primary = createTestD1({ schema: frameworkSchema() });
+    const projectionDb = createTestD1({ schema: frameworkSchema() });
+    const dying = (store: D1ProjectionStore): MonotonicProjectionWriter => ({
+      async saveNewest(snapshots) {
+        await store.saveNewest(snapshots);
+        throw new Error("isolate evicted");
+      }
+    });
+    const first = split({ primary, projectionDb, projections: dying });
+    await first.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Printer" } });
+    await expect(first.consumer.drain({ tenantId: "acme" })).rejects.toThrow(/evicted/);
+
+    const next = split({ primary, projectionDb });
+    await expect(next.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 1, cursor: 1 });
+    expect(documentRows(projectionDb).filter((row) => row.doctype === "Ticket")).toHaveLength(1);
+    first.close();
+  });
+
+  it("keeps draining while a write lands on the channel during every statement it runs", async () => {
+    // The sustained-load case: under a claim-and-complete consumer every one
+    // of these head appends moved the stream the consumer had to
+    // compare-and-swap, and the drain lost every attempt. The cursor lives on
+    // a stream no writer touches, so none of them can conflict with it.
+    const channel = documentDeliveryOutboxStream("acme", PROJECTION_OUTBOX_CHANNEL);
+    let racing = false;
+    let raced = 0;
+    const primary: TestD1 = createTestD1({
       schema: frameworkSchema(),
       beforeSql(sql) {
-        // A commit appends at the head between the claim's read of the outbox
-        // and its version check. (Injected at the check, not at the insert: the
-        // insert runs inside the batch's transaction, whose rollback would take
-        // the injected row with it.)
-        if (!injected && sql.includes("AS version")) {
-          const stream = documentDeliveryOutboxStream("acme", PROJECTION_OUTBOX_CHANNEL);
-          const head = primary.query("SELECT payload_json FROM cf_frappe_events WHERE stream = ? AND sequence = 1", stream);
-          if (head.length === 1) {
-            injected = true;
-            const payload = JSON.parse(String(head[0]!.payload_json)) as Record<string, unknown>;
-            primary.query(
-              `INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
-               VALUES ('evt_racer', 'acme', ?, 2, 'DocumentDeliveryOutboxEnqueued', '__DocumentDeliveryOutbox', 'racer:projection', 'x', ?, ?, '{}')`,
-              stream,
-              NOW,
-              JSON.stringify({ ...payload, outboxId: "racer:projection", sourceEventId: "racer" })
-            );
-          }
+        if (!racing || !sql.trimStart().startsWith("SELECT") || !sql.includes("cf_frappe_events")) {
+          return;
         }
+        raced += 1;
+        const name = `RACE-${String(raced).padStart(4, "0")}`;
+        const snapshot = {
+          tenantId: "acme",
+          doctype: "Ticket",
+          name,
+          version: 1,
+          docstatus: "draft",
+          data: { subject: name },
+          createdAt: NOW,
+          updatedAt: NOW
+        };
+        primary.query(
+          `INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
+           SELECT ?, 'acme', ?, COALESCE(MAX(sequence), 0) + 1, 'DocumentDeliveryOutboxEnqueued', '__DocumentDeliveryOutbox', ?, 'x', ?, ?, '{}'
+           FROM cf_frappe_events WHERE stream = ?`,
+          `evt_race_${raced}`,
+          channel,
+          `${name}:projection`,
+          NOW,
+          JSON.stringify({
+            kind: "DocumentDeliveryOutboxEnqueued",
+            outboxId: `${name}:projection`,
+            target: "projection",
+            sourceEventId: `race-${raced}`,
+            sourceEventType: "TicketCreated",
+            payloadKind: "DocumentCreated",
+            doctype: "Ticket",
+            documentName: name,
+            actorId: "x",
+            payload: { snapshots: [snapshot] }
+          }),
+          channel
+        );
       }
     });
     const layout = split({ primary });
     await layout.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Printer" } });
-    injected = false;
 
-    await expect(layout.consumer.drain({ tenantId: "acme" })).resolves.toMatchObject({ claimed: 2, delivered: 2 });
-    expect(injected).toBe(true);
+    racing = true;
+    const drained = await layout.consumer.drain({ tenantId: "acme", limit: 1, maxRounds: 6 });
+    racing = false;
+
+    // A head append before the cursor read, and before each round's channel
+    // read and cursor compare-and-swap.
+    expect(raced).toBe(13);
+    // Every round advanced: the channel always had more, so it ran them all.
+    expect(drained).toMatchObject({ rounds: 6, delivered: 6, cursor: 6, contended: false });
+
+    // Once the writes stop, the drain catches up with every one of them.
+    await layout.consumer.drain({ tenantId: "acme", limit: 100 });
+    await expect(layout.consumer.lag("acme")).resolves.toMatchObject({ inFlight: 0, head: raced + 1, cursor: raced + 1 });
+    const projected = layout.projectionDb.query(
+      "SELECT COUNT(*) AS n FROM cf_frappe_documents WHERE doctype = 'Ticket' AND name LIKE 'RACE-%'"
+    );
+    expect(projected).toEqual([{ n: raced }]);
     layout.close();
   });
 

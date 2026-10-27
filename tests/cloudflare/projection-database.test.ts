@@ -7,6 +7,7 @@ import {
   documentDeliveryOutboxStream,
   PROJECTION_DELIVERY_DRAIN_JOB_NAME,
   PROJECTION_OUTBOX_CHANNEL,
+  projectionDeliveryCursorStream,
   READ_AFTER_HEADER,
   InMemoryJobQueue,
   unsafeHeaderActorResolver,
@@ -231,9 +232,9 @@ describe("the projection database switch", () => {
     } as never, env, context);
     expect(acked).toEqual(["m1"]);
     expect(db.primary.query(
-      "SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ? AND type = 'DocumentDeliveryOutboxDelivered'",
-      documentDeliveryOutboxStream("acme", PROJECTION_OUTBOX_CHANNEL)
-    )).toEqual([{ n: 1 }]);
+      "SELECT json_extract(payload_json, '$.toSequence') AS position FROM cf_frappe_events WHERE stream = ?",
+      projectionDeliveryCursorStream("acme")
+    )).toEqual([{ position: 1 }]);
     db.close();
   });
 
@@ -257,6 +258,41 @@ describe("the projection database switch", () => {
     expect(report.status).toBe("lagging");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"cf-frappe.projection.lagging\""));
     warn.mockRestore();
+    db.close();
+  });
+
+  it("logs a record the drain had to read past, and hands read fallbacks to the hook", async () => {
+    const db = databases();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const env = { DB: db.primary.database, PROJECTIONS_DB: db.projections.database, READ_AFTER_SECRET: "s" } as Env;
+    const channel = documentDeliveryOutboxStream("acme", PROJECTION_OUTBOX_CHANNEL);
+    db.primary.query(
+      `INSERT INTO cf_frappe_events (id, tenant_id, stream, sequence, type, doctype, document_name, actor_id, occurred_at, payload_json, metadata_json)
+       VALUES ('evt_broken', 'acme', ?, 1, 'DocumentDeliveryOutboxEnqueued', '__DocumentDeliveryOutbox', 'broken:projection', 'x', ?, ?, '{}')`,
+      channel,
+      "2026-03-01T00:00:00.000Z",
+      JSON.stringify({ kind: "DocumentDeliveryOutboxEnqueued", target: "projection", payload: {} })
+    );
+    const fallbacks: unknown[] = [];
+    const runtime = createProjectionRuntime(env, {
+      ...projectionDatabase,
+      onReadFallback: (fallback) => void fallbacks.push(fallback)
+    });
+
+    await expect(runtime.delivery.drain({ tenantId: "acme" })).resolves.toMatchObject({ skipped: 1, cursor: 1 });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"cf-frappe.projection.delivery-skipped\""));
+    error.mockRestore();
+
+    const Coordinator = createAggregateCoordinatorClass<Env>({
+      registry,
+      notifications: false,
+      assignmentRuleActor: false,
+      projectionDatabase: { ...projectionDatabase, eagerApply: false }
+    });
+    await new Coordinator({} as DurableObjectState, env)
+      .transact({ kind: "create", actor, doctype: "Note", name: "One", data: { title: "One" } });
+    await expect(runtime.projections.get("acme", "Note", "One")).resolves.toMatchObject({ version: 1 });
+    expect(fallbacks).toEqual([expect.objectContaining({ name: "One", projectedVersion: null, streamVersion: 1 })]);
     db.close();
   });
 });

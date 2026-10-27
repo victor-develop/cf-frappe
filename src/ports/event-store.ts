@@ -21,9 +21,16 @@ export interface EventBatchStore {
   appendBatch(entries: readonly EventAppendBatchEntry[]): Promise<readonly DomainEvent[]>;
 }
 
+export interface StreamCatalogQuery {
+  readonly tenantId: TenantId;
+  readonly doctype: DocTypeName;
+  /** Only streams that sort after this one — the keyset cursor of a paged walk. */
+  readonly after?: StreamName;
+  /** At most this many streams. Omitted, every stream from `after` on. */
+  readonly limit?: number;
+}
+
 export interface StreamCatalog {
-  listStreams(query: {
-    readonly tenantId: TenantId;
-    readonly doctype: DocTypeName;
-  }): Promise<readonly StreamName[]>;
+  /** Stream names holding events of the doctype, in ascending order. */
+  listStreams(query: StreamCatalogQuery): Promise<readonly StreamName[]>;
 }

@@ -6,12 +6,11 @@ import {
   createRegistry,
   createResourceApi,
   defineDocType,
-  DocumentDeliveryOutboxService,
+  D1ProjectionStore,
   DocumentService,
   fixedClock,
   InMemoryDocumentStore,
   InMemoryProjectionStore,
-  PROJECTION_OUTBOX_CHANNEL,
   ProjectionCatchUp,
   ProjectionDeliveryConsumer,
   ProjectionOutboxHandoff,
@@ -21,6 +20,7 @@ import {
   unsafeHeaderActorResolver,
   type IdGenerator
 } from "../../src";
+import { createTestD1, frameworkSchema } from "../d1-engine.js";
 
 const NOW = "2026-03-01T00:00:00.000Z";
 const SECRET = "test-only-read-after-secret";
@@ -50,7 +50,8 @@ function makeApp(options: {
   );
   const documents = new DocumentService({ registry, store, clock: fixedClock(NOW), ids });
   const consumer = new ProjectionDeliveryConsumer({
-    outbox: new DocumentDeliveryOutboxService({ events: store, channel: PROJECTION_OUTBOX_CHANNEL, clock: fixedClock(NOW), ids }),
+    events: store,
+    ids,
     projections: projectionDatabase,
     clock: fixedClock(NOW)
   });
@@ -116,7 +117,8 @@ describe("read-your-writes over HTTP", () => {
     const listed = await app.request("/api/resource/Note", { headers: { ...owner, [READ_AFTER_HEADER]: token } });
 
     expect(listed.headers.get(CONSISTENCY_HEADER)).toBe("stale");
-    expect(sleeps).toEqual([50, 50, 20]);
+    // Backing off: 50, then 100 cut short by the timeout.
+    expect(sleeps).toEqual([50, 70]);
     await expect(listed.json()).resolves.toMatchObject({ total: 0 });
   });
 
@@ -290,8 +292,109 @@ describe("ProjectionCatchUp", () => {
     await expect(catchUp.waitFor(requirements)).rejects.toThrow(/at most 50/);
   });
 
-  it("rejects a polling interval it could spin on", () => {
-    expect(() => new ProjectionCatchUp({ projections: new InMemoryProjectionStore(), pollMs: 0 })).toThrow(/pollMs/);
-    expect(() => new ProjectionCatchUp({ projections: new InMemoryProjectionStore(), timeoutMs: -1 })).toThrow(/timeoutMs/);
+  it("rejects a polling interval it could spin on, and a budget it could not keep", () => {
+    const projections = new InMemoryProjectionStore();
+    expect(() => new ProjectionCatchUp({ projections, pollMs: 0 })).toThrow(/pollMs/);
+    expect(() => new ProjectionCatchUp({ projections, timeoutMs: -1 })).toThrow(/timeoutMs/);
+    expect(() => new ProjectionCatchUp({ projections, pollMs: 100, maxPollMs: 50 })).toThrow(/maxPollMs/);
+    expect(() => new ProjectionCatchUp({ projections, maxChecks: 0 })).toThrow(/maxChecks/);
+  });
+
+  it("waits for one tenant's documents only", async () => {
+    const catchUp = new ProjectionCatchUp({ projections: new InMemoryProjectionStore() });
+    await expect(catchUp.waitFor([
+      { tenantId: "acme", doctype: "Note", name: "A", version: 1 },
+      { tenantId: "other", doctype: "Note", name: "B", version: 1 }
+    ])).rejects.toThrow(/one tenant/);
+    await expect(catchUp.waitFor([])).resolves.toEqual({ status: "fresh", pending: [], waitedMs: 0 });
+  });
+
+  describe("against the real D1 engine", () => {
+    function snapshot(name: string, version: number, tenantId = "acme") {
+      return {
+        tenantId,
+        doctype: "Note",
+        name,
+        version,
+        docstatus: "draft" as const,
+        data: { title: name },
+        createdAt: NOW,
+        updatedAt: NOW
+      };
+    }
+
+    function timed(options: { readonly timeoutMs?: number; readonly maxChecks?: number } = {}) {
+      const d1 = createTestD1({ schema: frameworkSchema() });
+      let clock = 0;
+      const sleeps: number[] = [];
+      const catchUp = new ProjectionCatchUp({
+        projections: new D1ProjectionStore(d1.database),
+        ...options,
+        now: () => clock,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          clock += ms;
+        }
+      });
+      return { d1, catchUp, sleeps, projections: new D1ProjectionStore(d1.database) };
+    }
+
+    it("checks every document with one query, and spends a bounded number of them on a wait that times out", async () => {
+      const { d1, catchUp, sleeps } = timed();
+      const requirements = Array.from({ length: 50 }, (_, index) => ({
+        tenantId: "acme",
+        doctype: "Note",
+        name: `N${index}`,
+        version: 1
+      }));
+      const before = d1.statements.length;
+
+      const result = await catchUp.waitFor(requirements);
+
+      expect(result).toMatchObject({ status: "stale", waitedMs: 2000 });
+      expect(result.pending).toHaveLength(50);
+      // Eight queries for fifty documents over the default two seconds — the
+      // per-document, fixed-interval poll this replaces ran 2 050.
+      expect(d1.statements.length - before).toBe(8);
+      expect(sleeps).toEqual([50, 100, 200, 400, 500, 500, 250]);
+      d1.close();
+    });
+
+    it("stops at maxChecks queries even when the timeout is far off", async () => {
+      const { d1, catchUp } = timed({ timeoutMs: 60_000, maxChecks: 3 });
+      const before = d1.statements.length;
+
+      await expect(catchUp.waitFor([{ tenantId: "acme", doctype: "Note", name: "A", version: 1 }]))
+        .resolves.toMatchObject({ status: "stale" });
+      expect(d1.statements.length - before).toBe(3);
+      d1.close();
+    });
+
+    it("reads versions per document, for this tenant only", async () => {
+      const { d1, projections } = timed();
+      await projections.saveNewest([snapshot("Behind", 1), snapshot("Ahead", 4), snapshot("Missing", 9, "other")]);
+
+      await expect(projections.versions("acme", [
+        { doctype: "Note", name: "Ahead" },
+        { doctype: "Note", name: "Missing" },
+        { doctype: "Note", name: "Behind" },
+        { doctype: "Other", name: "Ahead" }
+      ])).resolves.toEqual([4, null, 1, null]);
+      await expect(projections.versions("acme", [])).resolves.toEqual([]);
+      d1.close();
+    });
+
+    it("reports fresh once every document reaches its version, and names the ones that did not", async () => {
+      const { d1, catchUp, projections } = timed({ timeoutMs: 0 });
+      await projections.saveNewest([snapshot("Behind", 1), snapshot("Ahead", 4)]);
+
+      await expect(catchUp.waitFor([
+        { tenantId: "acme", doctype: "Note", name: "Ahead", version: 3 },
+        { tenantId: "acme", doctype: "Note", name: "Behind", version: 2 }
+      ])).resolves.toMatchObject({ status: "stale", pending: [{ name: "Behind", version: 2 }] });
+      await expect(catchUp.waitFor([{ tenantId: "acme", doctype: "Note", name: "Ahead", version: 4 }]))
+        .resolves.toMatchObject({ status: "fresh" });
+      d1.close();
+    });
   });
 });

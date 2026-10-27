@@ -1,16 +1,17 @@
 import { D1EventStore, D1ProjectionStore, D1SnapshotStore } from "../adapters/d1/index.js";
 import type { ReadYourWritesHttpOptions } from "../adapters/http/read-your-writes.js";
-import { DocumentDeliveryOutboxService } from "../application/document-delivery-outbox-service.js";
 import { ProjectionBackfillService } from "../application/projection-backfill.js";
 import {
-  DEFAULT_PROJECTION_CLAIM_LEASE_SECONDS,
-  PROJECTION_OUTBOX_CHANNEL,
   ProjectionDeliveryConsumer,
   ProjectionOutboxHandoff,
   type ProjectionLagReport,
   type ProjectionLagThresholds
 } from "../application/projection-delivery.js";
-import { ConsistentProjectionStore, ProjectionCatchUp } from "../application/projection-read-consistency.js";
+import {
+  ConsistentProjectionStore,
+  ProjectionCatchUp,
+  type ProjectionReadFallback
+} from "../application/projection-read-consistency.js";
 import type { DocumentSnapshot } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
 import type { DocumentStoreProjectionOptions } from "../ports/document-store.js";
@@ -48,10 +49,11 @@ export interface CloudFrappeProjectionDatabaseOptions<TEnv> {
     readonly secret: (env: TEnv) => string;
     readonly timeoutMs?: number;
     readonly pollMs?: number;
+    readonly maxPollMs?: number;
+    /** Most D1 queries one read spends waiting. See `ProjectionCatchUp`. */
+    readonly maxChecks?: number;
     readonly ttlSeconds?: number;
   };
-  readonly claimLeaseSeconds?: number;
-  readonly retry?: { readonly baseDelaySeconds?: number; readonly maxDelaySeconds?: number };
   readonly lag?: ProjectionLagThresholds;
   /**
    * Where a lag breach goes. Defaults to one structured `console.warn` line,
@@ -60,6 +62,13 @@ export interface CloudFrappeProjectionDatabaseOptions<TEnv> {
    */
   readonly onLagAlert?: (alert: ProjectionLagReport, env: TEnv) => void | Promise<void>;
   readonly onEagerApplyError?: (error: unknown, snapshots: readonly DocumentSnapshot[], env: TEnv) => void;
+  /**
+   * Told each time a by-name read found the projection row behind the stream
+   * head and folded the primary instead — the read load this layout exists to
+   * move off the primary, so worth a metric. Not logged by default: on a busy
+   * tenant it is one line per lagging read.
+   */
+  readonly onReadFallback?: (fallback: ProjectionReadFallback, env: TEnv) => void;
   readonly clock?: Clock;
 }
 
@@ -107,20 +116,19 @@ export function createProjectionRuntime<TEnv extends { readonly DB: D1Database }
   const projections = new ConsistentProjectionStore({
     projections: projectionDatabase,
     events,
-    snapshots: new D1SnapshotStore(env.DB)
-  });
-  const outbox = new DocumentDeliveryOutboxService({
-    events,
-    channel: PROJECTION_OUTBOX_CHANNEL,
-    claimLeaseSeconds: options.claimLeaseSeconds ?? DEFAULT_PROJECTION_CLAIM_LEASE_SECONDS,
-    ...(options.clock === undefined ? {} : { clock: options.clock })
+    snapshots: new D1SnapshotStore(env.DB),
+    ...(options.onReadFallback === undefined
+      ? {}
+      : { onFallback: (fallback: ProjectionReadFallback) => options.onReadFallback!(fallback, env) })
   });
   const delivery = new ProjectionDeliveryConsumer({
-    outbox,
+    events,
     projections: projectionDatabase,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.retry === undefined ? {} : { retry: options.retry }),
     ...(options.lag === undefined ? {} : { lag: options.lag }),
+    onSkipped: (skipped) => {
+      console.error(JSON.stringify({ event: "cf-frappe.projection.delivery-skipped", ...skipped }));
+    },
     onLagAlert: async (alert) => {
       if (options.onLagAlert) {
         await options.onLagAlert(alert, env);
@@ -142,7 +150,9 @@ export function createProjectionRuntime<TEnv extends { readonly DB: D1Database }
             catchUp: new ProjectionCatchUp({
               projections: projectionDatabase,
               ...(readYourWrites.timeoutMs === undefined ? {} : { timeoutMs: readYourWrites.timeoutMs }),
-              ...(readYourWrites.pollMs === undefined ? {} : { pollMs: readYourWrites.pollMs })
+              ...(readYourWrites.pollMs === undefined ? {} : { pollMs: readYourWrites.pollMs }),
+              ...(readYourWrites.maxPollMs === undefined ? {} : { maxPollMs: readYourWrites.maxPollMs }),
+              ...(readYourWrites.maxChecks === undefined ? {} : { maxChecks: readYourWrites.maxChecks })
             }),
             ...(readYourWrites.ttlSeconds === undefined ? {} : { ttlSeconds: readYourWrites.ttlSeconds })
           }

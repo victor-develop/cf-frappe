@@ -1,6 +1,6 @@
 import { notFound } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL, documentDeliveryOutboxStream } from "../core/streams.js";
+import { documentDeliveryOutboxStream } from "../core/streams.js";
 import {
   documentDeliveryOutboxCheckpoint,
   documentDeliveryOutboxEventType,
@@ -33,7 +33,6 @@ import type { EventStore } from "../ports/event-store.js";
 import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import {
   claimableDocumentDeliveryOutboxRecords,
-  documentDeliveryOutboxClaimLeaseSeconds,
   documentDeliveryOutboxClaimLimit,
   documentDeliveryOutboxFailureError,
   documentDeliveryOutboxPayload,
@@ -75,17 +74,6 @@ export interface DocumentDeliveryOutboxServiceOptions {
   readonly events: EventStore & AuditEventStore;
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
-  /**
-   * Which of the tenant's outbox streams this service owns. Omitted, it is the
-   * one stream every outbox has always used. See `documentDeliveryOutboxStream`.
-   */
-  readonly channel?: string;
-  /**
-   * Makes a claim expire, so a record whose consumer died after claiming it is
-   * claimed again. Omitted, a claim never expires — the behaviour every
-   * existing outbox has. See `documentDeliveryClaimExpired`.
-   */
-  readonly claimLeaseSeconds?: number;
 }
 
 export interface EnqueueDocumentDeliveryOutboxCommand {
@@ -114,31 +102,15 @@ export interface FailDocumentDeliveryOutboxCommand extends CompleteDocumentDeliv
   readonly retryAt?: string;
 }
 
-export interface CompleteDocumentDeliveryOutboxBatchCommand {
-  readonly tenantId: TenantId;
-  readonly claimId: string;
-  readonly outboxIds: readonly string[];
-  readonly metadata?: DocumentData;
-}
-
 export class DocumentDeliveryOutboxService {
   private readonly events: EventStore & AuditEventStore;
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
-  private readonly channel: string;
-  private readonly claimLeaseSeconds: number | undefined;
 
   constructor(options: DocumentDeliveryOutboxServiceOptions) {
     this.events = options.events;
     this.ids = options.ids ?? cryptoIdGenerator;
     this.clock = options.clock ?? systemClock;
-    this.channel = options.channel ?? DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL;
-    this.claimLeaseSeconds = documentDeliveryOutboxClaimLeaseSeconds(options.claimLeaseSeconds);
-  }
-
-  /** The stream this service reads and appends: one per tenant and channel. */
-  stream(tenantId: TenantId): StreamName {
-    return documentDeliveryOutboxStream(tenantId, this.channel);
   }
 
   async enqueueFromDomainEvent(
@@ -168,7 +140,7 @@ export class DocumentDeliveryOutboxService {
                 tenantId: command.event.tenantId,
                 doctype: OUTBOX_DOCTYPE,
                 documentName: outboxId,
-                stream: this.stream(command.event.tenantId),
+                stream: documentDeliveryOutboxStream(command.event.tenantId),
                 limit: 1
               });
               return existing.length > 0 ? outboxId : undefined;
@@ -197,7 +169,7 @@ export class DocumentDeliveryOutboxService {
           return {
             id: this.ids.next("evt_"),
             tenantId: command.event.tenantId,
-            stream: this.stream(command.event.tenantId),
+            stream: documentDeliveryOutboxStream(command.event.tenantId),
             type: documentDeliveryOutboxEventType(payload),
             doctype: "__DocumentDeliveryOutbox",
             documentName: outboxId,
@@ -220,7 +192,7 @@ export class DocumentDeliveryOutboxService {
     const claimId = command.claimId ?? this.ids.next("claim_");
     const limit = documentDeliveryOutboxClaimLimit(command.limit);
     return this.appendWithRetry(command.tenantId, async (state) => {
-      const records = claimableDocumentDeliveryOutboxRecords(state, now, limit, this.claimLeaseSeconds);
+      const records = claimableDocumentDeliveryOutboxRecords(state, now, limit);
       const recordIds = records.map((record) => record.id);
       const events = records.map((record): NewDomainEvent => {
         const payload: DocumentDeliveryOutboxEventPayload = {
@@ -231,7 +203,7 @@ export class DocumentDeliveryOutboxService {
         return {
           id: this.ids.next("evt_"),
           tenantId: command.tenantId,
-          stream: this.stream(command.tenantId),
+          stream: documentDeliveryOutboxStream(command.tenantId),
           type: documentDeliveryOutboxEventType(payload),
           doctype: "__DocumentDeliveryOutbox",
           documentName: record.id,
@@ -256,82 +228,6 @@ export class DocumentDeliveryOutboxService {
       (await this.deliveredRecord(command.tenantId, command.outboxId)) ??
       this.requireRecord(await this.state(command.tenantId), command.outboxId)
     );
-  }
-
-  /**
-   * Delivers every record in `outboxIds` in one append — one state read and
-   * one compare-and-swap for the lot, where {@link markDelivered} pays both per
-   * record.
-   *
-   * For a consumer that applies a whole claim in one go, which the projection
-   * consumer does: a write enqueues one projection record, so a drain carries as
-   * many records as there were writes since the last one, and per-record
-   * completion turned every drain into that many folds of the outbox tail.
-   *
-   * Same rules as {@link markDelivered}, per record: one already delivered is
-   * success and appends nothing, one never enqueued fails the batch, and one
-   * claimed by someone else fails the batch with a conflict — before anything is
-   * appended, so a refused batch delivers none of them. Returns the ids this
-   * call delivered.
-   */
-  async markDeliveredBatch(command: CompleteDocumentDeliveryOutboxBatchCommand): Promise<readonly string[]> {
-    const outboxIds = [...new Set(command.outboxIds)];
-    if (outboxIds.length === 0) {
-      return [];
-    }
-    let delivered: readonly string[] = [];
-    await this.appendWithRetry(command.tenantId, async (state, attempt) => {
-      const pending: string[] = [];
-      for (const outboxId of outboxIds) {
-        const lookup = documentDeliveryOutboxRecordLookup(state, outboxId);
-        if (lookup.status === "missing") {
-          // Re-decided on every attempt for the reason `appendTerminalEvent`
-          // gives: the competitor that delivered it is what caused the retry.
-          if ((await this.record(command.tenantId, outboxId))?.status === "delivered") {
-            continue;
-          }
-          throw notFound(lookup.message);
-        }
-        ensureDocumentDeliveryOutboxClaimed(lookup.record, command.claimId);
-        pending.push(outboxId);
-      }
-      delivered = pending;
-      if (pending.length === 0) {
-        return { events: [], state, recordIds: [] };
-      }
-      const occurredAt = this.clock.now();
-      return {
-        recordIds: [],
-        events: [
-          // First, for the reason `appendTerminalEvent` puts it first.
-          ...this.plannedCheckpoint(command.tenantId, state, attempt),
-          ...pending.map((outboxId): NewDomainEvent => {
-            const payload: DocumentDeliveryOutboxEventPayload = {
-              kind: "DocumentDeliveryOutboxDelivered",
-              outboxId,
-              claimId: command.claimId
-            };
-            return {
-              // Derived for the same reason the checkpoint's id is: a batch
-              // would otherwise draw an unbounded number of ids from a generator
-              // that tests size exactly. A record is delivered at most once, so
-              // its id is enough to make this one unique.
-              id: `evt_outbox_delivered_${outboxId}`,
-              tenantId: command.tenantId,
-              stream: this.stream(command.tenantId),
-              type: documentDeliveryOutboxEventType(payload),
-              doctype: OUTBOX_DOCTYPE,
-              documentName: outboxId,
-              actorId: "system",
-              occurredAt,
-              payload,
-              metadata: command.metadata ?? {}
-            };
-          })
-        ]
-      };
-    });
-    return delivered;
   }
 
   /**
@@ -364,7 +260,7 @@ export class DocumentDeliveryOutboxService {
         events: [{
           id: this.ids.next("evt_"),
           tenantId: command.tenantId,
-          stream: this.stream(command.tenantId),
+          stream: documentDeliveryOutboxStream(command.tenantId),
           type: documentDeliveryOutboxEventType(payload),
           doctype: "__DocumentDeliveryOutbox",
           documentName: command.outboxId,
@@ -402,7 +298,7 @@ export class DocumentDeliveryOutboxService {
         tenantId,
         doctype: OUTBOX_DOCTYPE,
         documentName: outboxId,
-        stream: this.stream(tenantId)
+        stream: documentDeliveryOutboxStream(tenantId)
       })
     );
   }
@@ -457,7 +353,7 @@ export class DocumentDeliveryOutboxService {
           {
             id: this.ids.next("evt_"),
             tenantId: command.tenantId,
-            stream: this.stream(command.tenantId),
+            stream: documentDeliveryOutboxStream(command.tenantId),
             type: documentDeliveryOutboxEventType(payload),
             doctype: "__DocumentDeliveryOutbox",
             documentName: command.outboxId,
@@ -509,14 +405,9 @@ export class DocumentDeliveryOutboxService {
         // one commit can succeed at a given `state.version`, so no two
         // checkpoints in a stream can share an `upToSequence` — which is also
         // why checkpoints make strict progress without tracking the last one.
-        //
-        // A non-default channel is part of the id: two channels of one tenant
-        // checkpoint at the same versions, and event ids are global.
-        id: this.channel === DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL
-          ? `evt_outbox_checkpoint_${tenantId}_${String(state.version)}`
-          : `evt_outbox_checkpoint_${tenantId}_${this.channel}_${String(state.version)}`,
+        id: `evt_outbox_checkpoint_${tenantId}_${String(state.version)}`,
         tenantId,
-        stream: this.stream(tenantId),
+        stream: documentDeliveryOutboxStream(tenantId),
         type: documentDeliveryOutboxEventType(payload),
         doctype: OUTBOX_DOCTYPE,
         documentName: DOCUMENT_DELIVERY_OUTBOX_CHECKPOINT_DOCUMENT_NAME,
@@ -548,7 +439,7 @@ export class DocumentDeliveryOutboxService {
       readonly state?: DocumentDeliveryOutboxState;
     }>
   ): Promise<readonly DocumentDeliveryOutboxRecord[]> {
-    const stream = this.stream(tenantId);
+    const stream = documentDeliveryOutboxStream(tenantId);
     for (let attempt = 1; attempt <= MAX_OUTBOX_APPEND_ATTEMPTS; attempt += 1) {
       const state = await this.state(tenantId);
       const planned = await plan(state, attempt);
@@ -587,7 +478,7 @@ export class DocumentDeliveryOutboxService {
    * reads per round rather than 5.
    */
   private async state(tenantId: TenantId): Promise<DocumentDeliveryOutboxState> {
-    const stream = this.stream(tenantId);
+    const stream = documentDeliveryOutboxStream(tenantId);
     const checkpoint = await this.lastCheckpoint(tenantId, stream);
     const carried = checkpoint === null ? null : await this.carriedOverRecords(tenantId, checkpoint);
     if (checkpoint === null || carried === null) {
@@ -695,7 +586,7 @@ export class DocumentDeliveryOutboxService {
           tenantId,
           doctype: OUTBOX_DOCTYPE,
           documentName: outboxId,
-          stream: this.stream(tenantId)
+          stream: documentDeliveryOutboxStream(tenantId)
         })
       }))
     );

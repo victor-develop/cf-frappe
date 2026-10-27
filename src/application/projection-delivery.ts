@@ -1,15 +1,17 @@
 import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { documentDeliveryOutboxStream, documentStream } from "../core/streams.js";
+import { documentDeliveryOutboxStream, documentStream, projectionDeliveryCursorStream } from "../core/streams.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, NewDomainEvent, TenantId } from "../core/types.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { ProjectionHandoff } from "../ports/document-store.js";
+import type { EventStore } from "../ports/event-store.js";
+import { cryptoIdGenerator, type IdGenerator } from "../ports/id-generator.js";
 import type { MonotonicProjectionWriter } from "../ports/projection-store.js";
+import { isDocumentConflictError } from "./concurrency-policy.js";
 import {
   documentDeliveryOutboxDrainLimit,
   documentDeliveryOutboxErrorMessage,
-  documentDeliveryOutboxRetryAt,
   ensureDocumentDeliveryOutboxConsumerAvailable,
   isDocumentSnapshotValue,
   parseDocumentDeliveryOutboxDrainJobLimit
@@ -17,10 +19,14 @@ import {
 import {
   documentDeliveryOutboxEventType,
   documentDeliveryOutboxRecordId,
-  type DocumentDeliveryOutboxEventPayload,
-  type DocumentDeliveryOutboxRecord
+  type DocumentDeliveryOutboxEventPayload
 } from "./document-delivery-outbox-events.js";
-import type { DocumentDeliveryOutboxService } from "./document-delivery-outbox-service.js";
+import {
+  projectionDeliveryCursor,
+  type ProjectionDeliveryCursor,
+  type ProjectionDeliveryCursorEventPayload,
+  type ProjectionDeliverySkip
+} from "./projection-delivery-events.js";
 
 /**
  * The outbox channel projection deliveries travel on. Its own stream per tenant,
@@ -31,21 +37,15 @@ export const PROJECTION_OUTBOX_CHANNEL = "projections";
 
 export const PROJECTION_DELIVERY_DRAIN_JOB_NAME = "cf-frappe.projection-delivery.drain";
 
-/** How many claim rounds one drain call may run before returning. */
+/** How many rounds one drain call may run before returning. */
 export const DEFAULT_PROJECTION_DRAIN_ROUNDS = 10;
 export const MAX_PROJECTION_DRAIN_ROUNDS = 100;
-
-/**
- * A projection record claimed for longer than this is claimed again. Applying a
- * claim is one D1 batch, so a minute is generous for a live consumer and short
- * enough that a dead one is noticed before the lag alert's default age.
- */
-export const DEFAULT_PROJECTION_CLAIM_LEASE_SECONDS = 60;
 
 export const DEFAULT_PROJECTION_LAG_MAX_AGE_SECONDS = 120;
 export const DEFAULT_PROJECTION_LAG_MAX_IN_FLIGHT = 1_000;
 
 const OUTBOX_DOCTYPE = "__DocumentDeliveryOutbox";
+const PROJECTION_DELIVERY_DOCTYPE = "__ProjectionDelivery";
 
 /**
  * Turns a commit's projection rows into one outbox record on the projection
@@ -141,14 +141,22 @@ function projectionDeliveryPayload(snapshots: readonly DocumentSnapshot[]): Docu
   return { snapshots: snapshots as unknown as DocumentData[] };
 }
 
-/** The rows a projection record carries, validated, or a reason it has none. */
-export function projectionDeliverySnapshots(record: DocumentDeliveryOutboxRecord): readonly DocumentSnapshot[] {
-  const snapshots = record.payload.snapshots;
+/**
+ * The rows a projection record carries, validated, or a reason it has none.
+ * Every row must belong to the tenant whose channel the record is on: the
+ * consumer applies them to that tenant's projection without looking further.
+ */
+export function projectionDeliverySnapshots(tenantId: TenantId, record: DomainEvent): readonly DocumentSnapshot[] {
+  const payload = record.payload as Partial<DocumentDeliveryOutboxEventPayload>;
+  if (payload.kind !== "DocumentDeliveryOutboxEnqueued" || payload.target !== "projection") {
+    throw badRequest(`Event '${record.id}' is not a projection delivery`);
+  }
+  const snapshots = payload.payload?.snapshots;
   if (!Array.isArray(snapshots) || snapshots.length === 0) {
     throw badRequest(`Projection delivery '${record.id}' carries no snapshots`);
   }
   return snapshots.map((snapshot) => {
-    if (!isDocumentSnapshotValue(snapshot) || snapshot.tenantId !== record.tenantId) {
+    if (!isDocumentSnapshotValue(snapshot) || snapshot.tenantId !== tenantId || record.tenantId !== tenantId) {
       throw badRequest(`Projection delivery '${record.id}' carries an invalid snapshot`);
     }
     return snapshot;
@@ -156,57 +164,64 @@ export function projectionDeliverySnapshots(record: DocumentDeliveryOutboxRecord
 }
 
 export interface ProjectionDeliveryConsumerOptions {
-  /** An outbox service on {@link PROJECTION_OUTBOX_CHANNEL}. */
-  readonly outbox: Pick<
-    DocumentDeliveryOutboxService,
-    "claimPending" | "markDeliveredBatch" | "markFailed" | "list"
-  >;
+  /**
+   * The primary event store: the projection channel is read from it and the
+   * cursor is kept in it.
+   */
+  readonly events: Pick<EventStore, "readStream" | "append" | "currentVersion">;
   /** The projection database's writer. */
   readonly projections: MonotonicProjectionWriter;
+  readonly ids?: IdGenerator;
   readonly clock?: Clock;
-  readonly retry?: {
-    readonly baseDelaySeconds?: number;
-    readonly maxDelaySeconds?: number;
-  };
   readonly lag?: ProjectionLagThresholds;
   /** Called once per {@link ProjectionDeliveryConsumer.checkLag} that breaches a threshold. */
   readonly onLagAlert?: (alert: ProjectionLagReport) => void | Promise<void>;
+  /** Told about each record a drain read past without applying. */
+  readonly onSkipped?: (skipped: ProjectionDeliverySkip & { readonly tenantId: TenantId }) => void;
 }
 
 export interface DrainProjectionDeliveriesCommand {
   readonly tenantId: TenantId;
+  /** Records read and applied per round. */
   readonly limit?: number;
   readonly maxRounds?: number;
-  readonly now?: string;
 }
 
 export interface ProjectionDeliveryDrainResult {
   readonly tenantId: TenantId;
   readonly rounds: number;
-  readonly claimed: number;
+  /** Records applied by rounds whose cursor advance this drain committed. */
   readonly delivered: number;
-  readonly failed: number;
+  readonly skipped: number;
+  /** The channel position this drain left the cursor at. */
+  readonly cursor: number;
+  /**
+   * True when another drain advanced the cursor first. The rows this drain
+   * applied in that round are harmless — the other drain applied the same
+   * records — and it stops rather than read the range again.
+   */
+  readonly contended: boolean;
 }
 
 export interface ProjectionLagThresholds {
-  /** Oldest in-flight record older than this is lag. Seconds. */
+  /** Oldest undelivered record older than this is lag. Seconds. */
   readonly maxAgeSeconds?: number;
-  /** More records in flight than this is lag, whatever their age. */
+  /** More undelivered records than this is lag, whatever their age. */
   readonly maxInFlight?: number;
 }
 
 export interface ProjectionLag {
   readonly tenantId: TenantId;
   readonly measuredAt: string;
-  /** Records not yet delivered: pending, claimed and failed. */
+  /** Records on the channel past the cursor: written, not yet delivered. */
   readonly inFlight: number;
-  readonly pending: number;
-  readonly claimed: number;
-  readonly failed: number;
+  /** Channel position the cursor stands at. */
+  readonly cursor: number;
+  /** Channel head. */
+  readonly head: number;
   readonly oldestEnqueuedAt?: string;
-  /** Age of the oldest in-flight record, 0 when there is none. */
+  /** Age of the oldest undelivered record, 0 when there is none. */
   readonly ageSeconds: number;
-  readonly maxAttempts: number;
 }
 
 export interface ProjectionLagReport extends ProjectionLag {
@@ -215,42 +230,44 @@ export interface ProjectionLagReport extends ProjectionLag {
   readonly thresholds: Required<ProjectionLagThresholds>;
 }
 
-const DEFAULT_RETRY_BASE_DELAY_SECONDS = 5;
-const DEFAULT_RETRY_MAX_DELAY_SECONDS = 300;
-
 /**
- * Drains the projection channel into the projection database.
+ * Drains the projection channel into the projection database by cursor.
  *
- * A claim is applied as a whole — one `saveNewest` batch, one
- * `markDeliveredBatch` — because a drain carries one record per write since the
- * last drain, and per-record completion made each drain that many folds of the
- * outbox tail. Rows are applied with the newest-version guard, so the order the
- * records arrive in, a redelivery, and a concurrent eager apply or backfill all
- * leave the newest row in place.
+ * Writers head-append to the channel (see `ProjectionOutboxHandoff`), and
+ * head-append sequences are serial and gap-free: a record that becomes visible
+ * later always has a higher sequence than every record visible before it. So
+ * "everything at or below N is applied" is the whole of the consumer's state,
+ * and it lives on a stream of its own ({@link projectionDeliveryCursorStream})
+ * that only consumers compare-and-swap. A round reads the records past the
+ * cursor, applies them in one `saveNewest` batch and advances the cursor with
+ * one append.
  *
- * Deliberately not the generic `DocumentDeliveryOutboxConsumer`: that one runs a
- * handler per record and completes each separately, which is the per-record
- * cost this avoids.
+ * Why not claim records the way the notification outbox does: claims and
+ * completions are compare-and-swap appends to the stream every write in the
+ * tenant head-appends to, so under sustained writes they lose the race again
+ * and again, and the drain starves exactly when the projection has the most to
+ * catch up on. Here a write can never conflict with a drain, and a write costs
+ * one channel event rather than three (enqueue, claim, delivered).
+ *
+ * Rows are applied with the newest-version guard, so a round applied twice —
+ * by a drain that crashed before advancing, or by two drains racing for the
+ * same range — and a concurrent eager apply or backfill all leave the newest
+ * row in place. Of two racing drains one advances the cursor and the other gets
+ * a conflict and stops; neither has done anything wrong.
+ *
+ * A round whose apply throws does not advance, so the next drain reads the same
+ * records again; the error propagates, and the job's retry and the lag alert
+ * take it from there. Only a record that can never apply — no valid snapshot —
+ * is read past, and it is named in the cursor event and to `onSkipped`.
  */
 export class ProjectionDeliveryConsumer {
   private readonly clock: Clock;
-  private readonly retryBaseDelaySeconds: number;
-  private readonly retryMaxDelaySeconds: number;
+  private readonly ids: IdGenerator;
   private readonly thresholds: Required<ProjectionLagThresholds>;
 
   constructor(private readonly options: ProjectionDeliveryConsumerOptions) {
     this.clock = options.clock ?? systemClock;
-    this.retryBaseDelaySeconds = positiveInteger(
-      options.retry?.baseDelaySeconds ?? DEFAULT_RETRY_BASE_DELAY_SECONDS,
-      "Projection delivery retry baseDelaySeconds"
-    );
-    this.retryMaxDelaySeconds = positiveInteger(
-      options.retry?.maxDelaySeconds ?? DEFAULT_RETRY_MAX_DELAY_SECONDS,
-      "Projection delivery retry maxDelaySeconds"
-    );
-    if (this.retryMaxDelaySeconds < this.retryBaseDelaySeconds) {
-      throw badRequest("Projection delivery retry maxDelaySeconds must be greater than or equal to baseDelaySeconds");
-    }
+    this.ids = options.ids ?? cryptoIdGenerator;
     this.thresholds = {
       maxAgeSeconds: positiveInteger(
         options.lag?.maxAgeSeconds ?? DEFAULT_PROJECTION_LAG_MAX_AGE_SECONDS,
@@ -264,52 +281,64 @@ export class ProjectionDeliveryConsumer {
   }
 
   /**
-   * Claims and applies until the channel is empty or `maxRounds` claims have
-   * run. Bounded on purpose: this shares the primary database with live writes,
-   * and a driver that wants more simply calls again.
+   * Applies rounds until the channel is caught up or `maxRounds` have run.
+   * Bounded on purpose: this shares the primary database with live writes, and
+   * a driver that wants more simply calls again.
    */
   async drain(command: DrainProjectionDeliveriesCommand): Promise<ProjectionDeliveryDrainResult> {
     const limit = documentDeliveryOutboxDrainLimit(command.limit);
     const maxRounds = projectionDrainRounds(command.maxRounds);
+    const channel = documentDeliveryOutboxStream(command.tenantId, PROJECTION_OUTBOX_CHANNEL);
+    let cursor = await this.cursor(command.tenantId);
     let rounds = 0;
-    let claimed = 0;
     let delivered = 0;
-    let failed = 0;
+    let skipped = 0;
     while (rounds < maxRounds) {
-      const now = command.now ?? this.clock.now();
-      const batch = await this.options.outbox.claimPending({ tenantId: command.tenantId, limit, now });
+      const records = await this.options.events.readStream(channel, { minSequence: cursor.position + 1, limit });
       rounds += 1;
-      claimed += batch.length;
-      if (batch.length === 0) {
+      if (records.length === 0) {
         break;
       }
-      const outcome = await this.applyClaim(command.tenantId, batch, now);
-      delivered += outcome.delivered;
-      failed += outcome.failed;
-      if (batch.length < limit) {
+      const round = projectionDeliveryRound(command.tenantId, records);
+      await this.options.projections.saveNewest(round.snapshots);
+      const advanced = await this.advance(command.tenantId, cursor, records.at(-1)!.sequence, round);
+      if (advanced === undefined) {
+        return { tenantId: command.tenantId, rounds, delivered, skipped, cursor: cursor.position, contended: true };
+      }
+      cursor = advanced;
+      delivered += round.applied;
+      skipped += round.skipped.length;
+      for (const skip of round.skipped) {
+        this.options.onSkipped?.({ tenantId: command.tenantId, ...skip });
+      }
+      if (records.length < limit) {
         break;
       }
     }
-    return { tenantId: command.tenantId, rounds, claimed, delivered, failed };
+    return { tenantId: command.tenantId, rounds, delivered, skipped, cursor: cursor.position, contended: false };
   }
 
-  /** Where the projection channel stands for one tenant, right now. */
+  /**
+   * Where the projection channel stands for one tenant, right now. Three point
+   * reads on the primary — the cursor, the channel head and the oldest record
+   * past the cursor — however far behind the consumer is.
+   */
   async lag(tenantId: TenantId, now: string = this.clock.now()): Promise<ProjectionLag> {
-    const records = await this.options.outbox.list(tenantId);
-    const oldest = records.reduce<string | undefined>(
-      (current, record) => current === undefined || record.enqueuedAt < current ? record.enqueuedAt : current,
-      undefined
-    );
+    const channel = documentDeliveryOutboxStream(tenantId, PROJECTION_OUTBOX_CHANNEL);
+    const [cursor, head] = await Promise.all([this.cursor(tenantId), this.options.events.currentVersion(channel)]);
+    const [oldest] = head > cursor.position
+      ? await this.options.events.readStream(channel, { minSequence: cursor.position + 1, limit: 1 })
+      : [];
     return {
       tenantId,
       measuredAt: now,
-      inFlight: records.length,
-      pending: records.filter((record) => record.status === "pending").length,
-      claimed: records.filter((record) => record.status === "claimed").length,
-      failed: records.filter((record) => record.status === "failed").length,
-      ...(oldest === undefined ? {} : { oldestEnqueuedAt: oldest }),
-      ageSeconds: oldest === undefined ? 0 : Math.max(0, Math.floor((Date.parse(now) - Date.parse(oldest)) / 1000)),
-      maxAttempts: records.reduce((max, record) => Math.max(max, record.attempts), 0)
+      inFlight: Math.max(0, head - cursor.position),
+      cursor: cursor.position,
+      head,
+      ...(oldest === undefined ? {} : { oldestEnqueuedAt: oldest.occurredAt }),
+      ageSeconds: oldest === undefined
+        ? 0
+        : Math.max(0, Math.floor((Date.parse(now) - Date.parse(oldest.occurredAt)) / 1000))
     };
   }
 
@@ -336,60 +365,90 @@ export class ProjectionDeliveryConsumer {
     return report;
   }
 
-  private async applyClaim(
-    tenantId: TenantId,
-    batch: readonly DocumentDeliveryOutboxRecord[],
-    now: string
-  ): Promise<{ readonly delivered: number; readonly failed: number }> {
-    const valid: { readonly record: DocumentDeliveryOutboxRecord; readonly snapshots: readonly DocumentSnapshot[] }[] = [];
-    let failed = 0;
-    for (const record of batch) {
-      try {
-        valid.push({ record, snapshots: projectionDeliverySnapshots(record) });
-      } catch (error) {
-        // A record that cannot be read will not become readable by retrying,
-        // but failing it — rather than dropping it — keeps it in flight, where
-        // the lag check counts it and an operator can see it.
-        await this.fail(record, now, documentDeliveryOutboxErrorMessage(error));
-        failed += 1;
-      }
-    }
-    if (valid.length === 0) {
-      return { delivered: 0, failed };
-    }
-    try {
-      await this.options.projections.saveNewest(valid.flatMap((entry) => entry.snapshots));
-    } catch (error) {
-      const message = documentDeliveryOutboxErrorMessage(error);
-      for (const { record } of valid) {
-        await this.fail(record, now, message);
-      }
-      return { delivered: 0, failed: failed + valid.length };
-    }
-    // Every record in one claim shares its claim id.
-    const claimId = valid[0]!.record.claimId!;
-    const delivered = await this.options.outbox.markDeliveredBatch({
-      tenantId,
-      claimId,
-      outboxIds: valid.map((entry) => entry.record.id)
-    });
-    return { delivered: delivered.length, failed };
+  private async cursor(tenantId: TenantId): Promise<ProjectionDeliveryCursor> {
+    const [newest] = await this.options.events.readStream(projectionDeliveryCursorStream(tenantId), { limit: 1 });
+    return projectionDeliveryCursor(newest);
   }
 
-  private async fail(record: DocumentDeliveryOutboxRecord, now: string, error: string): Promise<void> {
-    await this.options.outbox.markFailed({
-      tenantId: record.tenantId,
-      outboxId: record.id,
-      claimId: record.claimId!,
-      error,
-      retryAt: documentDeliveryOutboxRetryAt({
-        now,
-        attempts: record.attempts,
-        baseDelaySeconds: this.retryBaseDelaySeconds,
-        maxDelaySeconds: this.retryMaxDelaySeconds
-      })
-    });
+  /** The advanced cursor, or undefined when another drain advanced it first. */
+  private async advance(
+    tenantId: TenantId,
+    from: ProjectionDeliveryCursor,
+    toSequence: number,
+    round: ProjectionDeliveryRound
+  ): Promise<ProjectionDeliveryCursor | undefined> {
+    const stream = projectionDeliveryCursorStream(tenantId);
+    const payload: ProjectionDeliveryCursorEventPayload = {
+      kind: "ProjectionDeliveryCursorAdvanced",
+      fromSequence: from.position,
+      toSequence,
+      applied: round.applied,
+      skipped: round.skipped
+    };
+    try {
+      const [saved] = await this.options.events.append(stream, from.version, [{
+        id: this.ids.next("evt_"),
+        tenantId,
+        stream,
+        type: payload.kind,
+        doctype: PROJECTION_DELIVERY_DOCTYPE,
+        documentName: "cursor",
+        actorId: "system",
+        occurredAt: this.clock.now(),
+        payload,
+        metadata: {}
+      }]);
+      return { position: toSequence, version: saved!.sequence };
+    } catch (error) {
+      if (isDocumentConflictError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   }
+}
+
+interface ProjectionDeliveryRound {
+  /** Newest row per document across the round. */
+  readonly snapshots: readonly DocumentSnapshot[];
+  readonly applied: number;
+  readonly skipped: readonly ProjectionDeliverySkip[];
+}
+
+/**
+ * The rows one page of the channel carries, newest per document.
+ *
+ * A busy document is written many times between drains; applying only its
+ * newest row is what the version guard would leave anyway, at a fraction of the
+ * statements. Events on the channel that are not projection records are read
+ * past without counting either way — nothing else writes there today.
+ */
+function projectionDeliveryRound(tenantId: TenantId, records: readonly DomainEvent[]): ProjectionDeliveryRound {
+  const newest = new Map<string, DocumentSnapshot>();
+  const skipped: ProjectionDeliverySkip[] = [];
+  let applied = 0;
+  for (const record of records) {
+    const payload = record.payload as Partial<DocumentDeliveryOutboxEventPayload>;
+    if (payload.kind !== "DocumentDeliveryOutboxEnqueued") {
+      continue;
+    }
+    let snapshots: readonly DocumentSnapshot[];
+    try {
+      snapshots = projectionDeliverySnapshots(tenantId, record);
+    } catch (error) {
+      skipped.push({ sequence: record.sequence, eventId: record.id, reason: documentDeliveryOutboxErrorMessage(error) });
+      continue;
+    }
+    applied += 1;
+    for (const snapshot of snapshots) {
+      const key = `${snapshot.doctype}\u0000${snapshot.name}`;
+      const current = newest.get(key);
+      if (current === undefined || snapshot.version >= current.version) {
+        newest.set(key, snapshot);
+      }
+    }
+  }
+  return { snapshots: [...newest.values()], applied, skipped };
 }
 
 export interface ProjectionDeliveryDrainJobResources {
@@ -403,6 +462,10 @@ export interface ProjectionDeliveryDrainJobResources {
  * Drains one tenant's projection channel and then checks its lag, so the cron
  * that keeps the projection database fed is also what raises the alert when it
  * falls behind.
+ *
+ * The lag check runs whether or not the drain succeeded. A drain that throws —
+ * the projection database down, a row it refuses — is precisely when the
+ * projection falls behind, so it is the last case the alert may be skipped in.
  */
 export function createProjectionDeliveryDrainJob<
   TResources extends ProjectionDeliveryDrainJobResources = ProjectionDeliveryDrainJobResources
@@ -417,18 +480,26 @@ export function createProjectionDeliveryDrainJob<
       const limit = parseDocumentDeliveryOutboxDrainJobLimit(payload.limit);
       const maxRounds = parseProjectionDrainJobRounds(payload.maxRounds);
       const tenant = tenantId ?? "default";
-      const result = await consumer.drain({
-        tenantId: tenant,
-        ...(limit === undefined ? {} : { limit }),
-        ...(maxRounds === undefined ? {} : { maxRounds })
-      });
+      let result: ProjectionDeliveryDrainResult;
+      try {
+        result = await consumer.drain({
+          tenantId: tenant,
+          ...(limit === undefined ? {} : { limit }),
+          ...(maxRounds === undefined ? {} : { maxRounds })
+        });
+      } catch (error) {
+        // The drain's error is the one that matters; a lag check that also
+        // fails must not replace it.
+        await consumer.checkLag(tenant).catch(() => undefined);
+        throw error;
+      }
       const lag = await consumer.checkLag(tenant);
       return {
         tenantId: result.tenantId,
         rounds: result.rounds,
-        claimed: result.claimed,
         delivered: result.delivered,
-        failed: result.failed,
+        skipped: result.skipped,
+        cursor: result.cursor,
         lag: {
           status: lag.status,
           inFlight: lag.inFlight,

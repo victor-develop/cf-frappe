@@ -10,7 +10,11 @@ import type {
 import { badRequest } from "../core/errors.js";
 import { isAutomationRunClaimStore, type AutomationRunClaimStore } from "../ports/automation-run-claim-store.js";
 import type { EventStore } from "../ports/event-store.js";
-import type { MonotonicProjectionWriter, ProjectionStore } from "../ports/projection-store.js";
+import type {
+  MonotonicProjectionWriter,
+  ProjectionStore,
+  ProjectionVersionReader
+} from "../ports/projection-store.js";
 import type { SnapshotStore } from "../ports/snapshot-store.js";
 import { DocumentFoldSnapshots } from "./document-fold-snapshots.js";
 import { projectionRowFromEvents } from "./projection-backfill.js";
@@ -154,10 +158,18 @@ export interface ProjectionCatchUpResult {
 
 export interface ProjectionCatchUpOptions {
   /** The projection database itself — not a store that falls back to the primary. */
-  readonly projections: Pick<ProjectionStore, "get">;
+  readonly projections: ProjectionVersionReader;
   /** Longest a read waits for the caller's writes. */
   readonly timeoutMs?: number;
+  /** First pause between checks; each later pause doubles, up to `maxPollMs`. */
   readonly pollMs?: number;
+  readonly maxPollMs?: number;
+  /**
+   * Most checks one wait may run, the first included. Each check is one query
+   * on the projection database however many documents it covers, so this is the
+   * wait's whole share of the invocation's D1 query budget.
+   */
+  readonly maxChecks?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   /** Milliseconds, monotonic enough to measure a wait. */
   readonly now?: () => number;
@@ -165,6 +177,8 @@ export interface ProjectionCatchUpOptions {
 
 export const DEFAULT_PROJECTION_CATCH_UP_TIMEOUT_MS = 2_000;
 export const DEFAULT_PROJECTION_CATCH_UP_POLL_MS = 50;
+export const DEFAULT_PROJECTION_CATCH_UP_MAX_POLL_MS = 500;
+export const DEFAULT_PROJECTION_CATCH_UP_MAX_CHECKS = 10;
 export const MAX_PROJECTION_READ_REQUIREMENTS = 50;
 
 /**
@@ -177,12 +191,20 @@ export const MAX_PROJECTION_READ_REQUIREMENTS = 50;
  * so", and this does both. By-name reads never need this; they are strong
  * already (see {@link ConsistentProjectionStore}).
  *
+ * A wait costs at most `maxChecks` D1 queries — one per check, for every
+ * document at once — with the pauses between checks backing off. The case it
+ * exists for is a lagging projection, where the wait runs to its timeout; it
+ * must not be the read that then fails on the invocation's query limit
+ * (1 000 on Workers Paid, 50 on Free) instead of answering `stale`.
+ *
  * The other half — minting and checking the token a client carries between
  * the write and the read — is an HTTP concern, in `adapters/http`.
  */
 export class ProjectionCatchUp {
   private readonly timeoutMs: number;
   private readonly pollMs: number;
+  private readonly maxPollMs: number;
+  private readonly maxChecks: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
 
@@ -192,6 +214,17 @@ export class ProjectionCatchUp {
     if (this.pollMs === 0 && this.timeoutMs > 0) {
       throw badRequest("Projection catch-up pollMs must be positive when timeoutMs is");
     }
+    this.maxPollMs = nonNegativeInteger(
+      options.maxPollMs ?? Math.max(this.pollMs, DEFAULT_PROJECTION_CATCH_UP_MAX_POLL_MS),
+      "maxPollMs"
+    );
+    if (this.maxPollMs < this.pollMs) {
+      throw badRequest("Projection catch-up maxPollMs must be at least pollMs");
+    }
+    this.maxChecks = nonNegativeInteger(options.maxChecks ?? DEFAULT_PROJECTION_CATCH_UP_MAX_CHECKS, "maxChecks");
+    if (this.maxChecks === 0) {
+      throw badRequest("Projection catch-up maxChecks must be positive");
+    }
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = options.now ?? (() => Date.now());
   }
@@ -200,24 +233,37 @@ export class ProjectionCatchUp {
     if (requirements.length > MAX_PROJECTION_READ_REQUIREMENTS) {
       throw badRequest(`A read can wait for at most ${MAX_PROJECTION_READ_REQUIREMENTS} documents`);
     }
+    const [first] = requirements;
+    if (first === undefined) {
+      return { status: "fresh", pending: [], waitedMs: 0 };
+    }
+    if (requirements.some((requirement) => requirement.tenantId !== first.tenantId)) {
+      // A token is minted for one tenant; one tenant keeps a check one query.
+      throw badRequest("A read can only wait for documents of one tenant");
+    }
     const started = this.now();
-    let pending = await this.unmet(requirements);
+    let pending = await this.unmet(first.tenantId, requirements);
+    let checks = 1;
+    let pause = this.pollMs;
     while (pending.length > 0) {
       const waited = this.now() - started;
-      if (waited >= this.timeoutMs) {
+      if (waited >= this.timeoutMs || checks >= this.maxChecks) {
         return { status: "stale", pending, waitedMs: waited };
       }
-      await this.sleep(Math.min(this.pollMs, this.timeoutMs - waited));
-      pending = await this.unmet(pending);
+      await this.sleep(Math.min(pause, this.timeoutMs - waited));
+      pause = Math.min(pause * 2, this.maxPollMs);
+      pending = await this.unmet(first.tenantId, pending);
+      checks += 1;
     }
     return { status: "fresh", pending: [], waitedMs: this.now() - started };
   }
 
-  private async unmet(requirements: readonly ProjectionReadRequirement[]): Promise<readonly ProjectionReadRequirement[]> {
-    const rows = await Promise.all(requirements.map((requirement) =>
-      this.options.projections.get(requirement.tenantId, requirement.doctype, requirement.name)
-    ));
-    return requirements.filter((requirement, index) => (rows[index]?.version ?? 0) < requirement.version);
+  private async unmet(
+    tenantId: TenantId,
+    requirements: readonly ProjectionReadRequirement[]
+  ): Promise<readonly ProjectionReadRequirement[]> {
+    const versions = await this.options.projections.versions(tenantId, requirements);
+    return requirements.filter((requirement, index) => (versions[index] ?? 0) < requirement.version);
   }
 }
 

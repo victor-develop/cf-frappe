@@ -7,10 +7,15 @@ import type {
   TenantId
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
-import type { MonotonicProjectionWriter, ProjectionStore } from "../../ports/projection-store.js";
+import type {
+  MonotonicProjectionWriter,
+  ProjectionDocumentRef,
+  ProjectionStore,
+  ProjectionVersionReader
+} from "../../ports/projection-store.js";
 import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.js";
 
-export class InMemoryProjectionStore implements ProjectionStore, MonotonicProjectionWriter {
+export class InMemoryProjectionStore implements ProjectionStore, MonotonicProjectionWriter, ProjectionVersionReader {
   private readonly documents = new Map<string, DocumentSnapshot>();
 
   async get(
@@ -37,6 +42,10 @@ export class InMemoryProjectionStore implements ProjectionStore, MonotonicProjec
         );
       }
     }
+  }
+
+  async versions(tenantId: TenantId, refs: readonly ProjectionDocumentRef[]): Promise<readonly (number | null)[]> {
+    return refs.map((ref) => this.documents.get(key(tenantId, ref.doctype, ref.name))?.version ?? null);
   }
 
   async remove(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void> {

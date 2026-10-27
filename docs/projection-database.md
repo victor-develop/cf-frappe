@@ -35,12 +35,13 @@ Automation-run claim candidates being eventual only delays a claim: the claim it
 ## How a write reaches the projection database
 
 1. **The handoff, in the commit.** `D1DocumentStore` is constructed with a `ProjectionHandoff` (`src/ports/document-store.ts`). Instead of upserting rows, the batch appends one `DocumentDeliveryOutboxEnqueued` event — target `projection`, carrying every row the commit produced (the document, its naming counter, its unique reservations) — to the tenant's `projections` outbox stream. Same batch, so a write and its outbox record cannot come apart: not on a crashed Worker, not on an evicted Durable Object. That is the guarantee an after-commit hook (how notifications reach the outbox) cannot give.
-2. **Appended at the head, not by compare-and-swap.** Every write in a tenant hands off into the same stream. A CAS on it would serialize every writer in the tenant behind one version, so the record takes `MAX(sequence) + 1` inside the batch instead (`insertEventAtHeadStatement`). Head appends cannot conflict with each other; a drain's claim, which does CAS, just sees its expectation move and retries, as it already does against any other writer. `UNIQUE(stream, sequence)` still stands behind both.
+2. **Appended at the head, not by compare-and-swap.** Every write in a tenant hands off into the same stream. A CAS on it would serialize every writer in the tenant behind one version, so the record takes `MAX(sequence) + 1` inside the batch instead (`insertEventAtHeadStatement`). Head appends cannot conflict with each other, and nothing else ever appends to this stream — the consumer only reads it. `UNIQUE(stream, sequence)` still stands behind it.
 3. **Applied eagerly.** Right after the commit lands, the coordinator applies the same rows to the projection database (`eagerApply`, on by default). That is one extra D1 write on the write path, and it is why a document is normally listable before the write returns. A failure here is logged (`cf-frappe.projection.eager-apply-failed`) and never fails the write.
-4. **Drained.** `ProjectionDeliveryConsumer` claims the channel, applies a whole claim in one batch, and completes it with one `markDeliveredBatch`. Rows are written with `saveNewest`, which keeps whichever row has the higher version — so a redelivery, a delivery that lands after a newer eager apply, and a concurrent backfill all leave the newest row in place. The automation-run claim index has no version of its own and is rewritten only when the document row holds exactly that version.
-5. **Claims expire.** The projection channel's claims carry a lease (60 s by default): a consumer that dies between claiming and completing does not strand the record, it is claimed again. The default delivery outbox keeps its old behaviour, where a claim never expires.
+4. **Drained by cursor.** Head-append sequences are serial and gap-free, so "every record up to sequence N is applied" is the consumer's whole state. `ProjectionDeliveryConsumer` keeps it on a stream of its own, `<tenant>:__ProjectionDelivery:cursor`, that only consumers append to. A round reads the records past the cursor (up to `limit`, 25 by default), applies the newest row per document in one `saveNewest` batch, and advances the cursor with one `ProjectionDeliveryCursorAdvanced` event. Rows are written with `saveNewest`, which keeps whichever row has the higher version — so a round applied twice, a delivery that lands after a newer eager apply, and a concurrent backfill all leave the newest row in place. The automation-run claim index has no version of its own and is rewritten only when the document row holds exactly that version.
+5. **Writes never contend with the drain.** The consumer compare-and-swaps only its cursor stream, which no writer touches, so it makes progress however busy the tenant is. (An earlier design claimed and completed records on the channel itself; under sustained writes every head append moved the version the claim was checking, and the drain starved exactly when it had the most to do.) Two drains racing for the same range both apply it, harmlessly; one advances the cursor, and the other gets a conflict and stops.
+6. **Failure.** A round whose apply throws does not advance: the next drain reads the same records again, the job's retry backs off, and the lag alert fires if it goes on. A record that can never apply — it carries no valid snapshot — is read past rather than blocking every later write: it is named in the cursor event's `skipped` list and logged as `cf-frappe.projection.delivery-skipped`. A backfill repairs whatever it would have written.
 
-Projection deliveries travel on their own channel — their own stream per tenant — rather than the notification outbox's. One record per write would otherwise share a working set, and a compaction carry-over limit, with every notification the tenant sends.
+Projection deliveries travel on their own channel — their own stream per tenant — rather than the notification outbox's, which still claims and completes records with compaction (see [Document Delivery Outbox](delivery-outbox.md)).
 
 ## Read-your-writes
 
@@ -50,7 +51,7 @@ With `readYourWrites` configured, every successful write under `/api/resource/*`
 X-CF-Frappe-Read-After: <token>
 ```
 
-Send it back on any `GET /api/*` that must see that write. The read waits — up to `timeoutMs`, 2 s by default, polling every `pollMs` — until the projection database shows every document in the token at the version written, then runs, and says how it went:
+Send it back on any `GET /api/*` that must see that write. The read waits — up to `timeoutMs`, 2 s by default — until the projection database shows every document in the token at the version written, then runs, and says how it went. Each check is one query for every document in the token at once; the pauses between checks back off from `pollMs` (50 ms) to `maxPollMs` (500 ms), and a wait runs at most `maxChecks` (10) checks. With the defaults a wait that times out costs 8 D1 queries, well inside the per-invocation query limit even on Workers Free — a wait that blew that limit would turn the one case it exists for, a lagging projection, into an error instead of a `stale` answer.
 
 ```
 X-CF-Frappe-Consistency: fresh | stale | eventual
@@ -68,13 +69,15 @@ Desk does not forward tokens yet. Desk form loads are strong; a Desk list right 
 
 ## Lag
 
-`ProjectionDeliveryConsumer.lag(tenantId)` reports the channel's in-flight records — pending, claimed and failed — the age of the oldest, and the highest attempt count. `checkLag` compares it with the thresholds (`maxAgeSeconds`, 120 by default; `maxInFlight`, 1 000) and raises an alert when one is breached. The Cloudflare wiring's default alert is one structured log line, which Workers Logs records and a log-based alert can match on:
+`ProjectionDeliveryConsumer.lag(tenantId)` reports the cursor, the channel head, the records in flight between them, and the age of the oldest — three point reads however far behind the consumer is. `checkLag` compares it with the thresholds (`maxAgeSeconds`, 120 by default; `maxInFlight`, 1 000) and raises an alert when one is breached. The Cloudflare wiring's default alert is one structured log line, which Workers Logs records and a log-based alert can match on:
 
 ```json
 {"event":"cf-frappe.projection.lagging","tenantId":"acme","status":"lagging","breaches":["age"],"ageSeconds":3600,"inFlight":1,...}
 ```
 
-Pass `onLagAlert` to route it elsewhere. The drain job (`cf-frappe.projection-delivery.drain`) checks lag after every drain, so the cron that keeps the projection database fed is also what notices it falling behind.
+Pass `onLagAlert` to route it elsewhere. The drain job (`cf-frappe.projection-delivery.drain`) checks lag after every drain — including one that threw, which is when the alert matters most — so the cron that keeps the projection database fed is also what notices it falling behind.
+
+`onReadFallback` is told every time a by-name read found its projection row behind the stream head and folded `DB` instead. That is read load landing back on the primary; wire it to a metric if you want to watch it. It is not logged by default.
 
 ## Turning it on
 
@@ -117,6 +120,8 @@ Pass `onLagAlert` to route it elsewhere. The drain job (`cf-frappe.projection-de
 
    Schedule the drain job per tenant, with the matching cron trigger in `wrangler.jsonc`. With `eagerApply` on, the drain is the safety net, so once a minute is plenty; with it off, the drain interval *is* the list lag.
 
+   **Deploy the switch atomically.** The coordinator decides where rows go and the Worker decides where reads look. During a gradual deployment an old Worker reading `DB`'s table, next to a new coordinator writing through the handoff, serves stale lists and stale by-name reads (the old read path has no head check). Use a single non-gradual deployment for the switch in either direction, then run the backfill.
+
 3. **Backfill, switch, backfill again.** The projection database starts empty. `services.projectionBackfill` (a `ProjectionBackfillService`) folds a doctype's streams on `DB` into whichever table reads come from in the current layout:
 
    ```ts
@@ -137,28 +142,30 @@ Remove `projectionDatabase` from both, deploy, then backfill. With the switch of
 for (const doctype of [...]) await services.projectionBackfill.run({ tenantId, doctype });
 ```
 
-Until the backfill finishes, documents written during the split are missing or stale in lists; reads by name are not affected, since a missing row is folded from events. Writes resume inline immediately and nothing more is handed off. Records still in flight on the `projections` channel are harmless — nothing claims them once the drain job is gone — and they remain in the event history like every delivered one.
+Until the backfill finishes, documents written during the split are missing or stale in lists; reads by name are not affected, since a missing row is folded from events. Writes resume inline immediately and nothing more is handed off. Records still past the cursor on the `projections` channel are harmless — nothing reads them once the drain job is gone — and they remain in the event history like every delivered one. Switching on again later carries on from the same cursor; applying those old records then is a no-op, since `saveNewest` never replaces a newer row.
 
 `tests/application/projection-split.test.ts` runs both directions on the real SQLite engine: on — backfill, a write that straddles the switch, split writes, second backfill — and off, where the primary's table ends up row-for-row equal to what the projection database held.
 
 ## What it costs
 
 - **Lists are eventually consistent.** See above; this is the cost the issue says not to pay early.
-- **The primary still grows.** Each write appends one outbox record carrying its rows — the snapshot is stored a second time — and draining it appends a claim and a delivery: about three outbox events per write, plus one compaction checkpoint per drain round while 25 or fewer records are in flight as the round completes. Those are events and are never deleted; cold-event archival (#18) is what moves them out. The split takes the projection *table* and its indexes off the primary, not the write volume.
+- **The primary still grows.** Each write appends one channel record carrying its rows — the snapshot is stored a second time — and each drain round appends one small cursor event. Those are events and are never deleted; cold-event archival (#18) is what moves them out. The split takes the projection *table* and its indexes off the primary, not the write volume.
+- **Cold-event archival (#18) must keep two heads.** The channel is appended at `MAX(sequence) + 1` of the rows present, and the cursor is read from the newest cursor event. Archiving the head row of either stream would reuse sequences on the channel and rewind the cursor. Archival may move older rows of both, but never the newest.
 - **Writes do one more D1 write** with `eagerApply` on: the projection database batch after the commit.
 - **By-name reads do one more indexed query** on `DB`: the stream head check.
-- **A drain is two folds of the channel's tail** (claim, complete) plus one projection batch, per round of up to 25 records (`limit` up to 100). Between drains the tail grows with the writes; the compaction checkpoint stops being written while more than 25 records are in flight, so a drain that falls far behind reads more per round until it catches up. Raise the drain frequency, not the limit, if lag alerts fire.
-- **A drain stays inside one invocation's query budget.** Every D1 batch counts as one query against the per-invocation limit (1 000 on Workers Paid, 50 on Free — [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)), so a round is a few dozen queries at most: the claim's reads (one per record carried over a checkpoint), one apply batch and the completion's reads. The default of 10 rounds fits Paid comfortably; on Free pass `maxRounds: 1` in the job payload.
-- **Read-your-writes reads poll.** A read carrying a token for a write the projection already shows costs one point read per document in the token; one that has to wait polls every `pollMs`.
+- **A drain round is four queries** whatever the backlog: one keyed read of the next records past the cursor, one projection batch, and the cursor append (a version check and an insert); plus one cursor read per drain. Every D1 batch counts as one query against the per-invocation limit (1 000 on Workers Paid, 50 on Free — [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)), so the default of 10 rounds is about 41 queries — inside Free's limit too. A backlog drains at up to `limit × maxRounds` records per call (250 by default); raise the drain frequency or `maxRounds` if lag alerts fire.
+- **Read-your-writes reads cost a bounded number of queries.** A read carrying a token for a write the projection already shows costs one query; one that has to wait costs at most `maxChecks`.
+- **The backfill pages by key.** Each `advance` lists the next `batchSize + 1` streams after its cursor (`stream > ? ORDER BY stream LIMIT ?`), so it never holds the doctype's whole stream list in memory.
 
 ## Where things are
 
 | | |
 | --- | --- |
 | `src/ports/document-store.ts` | `ProjectionHandoff`, `DocumentStoreProjectionOptions` |
-| `src/ports/projection-store.ts` | `MonotonicProjectionWriter` (`saveNewest`) |
+| `src/ports/projection-store.ts` | `MonotonicProjectionWriter` (`saveNewest`), `ProjectionVersionReader` (`versions`) |
 | `src/adapters/d1/event-writer.ts` | `insertEventAtHeadStatement` |
 | `src/application/projection-delivery.ts` | `ProjectionOutboxHandoff`, `ProjectionDeliveryConsumer`, lag, the drain job |
+| `src/application/projection-delivery-events.ts` | the cursor event, `ProjectionDeliveryCursorAdvanced` |
 | `src/application/projection-read-consistency.ts` | `ConsistentProjectionStore`, `ProjectionCatchUp`, the consistency table |
 | `src/application/projection-backfill.ts` | `ProjectionBackfillService`, `PROJECTED_FRAMEWORK_DOCTYPES` |
 | `src/adapters/http/read-your-writes.ts` | token minting and checking, the headers |

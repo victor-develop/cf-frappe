@@ -7,7 +7,12 @@ import type {
   TenantId
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
-import type { MonotonicProjectionWriter, ProjectionStore } from "../../ports/projection-store.js";
+import type {
+  MonotonicProjectionWriter,
+  ProjectionDocumentRef,
+  ProjectionStore,
+  ProjectionVersionReader
+} from "../../ports/projection-store.js";
 import type { AutomationRunClaimStore } from "../../ports/automation-run-claim-store.js";
 import {
   automationRunIndexUpsertIfCurrentStatement,
@@ -21,7 +26,8 @@ import {
 import { documentFromRow, type DocumentRow } from "./serde.js";
 import { D1_DOCUMENTS_TABLE } from "./tables.js";
 
-export class D1ProjectionStore implements ProjectionStore, MonotonicProjectionWriter, AutomationRunClaimStore {
+export class D1ProjectionStore
+  implements ProjectionStore, MonotonicProjectionWriter, ProjectionVersionReader, AutomationRunClaimStore {
   constructor(private readonly db: D1Database) {}
 
   async get(
@@ -112,6 +118,34 @@ export class D1ProjectionStore implements ProjectionStore, MonotonicProjectionWr
         ...(index === undefined ? [] : [index])
       ];
     }));
+  }
+
+  /**
+   * One statement for every ref. The refs go in as a single JSON parameter and
+   * are unpacked with `json_each`, so the query stays inside D1's limit on
+   * bound parameters however many documents it names, and each ref is still a
+   * primary-key lookup.
+   */
+  async versions(tenantId: TenantId, refs: readonly ProjectionDocumentRef[]): Promise<readonly (number | null)[]> {
+    if (refs.length === 0) {
+      return [];
+    }
+    const result = await this.db
+      .prepare(
+        `SELECT CAST(ref.key AS INTEGER) AS position, document.version AS version
+         FROM json_each(?) AS ref
+         JOIN ${D1_DOCUMENTS_TABLE} AS document
+           ON document.tenant_id = ?
+          AND document.doctype = json_extract(ref.value, '$[0]')
+          AND document.name = json_extract(ref.value, '$[1]')`
+      )
+      .bind(JSON.stringify(refs.map((ref) => [ref.doctype, ref.name])), tenantId)
+      .all<{ position: number; version: number }>();
+    const versions: (number | null)[] = refs.map(() => null);
+    for (const row of result.results ?? []) {
+      versions[Number(row.position)] = Number(row.version);
+    }
+    return versions;
   }
 
   async remove(tenantId: TenantId, doctype: DocTypeName, name: DocumentName): Promise<void> {

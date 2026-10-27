@@ -97,9 +97,17 @@ export class ProjectionBackfillService {
 
   async advance(command: ProjectionBackfillCommand): Promise<ProjectionBackfillResult> {
     const batchSize = backfillBatchSize(command.batchSize);
-    const streams = await this.options.streams.listStreams({ tenantId: command.tenantId, doctype: command.doctype });
-    const pending = streams.filter((stream) => command.after === undefined || stream > command.after);
-    const batch = pending.slice(0, batchSize);
+    // One more than the batch, to learn whether there is more without a second
+    // query. A keyset page, not the doctype's whole stream list sliced here:
+    // the backfill that switches the split on runs at exactly the scale where
+    // listing every stream on every batch stops fitting in an invocation.
+    const page = await this.options.streams.listStreams({
+      tenantId: command.tenantId,
+      doctype: command.doctype,
+      ...(command.after === undefined ? {} : { after: command.after }),
+      limit: batchSize + 1
+    });
+    const batch = page.slice(0, batchSize);
     const snapshots: DocumentSnapshot[] = [];
     for (const stream of batch) {
       const snapshot = projectionRowFromEvents(command.tenantId, command.doctype, await this.options.events.readStream(stream));
@@ -115,7 +123,7 @@ export class ProjectionBackfillService {
       doctype: command.doctype,
       applied: snapshots.length,
       ...(batch.length === 0 ? (command.after === undefined ? {} : { cursor: command.after }) : { cursor: batch.at(-1)! }),
-      more: pending.length > batch.length
+      more: page.length > batch.length
     };
   }
 
