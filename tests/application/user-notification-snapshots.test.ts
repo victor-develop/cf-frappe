@@ -180,8 +180,16 @@ describe("user notification fold snapshots", () => {
       return Number(process.hrtime.bigint() - started);
     };
 
-    const without = await measure();
-    const with_ = await measure(new InMemorySnapshotStore());
+    // Best of several interleaved trials, not one of each: under a loaded test
+    // run a single trial can be stalled by GC or another worker, which made this
+    // fail intermittently. The fastest trial is the one least disturbed, and
+    // interleaving gives both sides the same machine.
+    let without = Number.POSITIVE_INFINITY;
+    let with_ = Number.POSITIVE_INFINITY;
+    for (let trial = 0; trial < 5; trial += 1) {
+      without = Math.min(without, await measure());
+      with_ = Math.min(with_, await measure(new InMemorySnapshotStore()));
+    }
 
     // Measured around 0.10x; anything at or above parity means the snapshot is
     // costing more than the replay it removes.
