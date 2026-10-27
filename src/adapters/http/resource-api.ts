@@ -89,6 +89,7 @@ import {
   readBoundedText,
   requestMetadata
 } from "./request.js";
+import { readYourWritesMiddleware, type ReadYourWritesHttpOptions } from "./read-your-writes.js";
 import { writeCsvDownloadHeaders, writeCsvExportHeaders } from "./report-export.js";
 import { createRoleApi } from "./role-api.js";
 import { createSavedReportApi } from "./saved-report-api.js";
@@ -146,6 +147,12 @@ export interface ResourceApiOptions {
   readonly fieldProperties?: FieldPropertyService;
   readonly workflows?: WorkflowService;
   readonly naming?: NamingService;
+  /**
+   * Read-your-writes tokens, for the split projection layout (issue #13).
+   * Omitted — the single-database layout — no token is minted or honoured and
+   * responses carry no extra headers.
+   */
+  readonly readYourWrites?: ReadYourWritesHttpOptions;
 }
 
 export function createResourceApi(options: ResourceApiOptions): Hono {
@@ -165,6 +172,10 @@ export function createResourceApi(options: ResourceApiOptions): Hono {
       404
     )
   );
+
+  if (options.readYourWrites) {
+    app.use("/api/*", readYourWritesMiddleware(options.readYourWrites, resolveActor));
+  }
 
   app.get("/health", (c) => c.json({ ok: true }));
 
