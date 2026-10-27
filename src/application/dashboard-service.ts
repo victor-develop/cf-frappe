@@ -151,7 +151,8 @@ export class DashboardService {
     reducer: (accumulator: T, document: DocumentSnapshot) => T
   ): Promise<T> {
     const analytics = this.analytics;
-    if (analytics !== undefined && planAnalyticsQueryPath({ declared: queryPath, configured: true }).status === "analytical") {
+    const path = planAnalyticsQueryPath({ declared: queryPath, configured: analytics !== undefined });
+    if (path.status === "analytical" && analytics !== undefined) {
       try {
         const predicate = await this.analyticsPredicate(actor, doctype, filters, filterExpression);
         const { documents } = await analytics.readableDocuments(actor, doctype, predicate === undefined ? {} : { predicate });
