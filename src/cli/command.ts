@@ -287,6 +287,7 @@ interface InstallCommand {
 interface MigrateGenerateCommand {
   readonly kind: "migrate-generate";
   readonly includeCore: boolean;
+  readonly typedProjections: boolean;
   readonly migrationsDir?: string;
   readonly registryFile?: string;
 }
@@ -610,6 +611,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       const result = await generateD1MigrationFiles({
         cwd: io.cwd(),
         includeCore: command.includeCore,
+        ...(command.typedProjections ? { typedProjections: true } : {}),
         ...(command.migrationsDir === undefined ? {} : { migrationsDir: command.migrationsDir }),
         ...(command.registryFile === undefined ? {} : { registryFile: command.registryFile }),
         ...(io.migrationRegistryLoader === undefined ? {} : { registryLoader: io.migrationRegistryLoader })
@@ -6990,6 +6992,7 @@ function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
     return { kind: "invalid", message: `Unknown migrate command '${subcommand}'` };
   }
   let includeCore = true;
+  let typedProjections = false;
   let migrationsDir: string | undefined;
   let registryFile: string | undefined;
   for (let index = 0; index < rest.length; index += 1) {
@@ -7002,6 +7005,10 @@ function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
     }
     if (arg === "--no-core") {
       includeCore = false;
+      continue;
+    }
+    if (arg === "--typed-projections") {
+      typedProjections = true;
       continue;
     }
     if (arg === "--registry") {
@@ -7027,6 +7034,7 @@ function parseMigrateArgs(argv: readonly string[]): ParsedCommand {
   return {
     kind: "migrate-generate",
     includeCore,
+    typedProjections,
     ...(migrationsDir === undefined ? {} : { migrationsDir }),
     ...(registryFile === undefined ? {} : { registryFile })
   };
@@ -7195,7 +7203,7 @@ function helpText(): string {
     "Usage:",
     "  cf-frappe init <directory> [--force] [--auth <signed-session|cloudflare-access|oidc>]",
     "  cf-frappe install <module> [--version <range>] [--export <name>] [--as <localName>] [--registry <path>] [--package-manager <npm|pnpm|yarn|bun>] [--no-install] [--no-save]",
-    "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core]",
+    "  cf-frappe migrate generate [--registry <path>] [--migrations <dir>] [--no-core] [--typed-projections]",
     "  cf-frappe access plan (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
     "  cf-frappe access apply (--account-id <id>|--zone-id <id>) --team-domain <team.cloudflareaccess.com> --name <appName> --domain <host[/path]> (--email <user>|--email-domain <domain>|--group <id>|--everyone) --api-token-env <ENV> [--policy-name <name>] [--allowed-idp <id>] [--session-duration <duration>]",
     "  cf-frappe audit events --url <origin> [--tenant <tenant>] [--doctype <doctype>] [--name <docname>] [--actor-id <actor>] [--kind <eventKind>] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--header <name:value>] [--header-env <name=ENV>]",

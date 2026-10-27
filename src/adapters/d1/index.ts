@@ -15,3 +15,4 @@ export * from "./serde.js";
 export * from "./snapshot-store.js";
 export * from "./statistics.js";
 export * from "./tables.js";
+export * from "./typed-projection-layout.js";

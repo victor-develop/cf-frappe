@@ -10,6 +10,8 @@ import {
   D1_QUERIED_TABLES,
   D1_STATISTICS_TARGETS,
   D1_TABLES,
+  D1_TYPED_PROJECTION_TABLE_PREFIX,
+  defineDocType,
   planD1Migrations
 } from "../../src";
 import { isMetadataName, isPlainIdentifier } from "../../src/core/identifiers.js";
@@ -63,6 +65,25 @@ describe("D1 table constants", () => {
       D1_MIGRATIONS_TABLE,
       D1_FOLD_SNAPSHOTS_TABLE
     ]);
+  });
+
+  it("keeps the generated typed projection tables out of the framework's namespace", () => {
+    // Typed tables (issue #15) are generated per application, like projection
+    // indexes, so no checked-in migration creates them and they are not in
+    // D1_TABLES. What must hold instead: no framework table can ever be
+    // mistaken for one, and every one the planner generates carries the prefix.
+    for (const table of D1_TABLES) {
+      expect(table.startsWith(D1_TYPED_PROJECTION_TABLE_PREFIX), table).toBe(false);
+    }
+    expect(isPlainIdentifier(D1_TYPED_PROJECTION_TABLE_PREFIX)).toBe(true);
+    const Task = defineDocType({ name: "Sales Order", fields: [{ name: "status", type: "text" }], indexes: [["status"]] });
+    const sql = planD1Migrations([Task], { includeCore: false, typedProjections: true })
+      .flatMap((migration) => migration.statements.map((statement) => statement.sql))
+      .join("\n");
+    const created = [...sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]!);
+    expect(created).toHaveLength(1);
+    expect(created[0]!.startsWith(`${D1_TYPED_PROJECTION_TABLE_PREFIX}sales_order_`)).toBe(true);
+    expect(isPlainIdentifier(created[0]!)).toBe(true);
   });
 
   it("keeps every table name a plain SQL identifier", () => {
