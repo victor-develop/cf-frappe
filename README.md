@@ -266,7 +266,7 @@ createAggregateCoordinatorClass<Env>({ registry, projectionDatabase });
 createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* + createProjectionDeliveryDrainJob() */ } });
 ```
 
-The cost is real: lists, reports and dashboards become eventually consistent. Reads of one document by name stay strongly consistent, and writes never read projections at all. A write response carries an `X-CF-Frappe-Read-After` token; send it back on a read to wait for that write. Leave it off until the trigger is reached. [Separate Projection Database](docs/projection-database.md) covers which reads are strong, the lag alert, turning it on, and turning it back off.
+The cost is real: lists, reports and dashboards become eventually consistent. Reads of one document by name stay strongly consistent, and writes never read projections at all. A write response carries an `X-CF-Frappe-Read-After` token; send it back on a read to wait for that write. Leave it off until the trigger is reached. Turning it back off needs the same care as turning it on: drain the projection channel into `DB`'s own table with `createProjectionRollbackDrainJob()` *while the split is still on*, then switch, then drain once more — with the switch off, reads by name come straight from that table. [Separate Projection Database](docs/projection-database.md) covers which reads are strong, the lag alert, turning it on, and turning it back off.
 
 ### Development Setup
 
@@ -579,7 +579,7 @@ createAggregateCoordinatorClass<Env>({ registry, projectionDatabase });
 createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* + createProjectionDeliveryDrainJob() */ } });
 ```
 
-代价是实打实的：列表、报表和仪表板会变成最终一致。按名称读取单个文档仍然是强一致的，写入路径也从不读投影。写入的响应会带一个 `X-CF-Frappe-Read-After` token，读取时带回去，就会等到这次写入可见。触发条件没到之前请保持关闭。哪些读取是强一致、lag 告警、怎么开启、怎么回退到单库，见 [Separate Projection Database](docs/projection-database.md)。
+代价是实打实的：列表、报表和仪表板会变成最终一致。按名称读取单个文档仍然是强一致的，写入路径也从不读投影。写入的响应会带一个 `X-CF-Frappe-Read-After` token，读取时带回去，就会等到这次写入可见。触发条件没到之前请保持关闭。回退到单库和开启一样要讲顺序：**在分库还开着的时候**，先用 `createProjectionRollbackDrainJob()` 把投影 channel 回放进 `DB` 自己的投影表，再关开关、部署，然后再回放一次——开关一关，按名称读取就直接读这张表了。哪些读取是强一致、lag 告警、怎么开启、怎么回退到单库，见 [Separate Projection Database](docs/projection-database.md)。
 
 ### 开发环境
 

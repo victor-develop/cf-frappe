@@ -2,11 +2,14 @@ import {
   CONSISTENCY_HEADER,
   createJobRegistry,
   createProjectionDeliveryDrainJob,
+  createProjectionRollbackDrainJob,
   createRegistry,
   defineDocType,
   documentDeliveryOutboxStream,
   PROJECTION_DELIVERY_DRAIN_JOB_NAME,
   PROJECTION_OUTBOX_CHANNEL,
+  PROJECTION_ROLLBACK_CURSOR,
+  PROJECTION_ROLLBACK_DRAIN_JOB_NAME,
   projectionDeliveryCursorStream,
   READ_AFTER_HEADER,
   InMemoryJobQueue,
@@ -235,6 +238,114 @@ describe("the projection database switch", () => {
       "SELECT json_extract(payload_json, '$.toSequence') AS position FROM cf_frappe_events WHERE stream = ?",
       projectionDeliveryCursorStream("acme")
     )).toEqual([{ position: 1 }]);
+    db.close();
+  });
+
+  it("switches off with the documented steps: rollback drain job on, switch, and reads by name are current", async () => {
+    const db = databases();
+    const context = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
+    const jobs = createJobRegistry<CloudFrappeRuntimeServices>({
+      jobs: [createProjectionDeliveryDrainJob(), createProjectionRollbackDrainJob()]
+    });
+    const runJob = async (worker: ReturnType<typeof createCloudFrappeWorker<Env>>, env: Env, jobName: string) => {
+      const acked: string[] = [];
+      await worker.queue!({
+        queue: "jobs",
+        messages: [{
+          id: jobName,
+          timestamp: new Date(),
+          body: {
+            jobName,
+            runId: `run-${jobName}`,
+            tenantId: "acme",
+            payload: {},
+            idempotencyKey: `key-${jobName}-${acked.length}-${Math.random()}`,
+            enqueuedAt: "2026-03-01T00:00:00.000Z",
+            metadata: {}
+          } satisfies JobMessage,
+          attempts: 1,
+          ack: () => acked.push("ack"),
+          retry: () => acked.push("retry")
+        }],
+        ackAll() {},
+        retryAll() {}
+      } as never, env, context);
+      expect(acked).toEqual(["ack"]);
+    };
+
+    // On: a write and an edit, handed off; the rollback drain job applies the
+    // channel to DB's own table under its own cursor while the split is on.
+    const On = createAggregateCoordinatorClass<Env>({
+      registry,
+      notifications: false,
+      assignmentRuleActor: false,
+      projectionDatabase
+    });
+    let onEnv!: Env;
+    onEnv = {
+      DB: db.primary.database,
+      PROJECTIONS_DB: db.projections.database,
+      READ_AFTER_SECRET: "test-only-secret",
+      AGGREGATES: namespaceOf(On, () => onEnv)
+    };
+    const on = createCloudFrappeWorker<Env>({
+      registry,
+      actor: unsafeHeaderActorResolver,
+      projectionDatabase,
+      jobs: { registry: jobs, queue: () => new InMemoryJobQueue() }
+    });
+    const send = (worker: typeof on, env: Env, path: string, init: RequestInit = {}) =>
+      worker.fetch!(new Request(`https://app.test${path}`, {
+        ...init,
+        headers: { ...headers, "content-type": "application/json", ...(init.headers ?? {}) }
+      }) as never, env, context);
+    expect((await send(on, onEnv, "/api/resource/Note", {
+      method: "POST",
+      body: JSON.stringify({ name: "One", title: "Draft" })
+    })).status).toBe(201);
+    expect((await send(on, onEnv, "/api/resource/Note/One", {
+      method: "PUT",
+      body: JSON.stringify({ title: "Edited" })
+    })).status).toBe(200);
+    expect(rows(db.primary, "cf_frappe_documents")).toEqual([]);
+    await runJob(on, onEnv, PROJECTION_ROLLBACK_DRAIN_JOB_NAME);
+    expect(db.primary.query(
+      "SELECT json_extract(payload_json, '$.toSequence') AS position FROM cf_frappe_events WHERE stream = ?",
+      projectionDeliveryCursorStream("acme", PROJECTION_ROLLBACK_CURSOR)
+    )).toEqual([{ position: 2 }]);
+    // The projection database's own cursor has not moved.
+    expect(db.primary.query(
+      "SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ?",
+      projectionDeliveryCursorStream("acme")
+    )).toEqual([{ n: 0 }]);
+
+    // Off: the same DB, no projectionDatabase. Read by name straight away.
+    const Off = createAggregateCoordinatorClass<Env>({ registry, notifications: false, assignmentRuleActor: false });
+    let offEnv!: Env;
+    offEnv = { ...onEnv, AGGREGATES: namespaceOf(Off, () => offEnv) };
+    const off = createCloudFrappeWorker<Env>({
+      registry,
+      actor: unsafeHeaderActorResolver,
+      jobs: { registry: jobs, queue: () => new InMemoryJobQueue() }
+    });
+    const read = await send(off, offEnv, "/api/resource/Note/One");
+    expect(read.status).toBe(200);
+    await expect(read.json()).resolves.toMatchObject({ data: { name: "One", version: 2, data: { title: "Edited" } } });
+    // The job runs in the off layout too, for the records handed off after its
+    // last round; here there are none.
+    await runJob(off, offEnv, PROJECTION_ROLLBACK_DRAIN_JOB_NAME);
+    db.close();
+  });
+
+  it("warns when the split is on and no drain job is registered", async () => {
+    const db = databases();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const env = { DB: db.primary.database, PROJECTIONS_DB: db.projections.database, READ_AFTER_SECRET: "s" } as Env;
+    const worker = createCloudFrappeWorker<Env>({ registry, actor: unsafeHeaderActorResolver, projectionDatabase });
+    const context = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
+    await worker.fetch!(new Request("https://app.test/api/resource/Note", { headers }) as never, env, context);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("\"event\":\"cf-frappe.projection.drain-job-missing\""));
+    warn.mockRestore();
     db.close();
   });
 

@@ -11,6 +11,7 @@ import {
   fixedClock,
   PROJECTED_FRAMEWORK_DOCTYPES,
   PROJECTION_OUTBOX_CHANNEL,
+  PROJECTION_ROLLBACK_CURSOR,
   ProjectionBackfillService,
   ProjectionDeliveryConsumer,
   ProjectionOutboxHandoff,
@@ -618,33 +619,76 @@ describe("projections in a separate D1 (issue #13)", () => {
       after.close();
     });
 
-    it("turns back off: the primary's own table is backfilled to what the projection database held", async () => {
+    it("turns back off with reads by name current from the switch on: drain into the primary, switch, drain once more", async () => {
       const layout = split();
       await exercise(layout.documents);
+      const edited = await layout.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Draft" } });
+      await layout.documents.update({ actor: agent, doctype: "Ticket", name: edited.name, patch: { subject: "Edited" } });
       await layout.consumer.drain({ tenantId: "acme" });
       expect(documentRows(layout.primary)).toEqual([]);
 
-      const handedOff = projectionOutboxEvents(layout.primary).length;
-      const back = single(layout.primary);
-      const events = new D1EventStore(layout.primary.database);
-      const backfill = new ProjectionBackfillService({
-        events,
-        streams: events,
-        target: new D1ProjectionStore(layout.primary.database)
+      // While the split is still on, the channel is applied to the primary's own
+      // table under a cursor of its own. Nothing else writes that table now.
+      const rollback = new ProjectionDeliveryConsumer({
+        events: layout.events,
+        projections: new D1ProjectionStore(layout.primary.database),
+        cursor: PROJECTION_ROLLBACK_CURSOR,
+        ids: sequentialIds("r"),
+        clock: fixedClock(NOW)
       });
-      for (const doctype of ["Ticket", ...PROJECTED_FRAMEWORK_DOCTYPES]) {
-        await backfill.run({ tenantId: "acme", doctype });
-      }
+      await rollback.drain({ tenantId: "acme" });
+      // A write in the split after that drain, before the switch.
+      const straddler = await layout.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "Straddler" } });
+      const handedOff = projectionOutboxEvents(layout.primary).length;
 
+      // The switch. Reads by name now come from the primary's table with no
+      // stream head check, so they are only right if that table is.
+      const back = single(layout.primary);
+      await expect(back.queries.getDocument(agent, "Ticket", edited.name)).resolves.toMatchObject({
+        version: 2,
+        data: { subject: "Edited" }
+      });
+      await expect(back.queries.listDocuments(agent, "Ticket", { orderBy: "name", order: "asc" })).resolves.toMatchObject({
+        total: 3,
+        data: [{ data: { subject: "Printer" } }, { data: { subject: "Keyboard" } }, { data: { subject: "Edited" } }]
+      });
+      // The straddler is the one gap: handed off after the rollback's last
+      // round, and missing until the rollback drains once more.
+      await expect(back.queries.getDocument(agent, "Ticket", straddler.name)).rejects.toThrow();
+      await expect(rollback.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 1 });
+      await expect(back.queries.getDocument(agent, "Ticket", straddler.name)).resolves.toMatchObject({
+        data: { subject: "Straddler" }
+      });
+
+      // The primary's table ends up row for row what the projection database
+      // holds once it too has drained the channel.
+      await layout.consumer.drain({ tenantId: "acme" });
       expect(documentRows(layout.primary)).toEqual(documentRows(layout.projectionDb));
+      // The two consumers kept separate cursors on the one channel.
+      expect(await rollback.lag("acme")).toMatchObject({ inFlight: 0, cursor: handedOff });
+      expect(await layout.consumer.lag("acme")).toMatchObject({ inFlight: 0, cursor: handedOff });
+      expect(layout.primary.query(
+        "SELECT COUNT(*) AS n FROM cf_frappe_events WHERE stream = ?",
+        projectionDeliveryCursorStream("acme", PROJECTION_ROLLBACK_CURSOR)
+      )).toEqual([{ n: 2 }]);
+
       // And the single layout carries on writing inline from there.
       const created = await back.documents.create({ actor: agent, doctype: "Ticket", data: { subject: "After" } });
       await expect(back.queries.getDocument(agent, "Ticket", created.name)).resolves.toMatchObject({
         data: { subject: "After" }
       });
-      // Inline again: nothing more is handed off.
+      // Inline again: nothing more is handed off, and the rollback has nothing left.
       expect(projectionOutboxEvents(layout.primary)).toHaveLength(handedOff);
+      await expect(rollback.drain({ tenantId: "acme" })).resolves.toMatchObject({ delivered: 0, cursor: handedOff });
       layout.close();
+    });
+
+    it("rejects a cursor name that is not a plain identifier", () => {
+      const events = new D1EventStore(createTestD1({ schema: frameworkSchema() }).database);
+      const projections = new D1ProjectionStore(createTestD1({ schema: frameworkSchema() }).database);
+      for (const cursor of ["", "Primary", "a:b", "x".repeat(41)]) {
+        expect(() => new ProjectionDeliveryConsumer({ events, projections, cursor })).toThrow(/cursor/);
+      }
     });
   });
 });

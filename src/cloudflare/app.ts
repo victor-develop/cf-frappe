@@ -33,7 +33,9 @@ import { DocumentDeliveryOutboxService } from "../application/document-delivery-
 import { ProjectionBackfillService } from "../application/projection-backfill.js";
 import {
   PROJECTION_DELIVERY_DRAIN_JOB_NAME,
-  type ProjectionDeliveryConsumer
+  PROJECTION_ROLLBACK_CURSOR,
+  PROJECTION_ROLLBACK_DRAIN_JOB_NAME,
+  ProjectionDeliveryConsumer
 } from "../application/projection-delivery.js";
 import {
   createProjectionRuntime,
@@ -167,12 +169,20 @@ export interface CloudFrappeRuntimeServices {
   /**
    * Folds streams on the primary into whichever projection table reads come
    * from in this layout — the projection database when the split is on, the
-   * primary's own table when it is off. That is what makes it the tool for both
-   * directions of the switch; see `docs/projection-database.md`.
+   * primary's own table when it is off. The tool for switching the split on;
+   * switching it off goes through `projectionRollback` instead, so the table is
+   * current before reads move to it. See `docs/projection-database.md`.
    */
   readonly projectionBackfill: ProjectionBackfillService;
   /** Present only with `projectionDatabase`: drains the projection channel and reports its lag. */
   readonly projectionDelivery?: ProjectionDeliveryConsumer;
+  /**
+   * Drains the projection channel into the primary's own projection table,
+   * under its own cursor. The first half of switching the split off: run it
+   * while the split is still on, so the table reads come back to is current on
+   * the switch; see `docs/projection-database.md`.
+   */
+  readonly projectionRollback: ProjectionDeliveryConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -396,6 +406,13 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const projections = projectionRuntime?.projections ?? new D1ProjectionStore(env.DB);
   const projectionBackfill = projectionRuntime?.backfill ??
     new ProjectionBackfillService({ events, streams: events, target: new D1ProjectionStore(env.DB) });
+  // In either layout, and nothing calls it unless an operator switching the
+  // split off does: with the split off and never on, the channel is empty.
+  const projectionRollback = new ProjectionDeliveryConsumer({
+    events,
+    projections: new D1ProjectionStore(env.DB),
+    cursor: PROJECTION_ROLLBACK_CURSOR
+  });
   const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
   const automationRunStore = new D1DocumentStore(env.DB, documentStoreOptions);
   const documents = new DurableObjectCommandExecutor({
@@ -611,6 +628,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
     ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
     projectionBackfill,
+    projectionRollback,
     ...(projectionRuntime === undefined ? {} : { projectionDelivery: projectionRuntime.delivery })
   };
   const files = options.files
@@ -658,6 +676,17 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     projectionRuntime !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(PROJECTION_DELIVERY_DRAIN_JOB_NAME);
+  const projectionRollbackDrainQueueEnabled =
+    jobOptions !== undefined &&
+    jobOptions.registry.has(PROJECTION_ROLLBACK_DRAIN_JOB_NAME);
+  if (projectionRuntime !== undefined && !projectionDeliveryDrainQueueEnabled) {
+    // Not an error — a deployment may drain from elsewhere — but with no drain
+    // job the lag alert never runs either, and the channel can grow unwatched.
+    console.warn(JSON.stringify({
+      event: "cf-frappe.projection.drain-job-missing",
+      message: `projectionDatabase is set but the ${PROJECTION_DELIVERY_DRAIN_JOB_NAME} job is not registered`
+    }));
+  }
   const automationRunDrainQueueEnabled =
     jobOptions !== undefined &&
     jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
@@ -675,6 +704,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
           ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
           ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
           ...(projectionDeliveryDrainQueueEnabled ? { projectionDelivery: projectionRuntime.delivery } : {}),
+          ...(projectionRollbackDrainQueueEnabled ? { projectionRollback } : {}),
           ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
         })
       )

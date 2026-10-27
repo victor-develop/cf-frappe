@@ -120,7 +120,7 @@ Pass `onLagAlert` to route it elsewhere. The drain job (`cf-frappe.projection-de
 
    Schedule the drain job per tenant, with the matching cron trigger in `wrangler.jsonc`. With `eagerApply` on, the drain is the safety net, so once a minute is plenty; with it off, the drain interval *is* the list lag.
 
-   **Deploy the switch atomically.** The coordinator decides where rows go and the Worker decides where reads look. During a gradual deployment an old Worker reading `DB`'s table, next to a new coordinator writing through the handoff, serves stale lists and stale by-name reads (the old read path has no head check). Use a single non-gradual deployment for the switch in either direction, then run the backfill.
+   **Deploy the switch atomically.** The coordinator decides where rows go and the Worker decides where reads look. During a gradual deployment an old Worker reading `DB`'s table, next to a new coordinator writing through the handoff, serves stale lists and stale by-name reads (the old read path has no head check). Use a single non-gradual deployment for the switch in either direction.
 
 3. **Backfill, switch, backfill again.** The projection database starts empty. `services.projectionBackfill` (a `ProjectionBackfillService`) folds a doctype's streams on `DB` into whichever table reads come from in the current layout:
 
@@ -136,21 +136,27 @@ Pass `onLagAlert` to route it elsewhere. The drain job (`cf-frappe.projection-de
 
 ## Turning it off
 
-Remove `projectionDatabase` from both, deploy, then backfill. With the switch off, `services.projectionBackfill` targets `DB`'s own projection table, which stopped being written while the split was on:
+Turning it off mirrors turning it on: bring the table reads will come from up to date *before* the switch, not after. This matters more in this direction. With the switch off, reads by name come from `DB`'s own projection table through a plain `D1ProjectionStore`, with no stream head check and no fold from events — exactly as on a deployment that never had the split. `DB`'s table stopped being written when the split went on, so if it is still behind on the switch, a document created during the split reads as not found (a 404 in Desk, an automation update that cannot find its target) and one edited during the split comes back at an old version (the next save fails on `expectedVersion`), until whatever catches the table up finishes.
 
-```ts
-for (const doctype of [...]) await services.projectionBackfill.run({ tenantId, doctype });
-```
+What catches it up is the projection channel itself. While the split is on, every commit's rows are on the channel; `DB`'s table already held everything up to the moment the split went on. So applying the channel to `DB`'s table, from the start, makes it as current as the projection database — and it costs one keyed read per round however large the database is, rather than folding every stream again. `services.projectionRollback` is that consumer: a `ProjectionDeliveryConsumer` over the same channel, writing `DB`'s own table under a cursor of its own (`PROJECTION_ROLLBACK_CURSOR`, `<tenant>:__ProjectionDelivery:primary`), so it neither moves nor waits for the projection database's cursor. While the split is on nothing else writes `DB`'s table, and `saveNewest` keeps the newest row whatever order things land in.
 
-Until the backfill finishes, documents written during the split are missing or stale in lists; reads by name are not affected, since a missing row is folded from events. Writes resume inline immediately and nothing more is handed off. Records still past the cursor on the `projections` channel are harmless — nothing reads them once the drain job is gone — and they remain in the event history like every delivered one. Switching on again later carries on from the same cursor; applying those old records then is a no-op, since `saveNewest` never replaces a newer row.
+1. **While the split is still on, drain the channel into `DB`.** Register `createProjectionRollbackDrainJob()` next to the projection drain and schedule it per tenant (once a minute is fine), or drive `services.projectionRollback.drain({ tenantId })` yourself. Wait until `services.projectionRollback.lag(tenantId)` reports `inFlight` close to 0 — the first run works through every write made during the split.
+2. **Switch off.** Remove `projectionDatabase` from both the coordinator and the Worker and deploy, in one non-gradual deployment (see above). Keep the rollback drain job registered.
+3. **Drain once more.** Run the rollback drain right after the deploy, until `inFlight` is 0. With the switch off nothing is handed off any more, so the channel stops growing and this finishes in a round or two. Then remove the job and its schedule.
 
-`tests/application/projection-split.test.ts` runs both directions on the real SQLite engine: on — backfill, a write that straddles the switch, split writes, second backfill — and off, where the primary's table ends up row-for-row equal to what the projection database held.
+The only reads that can be wrong are reads by name of documents written in the gap between the rollback's last round before the deploy and its first round after it — with the job on a one-minute cron and a drain run right after the deploy, about a minute of writes. Lists in that gap are behind by the same records. If even that gap is too much, put the tenant into maintenance (no writes) for the deploy and step 3.
+
+If archival (#18) ever moved channel records that the rollback cursor had not passed, the channel no longer holds every write of the split. In that case fold the streams instead, also while the split is on and also into `DB`'s table — construct `ProjectionBackfillService` with `target: new D1ProjectionStore(env.DB)` and run it for every doctype — and then follow the three steps above. A full fold of a database near 5 GB takes many invocations, which is why it is the fallback and not the procedure.
+
+Writes resume inline immediately after the switch. Records past the projection database's cursor are harmless once its drain job is gone, and remain in the event history like every delivered one. Switching on again later carries on from both cursors where they stood; applying old records then is a no-op, since `saveNewest` never replaces a newer row.
+
+`tests/application/projection-split.test.ts` runs both directions on the real SQLite engine: on — backfill, a write that straddles the switch, split writes, second backfill — and off — the rollback drain during the split, a by-name read right after the switch that sees a document edited during the split at its current version, the one write in the gap, and the second rollback drain, after which `DB`'s table is row-for-row what the projection database holds. `tests/cloudflare/projection-database.test.ts` runs the same steps through the Worker and the rollback drain job.
 
 ## What it costs
 
 - **Lists are eventually consistent.** See above; this is the cost the issue says not to pay early.
 - **The primary still grows.** Each write appends one channel record carrying its rows — the snapshot is stored a second time — and each drain round appends one small cursor event. Those are events and are never deleted; cold-event archival (#18) is what moves them out. The split takes the projection *table* and its indexes off the primary, not the write volume.
-- **Cold-event archival (#18) must keep two heads.** The channel is appended at `MAX(sequence) + 1` of the rows present, and the cursor is read from the newest cursor event. Archiving the head row of either stream would reuse sequences on the channel and rewind the cursor. Archival may move older rows of both, but never the newest.
+- **Cold-event archival (#18) must keep the heads.** The channel is appended at `MAX(sequence) + 1` of the rows present, and each cursor is read from its newest cursor event. Archiving the head row of the channel or of a cursor stream (`cursor`, and `primary` once a rollback has started) would reuse sequences on the channel and rewind the cursor. Archival may move older rows of all of them, but never the newest — and moving channel records the rollback cursor has not passed means a later switch-off has to fold streams instead (see above).
 - **Writes do one more D1 write** with `eagerApply` on: the projection database batch after the commit.
 - **By-name reads do one more indexed query** on `DB`: the stream head check.
 - **A drain round is four queries** whatever the backlog: one keyed read of the next records past the cursor, one projection batch, and the cursor append (a version check and an insert); plus one cursor read per drain. Every D1 batch counts as one query against the per-invocation limit (1 000 on Workers Paid, 50 on Free — [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)), so the default of 10 rounds is about 41 queries — inside Free's limit too. A backlog drains at up to `limit × maxRounds` records per call (250 by default); raise the drain frequency or `maxRounds` if lag alerts fire.
@@ -164,7 +170,7 @@ Until the backfill finishes, documents written during the split are missing or s
 | `src/ports/document-store.ts` | `ProjectionHandoff`, `DocumentStoreProjectionOptions` |
 | `src/ports/projection-store.ts` | `MonotonicProjectionWriter` (`saveNewest`), `ProjectionVersionReader` (`versions`) |
 | `src/adapters/d1/event-writer.ts` | `insertEventAtHeadStatement` |
-| `src/application/projection-delivery.ts` | `ProjectionOutboxHandoff`, `ProjectionDeliveryConsumer`, lag, the drain job |
+| `src/application/projection-delivery.ts` | `ProjectionOutboxHandoff`, `ProjectionDeliveryConsumer`, lag, the drain job, the rollback cursor and its drain job |
 | `src/application/projection-delivery-events.ts` | the cursor event, `ProjectionDeliveryCursorAdvanced` |
 | `src/application/projection-read-consistency.ts` | `ConsistentProjectionStore`, `ProjectionCatchUp`, the consistency table |
 | `src/application/projection-backfill.ts` | `ProjectionBackfillService`, `PROJECTED_FRAMEWORK_DOCTYPES` |

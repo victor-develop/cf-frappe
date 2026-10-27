@@ -79,8 +79,13 @@ export interface ProjectionBackfillResult {
  *   switch the coordinator and the Worker over, then backfill again: writes that
  *   landed between the first pass and the switch went to the primary's own
  *   table, and the second pass picks them up.
- * - **Turning it off.** The primary's projection table stopped being written
- *   while the split was on. Switch back, then backfill the primary.
+ * - **Turning it off, as the fallback.** The primary's projection table stopped
+ *   being written while the split was on, and with the switch off reads by
+ *   name come from it with no stream head check — so it has to be current
+ *   *before* the switch. The rollback consumer (`PROJECTION_ROLLBACK_CURSOR`)
+ *   does that from the channel; when the channel no longer holds every write
+ *   of the split, backfill the primary's table while the split is still on,
+ *   then follow the same steps.
  *
  * Both are safe against live writes for one reason: `saveNewest` never replaces
  * a row with an older one. A stream folded here a moment before a commit moves

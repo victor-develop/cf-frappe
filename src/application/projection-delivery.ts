@@ -1,6 +1,11 @@
 import { badRequest } from "../core/errors.js";
 import { domainEventPayloadKind } from "../core/domain-events.js";
-import { documentDeliveryOutboxStream, documentStream, projectionDeliveryCursorStream } from "../core/streams.js";
+import {
+  documentDeliveryOutboxStream,
+  documentStream,
+  PROJECTION_DELIVERY_DEFAULT_CURSOR,
+  projectionDeliveryCursorStream
+} from "../core/streams.js";
 import type { DocumentData, DocumentSnapshot, DomainEvent, NewDomainEvent, TenantId } from "../core/types.js";
 import type { JobDefinition, JobPayload } from "../core/jobs.js";
 import { systemClock, type Clock } from "../ports/clock.js";
@@ -36,6 +41,18 @@ import {
 export const PROJECTION_OUTBOX_CHANNEL = "projections";
 
 export const PROJECTION_DELIVERY_DRAIN_JOB_NAME = "cf-frappe.projection-delivery.drain";
+
+/**
+ * The cursor of the consumer that applies the projection channel to the
+ * primary's own projection table, for switching the split off. While the split
+ * is on nothing else writes that table, so draining the channel into it keeps it
+ * as current as the projection database; once the switch is off, reads by name
+ * come from it with no stream head check, and only a table that was kept current
+ * answers them correctly. See `docs/projection-database.md`.
+ */
+export const PROJECTION_ROLLBACK_CURSOR = "primary";
+
+export const PROJECTION_ROLLBACK_DRAIN_JOB_NAME = "cf-frappe.projection-rollback.drain";
 
 /** How many rounds one drain call may run before returning. */
 export const DEFAULT_PROJECTION_DRAIN_ROUNDS = 10;
@@ -169,8 +186,14 @@ export interface ProjectionDeliveryConsumerOptions {
    * cursor is kept in it.
    */
   readonly events: Pick<EventStore, "readStream" | "append" | "currentVersion">;
-  /** The projection database's writer. */
+  /** Where the rows go: the projection database, or the primary's own table on the way back. */
   readonly projections: MonotonicProjectionWriter;
+  /**
+   * Which cursor on the channel this consumer advances. Consumers with
+   * different cursors read the same records independently. Defaults to the
+   * projection database's; {@link PROJECTION_ROLLBACK_CURSOR} is the primary's.
+   */
+  readonly cursor?: string;
   readonly ids?: IdGenerator;
   readonly clock?: Clock;
   readonly lag?: ProjectionLagThresholds;
@@ -264,9 +287,11 @@ export class ProjectionDeliveryConsumer {
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
   private readonly thresholds: Required<ProjectionLagThresholds>;
+  private readonly cursorName: string;
 
   constructor(private readonly options: ProjectionDeliveryConsumerOptions) {
     this.clock = options.clock ?? systemClock;
+    this.cursorName = projectionCursorName(options.cursor);
     this.ids = options.ids ?? cryptoIdGenerator;
     this.thresholds = {
       maxAgeSeconds: positiveInteger(
@@ -366,7 +391,10 @@ export class ProjectionDeliveryConsumer {
   }
 
   private async cursor(tenantId: TenantId): Promise<ProjectionDeliveryCursor> {
-    const [newest] = await this.options.events.readStream(projectionDeliveryCursorStream(tenantId), { limit: 1 });
+    const [newest] = await this.options.events.readStream(
+      projectionDeliveryCursorStream(tenantId, this.cursorName),
+      { limit: 1 }
+    );
     return projectionDeliveryCursor(newest);
   }
 
@@ -377,7 +405,7 @@ export class ProjectionDeliveryConsumer {
     toSequence: number,
     round: ProjectionDeliveryRound
   ): Promise<ProjectionDeliveryCursor | undefined> {
-    const stream = projectionDeliveryCursorStream(tenantId);
+    const stream = projectionDeliveryCursorStream(tenantId, this.cursorName);
     const payload: ProjectionDeliveryCursorEventPayload = {
       kind: "ProjectionDeliveryCursorAdvanced",
       fromSequence: from.position,
@@ -392,7 +420,7 @@ export class ProjectionDeliveryConsumer {
         stream,
         type: payload.kind,
         doctype: PROJECTION_DELIVERY_DOCTYPE,
-        documentName: "cursor",
+        documentName: this.cursorName,
         actorId: "system",
         occurredAt: this.clock.now(),
         payload,
@@ -451,11 +479,17 @@ function projectionDeliveryRound(tenantId: TenantId, records: readonly DomainEve
   return { snapshots: [...newest.values()], applied, skipped };
 }
 
+interface ProjectionChannelDrainer {
+  drain(command: DrainProjectionDeliveriesCommand): Promise<ProjectionDeliveryDrainResult>;
+  checkLag(tenantId: TenantId): Promise<ProjectionLagReport>;
+}
+
 export interface ProjectionDeliveryDrainJobResources {
-  readonly projectionDelivery?: {
-    drain(command: DrainProjectionDeliveriesCommand): Promise<ProjectionDeliveryDrainResult>;
-    checkLag(tenantId: TenantId): Promise<ProjectionLagReport>;
-  };
+  readonly projectionDelivery?: ProjectionChannelDrainer;
+}
+
+export interface ProjectionRollbackDrainJobResources {
+  readonly projectionRollback?: ProjectionChannelDrainer;
 }
 
 /**
@@ -470,12 +504,42 @@ export interface ProjectionDeliveryDrainJobResources {
 export function createProjectionDeliveryDrainJob<
   TResources extends ProjectionDeliveryDrainJobResources = ProjectionDeliveryDrainJobResources
 >(options: { readonly name?: string } = {}): JobDefinition<JobPayload, TResources> {
+  return projectionChannelDrainJob(
+    options.name ?? PROJECTION_DELIVERY_DRAIN_JOB_NAME,
+    "Apply pending cf-frappe projection deliveries to the projection database",
+    (resources) => resources.projectionDelivery
+  );
+}
+
+/**
+ * Drains one tenant's projection channel into the primary's own projection
+ * table, under {@link PROJECTION_ROLLBACK_CURSOR}. Scheduled only while the
+ * split is being switched off: before the switch it keeps the primary's table
+ * current, and once after it picks up the last records the coordinator handed
+ * off. With the switch off the channel stops growing, and this job has nothing
+ * more to do. See `docs/projection-database.md`.
+ */
+export function createProjectionRollbackDrainJob<
+  TResources extends ProjectionRollbackDrainJobResources = ProjectionRollbackDrainJobResources
+>(options: { readonly name?: string } = {}): JobDefinition<JobPayload, TResources> {
+  return projectionChannelDrainJob(
+    options.name ?? PROJECTION_ROLLBACK_DRAIN_JOB_NAME,
+    "Apply the cf-frappe projection channel to the primary's own projection table, for switching the split off",
+    (resources) => resources.projectionRollback
+  );
+}
+
+function projectionChannelDrainJob<TResources>(
+  name: string,
+  description: string,
+  drainer: (resources: TResources) => ProjectionChannelDrainer | undefined
+): JobDefinition<JobPayload, TResources> {
   return {
-    name: options.name ?? PROJECTION_DELIVERY_DRAIN_JOB_NAME,
-    description: "Apply pending cf-frappe projection deliveries to the projection database",
+    name,
+    description,
     retry: { maxAttempts: 3, baseDelaySeconds: 10, maxDelaySeconds: 120 },
     async handler({ tenantId, payload, resources }) {
-      const consumer = resources.projectionDelivery;
+      const consumer = drainer(resources);
       ensureDocumentDeliveryOutboxConsumerAvailable(consumer);
       const limit = parseDocumentDeliveryOutboxDrainJobLimit(payload.limit);
       const maxRounds = parseProjectionDrainJobRounds(payload.maxRounds);
@@ -528,6 +592,14 @@ function parseProjectionDrainJobRounds(value: unknown): number | undefined {
     throw badRequest("Projection drain job maxRounds is invalid");
   }
   return projectionDrainRounds(value);
+}
+
+function projectionCursorName(value: string | undefined): string {
+  const name = value ?? PROJECTION_DELIVERY_DEFAULT_CURSOR;
+  if (!/^[a-z][a-z0-9-]{0,39}$/.test(name)) {
+    throw badRequest("Projection delivery cursor must be 1-40 lowercase letters, digits or dashes, starting with a letter");
+  }
+  return name;
 }
 
 function positiveInteger(value: number, label: string): number {

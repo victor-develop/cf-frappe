@@ -114,14 +114,24 @@ export function documentDeliveryOutboxStream(
 export const DOCUMENT_DELIVERY_OUTBOX_DEFAULT_CHANNEL = "deliveries";
 
 /**
- * How far the projection consumer has read the tenant's projection channel
+ * How far one projection consumer has read the tenant's projection channel
  * (issue #13). A stream of its own so that only consumers ever compare-and-swap
  * on it: writers head-append to the channel, and a consumer that had to CAS
  * there would lose to every write that landed while it worked.
+ *
+ * `cursor` names the consumer. The one that feeds the projection database uses
+ * the default; the one that brings the primary's own table back up to date
+ * before the split is switched off uses `PROJECTION_ROLLBACK_CURSOR`. Each reads
+ * the same channel at its own pace.
  */
-export function projectionDeliveryCursorStream(tenantId: TenantId): StreamName {
-  return documentStream(tenantId, "__ProjectionDelivery", "cursor");
+export function projectionDeliveryCursorStream(
+  tenantId: TenantId,
+  cursor: string = PROJECTION_DELIVERY_DEFAULT_CURSOR
+): StreamName {
+  return documentStream(tenantId, "__ProjectionDelivery", cursor);
 }
+
+export const PROJECTION_DELIVERY_DEFAULT_CURSOR = "cursor";
 
 export function automationRunStream(tenantId: TenantId, runId: string): StreamName {
   return documentStream(tenantId, "__AutomationRuns", runId);
