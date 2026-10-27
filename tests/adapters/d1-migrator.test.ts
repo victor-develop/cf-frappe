@@ -56,7 +56,8 @@ describe("D1MigrationRunner", () => {
       "0005_cf_frappe_data_patch_rollbacks",
       "0006_cf_frappe_automation_runs",
       "0007_cf_frappe_events_document_name",
-      "0008_cf_frappe_fold_snapshots"
+      "0008_cf_frappe_fold_snapshots",
+      "0009_cf_frappe_tenant_shards"
     ]);
   });
 

@@ -4,6 +4,8 @@ import {
   D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS,
   D1_FOLD_SNAPSHOT_MIGRATION_ID,
   D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS,
+  D1_TENANT_SHARD_MIGRATION_ID,
+  D1_TENANT_SHARD_SCHEMA_STATEMENTS,
   D1_AUTOMATION_RUN_SCHEMA_STATEMENTS,
   D1_CORE_MIGRATION_ID,
   D1_CORE_SCHEMA_STATEMENTS,
@@ -154,6 +156,7 @@ describe("D1 schema planner", () => {
       D1_AUTOMATION_RUN_MIGRATION_ID,
       D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
       D1_FOLD_SNAPSHOT_MIGRATION_ID,
+      D1_TENANT_SHARD_MIGRATION_ID,
       "doctype_task_v7_indexes"
     ]);
     expect(migrations[0]!.checksum).toMatch(/^fnv1a32:[a-f0-9]{8}$/);
@@ -211,6 +214,11 @@ describe("D1 schema planner", () => {
       statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
     });
     expect(migrations[8]).toMatchObject({
+      id: D1_TENANT_SHARD_MIGRATION_ID,
+      label: "cf-frappe tenant shard directory and fences",
+      statements: D1_TENANT_SHARD_SCHEMA_STATEMENTS
+    });
+    expect(migrations[9]).toMatchObject({
       label: "Task projection indexes",
       statements: [
         {
@@ -430,6 +438,19 @@ describe("D1 schema planner", () => {
     );
   });
 
+  it("keeps the checked-in Wrangler tenant shard migration exactly equivalent to the TypeScript plan", () => {
+    const fileSql = readFileSync(new URL("../../migrations/0009_cf_frappe_tenant_shards.sql", import.meta.url), "utf8");
+
+    // The fence trigger's body has a `;` of its own, so this file cannot be
+    // split on every semicolon the way the others are: a statement that opens
+    // a BEGIN runs to its END.
+    expect(splitSqlStatementsWithTriggers(fileSql)).toEqual(
+      D1_TENANT_SHARD_SCHEMA_STATEMENTS.map((statement) =>
+        normalizeSql(renderD1Migration({ ...tenantShardMigrationStub, statements: [statement] }))
+      )
+    );
+  });
+
   it("keeps the checked-in Wrangler event document name migration exactly equivalent to the TypeScript plan", () => {
     // `wrangler d1 migrations apply` runs the file on disk while
     // `D1MigrationRunner` runs the planned statements, so the two can drift
@@ -482,6 +503,11 @@ const eventDocumentNameMigrationStub = {
   checksum: "test"
 };
 
+const tenantShardMigrationStub = {
+  id: D1_TENANT_SHARD_MIGRATION_ID,
+  checksum: "test"
+};
+
 const foldSnapshotMigrationStub = {
   id: D1_FOLD_SNAPSHOT_MIGRATION_ID,
   checksum: "test"
@@ -492,6 +518,23 @@ function normalizeSql(sql: string): string {
     .replaceAll(/\s+/g, " ")
     .replaceAll(/\s*([(),;])\s*/g, "$1")
     .trim();
+}
+
+function splitSqlStatementsWithTriggers(sql: string): readonly string[] {
+  const statements: string[] = [];
+  let current = "";
+  for (const part of sql.split(";")) {
+    current = current.length === 0 ? part : `${current};${part}`;
+    const opensBlock = /\bBEGIN\b/i.test(current);
+    const closesBlock = /\bEND\s*$/i.test(current.trim());
+    if (!opensBlock || closesBlock) {
+      if (current.trim().length > 0) {
+        statements.push(normalizeSql(`${current.trim()};`));
+      }
+      current = "";
+    }
+  }
+  return statements;
 }
 
 function splitSqlStatements(sql: string): readonly string[] {

@@ -55,6 +55,11 @@ import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
 import { projectionDocumentStoreOptions, type CloudFrappeProjectionDatabaseOptions } from "./projection-database.js";
+import { createTenantShardingRuntime, type CloudFrappeTenantShardingOptions } from "./tenant-sharding.js";
+import type { DocumentStore } from "../ports/document-store.js";
+import type { EventBatchStore, StreamCatalog } from "../ports/event-store.js";
+import type { SnapshotStore } from "../ports/snapshot-store.js";
+import type { AuditEventStore } from "../ports/audit-event-store.js";
 
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
@@ -120,6 +125,11 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
    * `createCloudFrappeWorker`. Off by default.
    */
   readonly projectionDatabase?: CloudFrappeProjectionDatabaseOptions<Env>;
+  /**
+   * Tenant sharding (issue #14): each command's events go to its tenant's
+   * shard. Pass the same object to `createCloudFrappeWorker`. Off by default.
+   */
+  readonly tenantSharding?: CloudFrappeTenantShardingOptions<Env>;
 }
 
 export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> = new (
@@ -138,8 +148,18 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
 
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
-      const events = new D1EventStore(env.DB);
+      // Sharded, every store routes to the command's tenant's shard; the
+      // services above them are the same either way.
+      const sharding = options.tenantSharding === undefined
+        ? undefined
+        : createTenantShardingRuntime(env, options.tenantSharding, {
+            registry: options.registry,
+            ...(options.projectionDatabase === undefined ? {} : { projectionDatabase: options.projectionDatabase })
+          });
+      const events: EventStore & EventBatchStore & StreamCatalog & AuditEventStore = sharding?.events ?? new D1EventStore(env.DB);
       const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
+      const documentStore = (): DocumentStore => sharding?.documents ?? new D1DocumentStore(env.DB, documentStoreOptions);
+      const notificationSnapshots: SnapshotStore = sharding?.snapshots ?? new D1SnapshotStore(env.DB);
       const customFields = new CustomFieldService({
         registry: options.registry,
         events
@@ -163,7 +183,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       const naming = new NamingService({
         registry: options.registry,
         events,
-        store: new D1DocumentStore(env.DB, documentStoreOptions),
+        store: documentStore(),
         preNamingDocTypeResolver: preNamingDocType
       });
       const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
@@ -189,7 +209,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
             // is addressed per document, so the notification fold for one user
             // is written from many different instances — an in-memory snapshot
             // would miss nearly every time.
-            snapshots: new D1SnapshotStore(env.DB),
+            snapshots: notificationSnapshots,
             ...(options.clock ? { clock: options.clock } : {})
       });
       const emailNotifications = options.emailNotifications?.(env, { events, notificationRules });
@@ -231,7 +251,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           });
       this.service = new DocumentService({
         registry: options.registry,
-        store: new D1DocumentStore(env.DB, documentStoreOptions),
+        store: documentStore(),
         // In-memory is enough here because losing a snapshot costs a cold fold
         // and nothing else — issue #17's rule is that a snapshot may always be
         // ignored. That is why this is one line rather than a table, a migration

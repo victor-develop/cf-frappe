@@ -7,6 +7,7 @@ export * from "./images-file-transformer.js";
 export * from "./job-consumer.js";
 export * from "./job-queue.js";
 export * from "./projection-database.js";
+export * from "./tenant-sharding.js";
 export * from "./r2-file-storage.js";
 export * from "./realtime-hub.js";
 export * from "./scheduled-jobs.js";
