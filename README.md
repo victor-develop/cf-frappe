@@ -252,6 +252,23 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
+#### Typed projection tables (optional, off by default)
+
+Lists read every business field out of one `data_json` column. When JSON parsing becomes the query bottleneck, or you need field-level type constraints, a DocType can get its own typed table: fields named in `indexes`, plus any listed in `promotedFields`, become real columns with type `CHECK`s; the rest stay in `data_json`. Queries are unchanged for callers.
+
+```bash
+cf-frappe migrate generate --typed-projections   # creates cf_frappe_p_<doctype>_<digest> tables
+```
+
+```ts
+const typedProjections = { doctypes: { Ticket: "shadow" } } as const;
+// later, once compared clean: { Ticket: { mode: "active", table: "cf_frappe_p_ticket_<digest>" } }
+export const AggregateCoordinator = createAggregateCoordinatorClass({ registry, typedProjections });
+export default createCloudFrappeWorker({ registry, actor, typedProjections });
+```
+
+Run in `shadow`, rebuild and compare with `services.typedProjections`, then switch to `active`, pinned to the table you compared. A later layout change (an index, a promoted field, a type) plans a new table; the pin makes startup refuse with `D1_TYPED_PROJECTION_LAYOUT_MISMATCH` instead of silently reading the new, empty one. Pass the same options to both. See [Typed Projection Tables](docs/typed-projection-tables.md) for the modes, the 100-column limit and how field changes migrate.
+
 ### Development Setup
 
 Work on the framework:
@@ -297,6 +314,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [ReturnsOS Example](examples/returns/README.md): full reference application for multi-workflow and durable Automation.
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
+- [Typed Projection Tables](docs/typed-projection-tables.md): optional per-DocType tables with real, type-checked columns for hot fields; modes, the 100-column limit, and the rebuild-then-compare cutover.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
@@ -548,6 +566,23 @@ npm run deploy
 
 委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
+#### 类型化投影表（可选，默认关闭）
+
+列表查询的所有业务字段都从同一个 `data_json` 列里读。等 JSON 解析成了查询瓶颈，或者需要字段级的类型约束时，可以给某个 DocType 开一张自己的类型化表：`indexes` 里出现的字段，加上 `promotedFields` 列出的字段，会变成带类型 `CHECK` 的真字段；其余字段留在 `data_json`。调用方的查询写法不变。
+
+```bash
+cf-frappe migrate generate --typed-projections   # 生成 cf_frappe_p_<doctype>_<digest> 表
+```
+
+```ts
+const typedProjections = { doctypes: { Ticket: "shadow" } } as const;
+// 对照没有差异后：{ Ticket: { mode: "active", table: "cf_frappe_p_ticket_<digest>" } }
+export const AggregateCoordinator = createAggregateCoordinatorClass({ registry, typedProjections });
+export default createCloudFrappeWorker({ registry, actor, typedProjections });
+```
+
+先用 `shadow` 跑，用 `services.typedProjections` 从事件流重建并逐行对照，没有差异再切到 `active`，同时写明对照过的那张表。之后改了布局（加索引、加 promoted 字段、改字段类型）会生成一张新表；有这个表名在，启动时会直接报 `D1_TYPED_PROJECTION_LAYOUT_MISMATCH`，不会悄悄去读那张空表。两处要传同一份配置。模式说明、100 列上限、字段变更怎么迁移，见 [Typed Projection Tables](docs/typed-projection-tables.md)。
+
 ### 开发环境
 
 开发框架本身：
@@ -593,6 +628,7 @@ See [English TODO](#todo).
 - [ReturnsOS Example](examples/returns/README.md)：多工作流和持久化 Automation 的完整参考应用。
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
+- [Typed Projection Tables](docs/typed-projection-tables.md)：可选的每 DocType 一张表，热字段是带类型检查的真字段；包括模式、100 列上限、先重建再对照的切换流程。
 - [Document Delivery Outbox](docs/delivery-outbox.md)：outbox 的工作集如何随投递历史增长而保持有界，以及单记录读依赖的那条索引。
 - [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。

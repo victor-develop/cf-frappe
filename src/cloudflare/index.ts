@@ -9,4 +9,9 @@ export * from "./job-queue.js";
 export * from "./r2-file-storage.js";
 export * from "./realtime-hub.js";
 export * from "./scheduled-jobs.js";
+export {
+  TYPED_PROJECTION_TARGET,
+  type CloudFrappeTypedProjectionOptions,
+  type CloudFrappeTypedProjectionServices
+} from "./typed-projections.js";
 export { EmailNotificationService, UserAccountEmailRecipientResolver } from "../application/email-notification-service.js";

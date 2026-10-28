@@ -12,6 +12,18 @@ export const D1_DATA_PATCHES_TABLE = "cf_frappe_data_patches";
 export const D1_AUTOMATION_RUNS_TABLE = "cf_frappe_automation_runs";
 export const D1_FOLD_SNAPSHOTS_TABLE = "cf_frappe_fold_snapshots";
 
+/**
+ * Prefix of the per-DocType typed projection tables (issue #15).
+ *
+ * These are not in {@link D1_TABLES}: they are generated per application from
+ * its DocTypes by `planD1Migrations(..., { typedProjections: true })`, the same
+ * way projection indexes are, so no checked-in framework migration creates
+ * them. The full name is `cf_frappe_p_<doctype slug>_<layout digest>` — see
+ * `typed-projection-layout.ts`. Nothing the framework owns may start with this
+ * prefix; `tests/adapters/d1-tables.test.ts` checks that.
+ */
+export const D1_TYPED_PROJECTION_TABLE_PREFIX = "cf_frappe_p_";
+
 /** Every framework-owned table, in migration order. */
 export const D1_TABLES: readonly string[] = [
   D1_DOCUMENTS_TABLE,

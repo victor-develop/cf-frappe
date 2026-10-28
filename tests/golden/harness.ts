@@ -6,7 +6,14 @@ import {
   D1DocumentStore,
   D1EventStore,
   D1ProjectionStore,
+  D1TypedProjectionStore,
+  planD1TypedProjectionLayout,
+  planD1TypedProjectionMigrations,
+  planD1TypedProjections,
+  renderD1Migration,
   type Actor,
+  type D1TypedProjectionMode,
+  type ProjectionStore,
   type Clock,
   type DocumentData,
   type DocumentSnapshot,
@@ -53,14 +60,66 @@ export interface ReplayApp {
   readonly runs: AutomationRunService;
   readonly consumer: AutomationRunConsumer;
   readonly events: D1EventStore;
-  readonly projections: D1ProjectionStore;
+  /** What the application reads through: the shared table, or typed tables over it. */
+  readonly projections: ProjectionStore;
+  /** The shared `cf_frappe_documents` store, maintained in every mode. */
+  readonly shared: D1ProjectionStore;
+  /** Every registered DocType's typed table, when typed projections are on. */
+  readonly typed?: D1TypedProjectionStore;
 }
 
-export function buildReplayApp(registry: ModelRegistry, options: { readonly clock: Clock; readonly ids: IdGenerator }): ReplayApp {
-  const engine = createTestD1({ schema: frameworkSchema() });
-  const store = new D1DocumentStore(engine.database);
+export interface ReplayOptions {
+  /**
+   * Puts every registered DocType on a typed projection table (issue #15).
+   * Omitted, the replay runs exactly the default wiring. With it, the transcript
+   * must still equal the same golden — that is the claim that typed tables are
+   * invisible to the application.
+   */
+  readonly typedProjections?: Exclude<D1TypedProjectionMode, "off">;
+}
+
+export function buildReplayApp(
+  registry: ModelRegistry,
+  options: { readonly clock: Clock; readonly ids: IdGenerator } & ReplayOptions
+): ReplayApp {
+  const typedMode = options.typedProjections;
+  const engine = createTestD1({
+    schema: [
+      ...frameworkSchema(),
+      ...(typedMode === undefined
+        ? []
+        : planD1TypedProjectionMigrations(registry.list()).map(renderD1Migration))
+    ]
+  });
+  const plan = typedMode === undefined
+    ? undefined
+    : planD1TypedProjections(registry.list(), {
+        mode: typedMode === "active" ? "off" : typedMode,
+        // `active` must be pinned per DocType; the replay creates exactly the
+        // tables the current layouts plan, so it pins those.
+        ...(typedMode === "active"
+          ? {
+              doctypes: Object.fromEntries(registry.list().map((doctype) => [
+                doctype.name,
+                { mode: "active", table: planD1TypedProjectionLayout(doctype).table }
+              ]))
+            }
+          : {}),
+        onShadowWriteFailure: (failure) => {
+          throw new Error(`shadow write failed during a golden replay: ${JSON.stringify(failure)}`);
+        }
+      });
+  const store = new D1DocumentStore(engine.database, plan === undefined ? {} : { typedProjections: plan });
   const events = new D1EventStore(engine.database);
-  const projections = new D1ProjectionStore(engine.database);
+  const shared = new D1ProjectionStore(engine.database);
+  const typed = plan === undefined
+    ? undefined
+    : new D1TypedProjectionStore(engine.database, { layouts: [...plan.active, ...plan.shadow] });
+  // Reads go where the runtime would send them: an `active` DocType's typed
+  // table, everything else the shared table.
+  const projections: ProjectionStore = plan === undefined
+    ? shared
+    : new D1TypedProjectionStore(engine.database, { layouts: plan.active, fallback: shared });
   const documents = new DocumentService({
     registry,
     store,
@@ -68,7 +127,10 @@ export function buildReplayApp(registry: ModelRegistry, options: { readonly cloc
     ids: options.ids,
     automationRuns: new AutomationRunPlanner({ ids: options.ids })
   });
-  const runs = new AutomationRunService({ store, projections, ids: options.ids, clock: options.clock });
+  // The shared store, not `projections`: the claim query joins the automation
+  // run index against `cf_frappe_documents`, which is where `__AutomationRuns`
+  // lives in every mode.
+  const runs = new AutomationRunService({ store, projections: shared, ids: options.ids, clock: options.clock });
   const consumer = new AutomationRunConsumer({
     runs,
     documents,
@@ -76,7 +138,7 @@ export function buildReplayApp(registry: ModelRegistry, options: { readonly cloc
     projections,
     clock: options.clock
   });
-  return { engine, documents, runs, consumer, events, projections };
+  return { engine, documents, runs, consumer, events, projections, shared, ...(typed === undefined ? {} : { typed }) };
 }
 
 /**
@@ -131,10 +193,16 @@ export interface GoldenTranscript {
  * golden is exactly what a fresh fold of the stored history and the derived
  * projections say, not what the commands happened to return.
  */
-export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> {
+export async function replay(fixture: GoldenFixture, options: ReplayOptions = {}): Promise<GoldenTranscript> {
+  const app = await replayApp(fixture, options);
+  return await collect(app, fixture);
+}
+
+/** Replays a fixture and hands back the finished app, for assertions beyond the transcript. */
+export async function replayApp(fixture: GoldenFixture, options: ReplayOptions = {}): Promise<ReplayApp> {
   const clock = tickingClock(fixture.clockStart);
   const ids = sequentialIds();
-  const app = buildReplayApp(fixture.registry, { clock, ids });
+  const app = buildReplayApp(fixture.registry, { clock, ids, ...options });
   const versions = new Map<string, number>();
   // Series-named documents (RMA-2026-000001 and friends) get their name from
   // the engine, so a create step names the result with an `as` alias and later
@@ -171,7 +239,7 @@ export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> 
     versions.set(versionKey, snapshot.version);
   }
 
-  return await collect(app, fixture);
+  return app;
 }
 
 async function applyStep(

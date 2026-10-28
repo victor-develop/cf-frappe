@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -1273,8 +1273,14 @@ if (seededAfterRollback.data.length !== 0) {
     expect(parseCliArgs(["migrate", "generate", "--registry", "src/apps/index.ts", "--migrations", "migrations", "--no-core"])).toEqual({
       kind: "migrate-generate",
       includeCore: false,
+      typedProjections: false,
       registryFile: "src/apps/index.ts",
       migrationsDir: "migrations"
+    });
+    expect(parseCliArgs(["migrate", "generate", "--typed-projections"])).toEqual({
+      kind: "migrate-generate",
+      includeCore: true,
+      typedProjections: true
     });
 
     const stdout = textBuffer();
@@ -1346,6 +1352,42 @@ if (seededAfterRollback.data.length !== 0) {
 
     expect(second).toBe(0);
     expect(secondStdout.text()).toContain("No new migration files were needed.");
+  });
+
+  it("generates typed projection table migrations only behind --typed-projections", async () => {
+    const registry = createRegistry({
+      doctypes: [
+        defineDocType({
+          name: "Customer",
+          version: 2,
+          fields: [{ name: "email", type: "text" }, { name: "tier", type: "select", options: ["A", "B"] }],
+          indexes: [["email"]],
+          promotedFields: ["tier"]
+        })
+      ]
+    });
+    const plain = await runCli(["migrate", "generate", "--no-core"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr: textBuffer()
+    });
+    expect(plain).toBe(0);
+    expect((await readdir(join(tempRoot, "migrations"))).sort()).toEqual(["0001_doctype_customer_v2_indexes.sql"]);
+
+    const typed = await runCli(["migrate", "generate", "--no-core", "--typed-projections"], {
+      cwd: () => tempRoot,
+      migrationRegistryLoader: registryLoader(registry),
+      stdout: textBuffer(),
+      stderr: textBuffer()
+    });
+    expect(typed).toBe(0);
+    const files = (await readdir(join(tempRoot, "migrations"))).sort();
+    expect(files).toHaveLength(2);
+    expect(files[1]).toMatch(/^0002_doctype_customer_typed_[0-9a-f]{8}\.sql$/);
+    const sql = await readFile(join(tempRoot, "migrations", files[1]!), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS cf_frappe_p_customer_");
+    expect(sql).toContain("f_tier AS (json_extract(data_json, '$.tier')) STORED");
   });
 
   it("uses migration metadata to avoid regenerating files after a filename changes", async () => {

@@ -11,6 +11,13 @@ import {
 } from "./tables.js";
 import { isMetadataName } from "../../core/identifiers.js";
 import { d1JsonExtract } from "./json-path.js";
+import { fnv1a32, sqlSlug } from "./sql-names.js";
+import { D1_TYPED_PROJECTION_TABLE_PREFIX } from "./tables.js";
+import {
+  d1TypedProjectionDdl,
+  planD1TypedProjectionLayout,
+  type D1TypedProjectionLayoutOptions
+} from "./typed-projection-layout.js";
 
 export interface PlannedSqlStatement {
   readonly name: string;
@@ -38,6 +45,22 @@ export interface D1MigrationPlanOptions {
    * write-cost curve in docs/projection-indexes.md.
    */
   readonly maxProjectionIndexes?: number;
+  /**
+   * Also plan a typed per-DocType projection table for every DocType (issue
+   * #15). Off by default, and off plans exactly what it always has. See
+   * docs/typed-projection-tables.md.
+   */
+  readonly typedProjections?: boolean | D1TypedProjectionPlanOptions;
+}
+
+export interface D1TypedProjectionPlanOptions extends D1TypedProjectionLayoutOptions {
+  /**
+   * Typed tables to drop: layouts that a DocType change has superseded and whose
+   * replacement has been rebuilt, verified and switched to. Each becomes its own
+   * `typed_projection_retire_<table>` migration. A table the current layouts
+   * still use cannot be retired.
+   */
+  readonly retiredTables?: readonly string[];
 }
 
 /**
@@ -452,9 +475,74 @@ export function planD1Migrations(
     );
   }
 
+  if (options.typedProjections !== undefined && options.typedProjections !== false) {
+    migrations.push(...planD1TypedProjectionMigrations(
+      doctypes,
+      options.typedProjections === true ? {} : options.typedProjections
+    ));
+  }
+
   assertProjectionIndexBudget(doctypes, options.maxProjectionIndexes ?? D1_PROJECTION_INDEX_BUDGET);
   assertUniqueMigrationIds(migrations);
   return migrations;
+}
+
+/**
+ * One `doctype_<slug>_typed_<digest>` migration per DocType, creating its typed
+ * projection table and indexes, then one migration per retired table.
+ *
+ * The id carries the layout digest rather than `doctype.version`: the digest
+ * moves exactly when the physical layout does, so an unrelated DocType change
+ * plans nothing new, and a layout change plans a *new* table instead of editing
+ * an applied migration. Filling that table is a rebuild, not a migration.
+ */
+export function planD1TypedProjectionMigrations(
+  doctypes: readonly DocTypeDefinition[],
+  options: D1TypedProjectionPlanOptions = {}
+): readonly D1Migration[] {
+  // Binary order, not localeCompare: the migration files must come out in the
+  // same order on every machine.
+  const layouts = [...doctypes]
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+    .map((doctype) => planD1TypedProjectionLayout(doctype, options));
+  const live = new Set(layouts.map((layout) => layout.table));
+  const retired = new Set<string>();
+  for (const table of options.retiredTables ?? []) {
+    if (!table.startsWith(D1_TYPED_PROJECTION_TABLE_PREFIX) || !/^[a-z0-9_]+$/.test(table)) {
+      throw new FrameworkError(
+        "MIGRATION_TYPED_PROJECTION_INVALID",
+        `Retired typed projection table '${table}' is not a typed projection table name`,
+        { status: 400 }
+      );
+    }
+    if (live.has(table)) {
+      throw new FrameworkError(
+        "MIGRATION_TYPED_PROJECTION_INVALID",
+        `Typed projection table '${table}' cannot be retired: a current DocType layout still uses it`,
+        { status: 409 }
+      );
+    }
+    if (retired.has(table)) {
+      throw new FrameworkError(
+        "MIGRATION_TYPED_PROJECTION_INVALID",
+        `Typed projection table '${table}' is retired more than once`,
+        { status: 409 }
+      );
+    }
+    retired.add(table);
+  }
+  return [
+    ...layouts.map((layout) => defineD1Migration({
+      id: `doctype_${slug(layout.doctype)}_typed_${layout.digest}`,
+      label: `${layout.doctype} typed projection table`,
+      statements: d1TypedProjectionDdl(layout)
+    })),
+    ...[...retired].sort().map((table) => defineD1Migration({
+      id: `typed_projection_retire_${table}`,
+      label: `retire typed projection table ${table}`,
+      statements: [{ name: `drop_${table}`, sql: `DROP TABLE IF EXISTS ${table};` }]
+    }))
+  ];
 }
 
 export function defineD1Migration(input: D1MigrationInput): D1Migration {
@@ -527,7 +615,7 @@ function indexName(doctype: string, fields: readonly string[]): string {
 }
 
 function slug(value: string): string {
-  return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "_").replaceAll(/^_+|_+$/g, "");
+  return sqlSlug(value);
 }
 
 function escapeSqlString(value: string): string {
@@ -693,13 +781,4 @@ function checksumMigration(id: string, statements: readonly PlannedSqlStatement[
     }))
   });
   return `fnv1a32:${fnv1a32(payload)}`;
-}
-
-function fnv1a32(input: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
 }

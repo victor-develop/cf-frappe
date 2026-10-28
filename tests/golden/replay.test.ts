@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fixtures } from "./fixtures";
-import { replay, type GoldenTranscript } from "./harness";
+import { RoutedProjectionStore } from "../../src";
+import { replay, replayApp, type GoldenTranscript } from "./harness";
 
 /**
  * Deterministic command-replay goldens (issue #64): each fixture replays a
@@ -45,6 +46,47 @@ describe("golden command replay", () => {
         );
       }
       expect(actual).toEqual(expected);
+    });
+  }
+
+  // Issue #15: the same histories with every registered DocType on a typed
+  // projection table. `active` reads lists and documents from the typed tables,
+  // so an equal transcript is the claim that they are invisible to the
+  // application. `shadow` reads the shared table, so there the claim is that the
+  // follower write never fails and ends up row-for-row equal to the shared one.
+  for (const fixture of fixtures) {
+    it(`replays ${fixture.name} on active typed projection tables to the same golden`, async () => {
+      const expected = JSON.parse(readFileSync(goldenPath(fixture.name), "utf8")) as GoldenTranscript;
+      expect(await replay(fixture, { typedProjections: "active" })).toEqual(expected);
+
+      // And the typed tables were really the ones written and read, not bypassed.
+      const app = await replayApp(fixture, { typedProjections: "active" });
+      let typedRows = 0;
+      for (const doctype of fixture.registry.list()) {
+        const table = app.typed!.tableFor(doctype.name)!;
+        typedRows += Number(app.engine.query(`SELECT COUNT(*) AS n FROM ${table}`)[0]!.n);
+        await app.projections.list({ tenantId: "default", doctype: doctype.name });
+        expect(app.engine.executed.some((sql) => sql.includes(`FROM ${table}`)), table).toBe(true);
+      }
+      expect(typedRows).toBeGreaterThan(0);
+    });
+
+    it(`keeps shadow typed projection tables row-for-row equal to the shared table for ${fixture.name}`, async () => {
+      const app = await replayApp(fixture, { typedProjections: "shadow" });
+      const router = new RoutedProjectionStore({
+        targets: [
+          { name: "shared", state: "active", store: app.shared },
+          { name: "typed", state: "caught-up", store: app.typed! }
+        ]
+      });
+      let compared = 0;
+      for (const doctype of fixture.registry.list()) {
+        const result = await router.compare("typed", "default", doctype.name);
+        expect(result.differences, doctype.name).toEqual([]);
+        compared += (await app.shared.list({ tenantId: "default", doctype: doctype.name })).total;
+      }
+      // Guard against a vacuous pass: the histories do write documents.
+      expect(compared).toBeGreaterThan(0);
     });
   }
 

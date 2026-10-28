@@ -4,7 +4,12 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import type { DocTypeDefinition } from "../core/types.js";
 import type { ModelRegistry } from "../core/registry.js";
-import { planD1Migrations, renderD1MigrationFile, type D1Migration } from "../adapters/d1/schema-planner.js";
+import {
+  planD1Migrations,
+  renderD1MigrationFile,
+  type D1Migration,
+  type D1TypedProjectionPlanOptions
+} from "../adapters/d1/schema-planner.js";
 
 const DEFAULT_REGISTRY_FILE = "src/apps/index.ts";
 const DEFAULT_MIGRATIONS_DIR = "migrations";
@@ -23,6 +28,8 @@ export interface GenerateD1MigrationFilesOptions {
   readonly registryFile?: string;
   readonly migrationsDir?: string;
   readonly includeCore?: boolean;
+  /** Also generate typed per-DocType projection tables (issue #15). Off by default. */
+  readonly typedProjections?: boolean | D1TypedProjectionPlanOptions;
   readonly registryLoader?: MigrationRegistryLoader;
 }
 
@@ -55,7 +62,10 @@ export async function generateD1MigrationFiles(
   const registryFile = options.registryFile ?? DEFAULT_REGISTRY_FILE;
   const migrationsDir = options.migrationsDir ?? DEFAULT_MIGRATIONS_DIR;
   const registry = await (options.registryLoader ?? dynamicMigrationRegistryLoader()).load({ cwd, registryFile });
-  const migrations = planD1Migrations(registry.list(), { includeCore: options.includeCore ?? true });
+  const migrations = planD1Migrations(registry.list(), {
+    includeCore: options.includeCore ?? true,
+    ...(options.typedProjections === undefined ? {} : { typedProjections: options.typedProjections })
+  });
   const migrationsPath = resolve(cwd, migrationsDir);
   const existing = await readExistingMigrationFiles(migrationsPath);
   const existingById = new Map(existing.flatMap((file) => file.migrationIds.map((id) => [id, file] as const)));

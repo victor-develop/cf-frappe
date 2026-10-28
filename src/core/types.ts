@@ -406,6 +406,15 @@ export interface DocTypeDefinition<TData extends DocumentData = DocumentData> {
   readonly allowUnknownFields?: boolean;
   readonly indexes?: readonly (readonly string[])[];
   readonly retiredIndexes?: readonly RetiredIndexDefinition[];
+  /**
+   * Fields promoted to real columns in a typed projection table, beyond the ones
+   * {@link indexes} already promotes (issue #15). Every indexed field is hot by
+   * definition, so it is never listed here as well; this names only the fields
+   * that are filtered or sorted on without an index of their own. Read only
+   * when typed projection tables are switched on — see
+   * docs/typed-projection-tables.md.
+   */
+  readonly promotedFields?: readonly string[];
   readonly events?: {
     readonly create?: string;
     readonly update?: string;

@@ -79,6 +79,7 @@ export function defineDocType<TData extends DocumentData>(
   const commands = definition.commands ? freezeCommandDefinitions(definition.commands) : undefined;
   const indexes = definition.indexes ? freezeProjectionIndexes(definition.indexes) : undefined;
   const retiredIndexes = definition.retiredIndexes ? freezeRetiredIndexes(definition.retiredIndexes) : undefined;
+  const promotedFields = definition.promotedFields ? Object.freeze([...definition.promotedFields]) : undefined;
   const fields = Object.freeze(definition.fields.map((field) => freezeFieldDefinition(definition, field)));
   return Object.freeze({
     ...definition,
@@ -91,6 +92,7 @@ export function defineDocType<TData extends DocumentData>(
     ...(commands ? { commands } : {}),
     ...(indexes ? { indexes } : {}),
     ...(retiredIndexes ? { retiredIndexes } : {}),
+    ...(promotedFields ? { promotedFields } : {}),
     ...(assignmentRules ? { assignmentRules } : {}),
     ...(automationRules ? { automationRules } : {})
   });
