@@ -49,6 +49,7 @@ import type {
 } from "../application/document-service.js";
 import type { ExecuteDomainCommand } from "../application/document-service.js";
 import { D1DocumentStore, D1EventStore } from "../adapters/d1/index.js";
+import { createCloudFrappeEventArchiveRuntime, type CloudFrappeEventArchiveOptions } from "./event-archive.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
@@ -113,6 +114,12 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
     readonly targets?: readonly DocumentDeliveryOutboxTarget[];
   };
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+  /**
+   * Cold event archive (issue #18). Off unless set, and must be the same object
+   * passed to `createCloudFrappeWorker`: this coordinator folds the document
+   * streams the archive moves.
+   */
+  readonly eventArchive?: CloudFrappeEventArchiveOptions<Env>;
 }
 
 export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> = new (
@@ -131,7 +138,11 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
 
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
-      const events = new D1EventStore(env.DB);
+      const eventArchive = options.eventArchive === undefined
+        ? undefined
+        : createCloudFrappeEventArchiveRuntime(env, options.eventArchive);
+      const storeOptions = eventArchive === undefined ? {} : { archive: eventArchive.archived };
+      const events = new D1EventStore(env.DB, storeOptions);
       const customFields = new CustomFieldService({
         registry: options.registry,
         events
@@ -155,7 +166,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       const naming = new NamingService({
         registry: options.registry,
         events,
-        store: new D1DocumentStore(env.DB),
+        store: new D1DocumentStore(env.DB, storeOptions),
         preNamingDocTypeResolver: preNamingDocType
       });
       const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
@@ -223,7 +234,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           });
       this.service = new DocumentService({
         registry: options.registry,
-        store: new D1DocumentStore(env.DB),
+        store: new D1DocumentStore(env.DB, storeOptions),
         // In-memory is enough here because losing a snapshot costs a cold fold
         // and nothing else — issue #17's rule is that a snapshot may always be
         // ignored. That is why this is one line rather than a table, a migration
@@ -243,7 +254,13 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
         //   just means a longer tail replay.
         // - Growth was not free. It accumulates one entry per document it has
         //   ever created, so the store is bounded and evicts least-recently-used.
-        snapshots: new InMemorySnapshotStore(),
+        //
+        // With the event archive on, misses fall through to the D1 snapshot the
+        // archiver records before it moves a document's history to R2, so an
+        // instance that starts cold reads a hot tail instead of the archive.
+        snapshots: new InMemorySnapshotStore(
+          eventArchive === undefined ? {} : { fallback: new D1SnapshotStore(env.DB) }
+        ),
         doctypeResolver: effectiveDocType,
         documentShares: new DocumentShareService({ events }),
         userPermissions: new UserPermissionService({

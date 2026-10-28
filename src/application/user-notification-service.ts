@@ -70,8 +70,12 @@ export interface UserNotificationServiceOptions {
  *
  * Bound rather than passed per call so a snapshot can never be taken over one
  * subset of the stream's events and resumed over another.
+ *
+ * Exported for the event archive, which records this fold's snapshot before it
+ * moves a user's notification history to cold storage — the snapshot it writes
+ * has to be the one this service resumes from.
  */
-const USER_NOTIFICATIONS_FOLD = (tenantId: TenantId, userId: string): StreamFold<UserNotificationState> => ({
+export const USER_NOTIFICATIONS_FOLD = (tenantId: TenantId, userId: string): StreamFold<UserNotificationState> => ({
   name: "userNotifications",
   version: 1,
   payloadKinds: USER_NOTIFICATION_PAYLOAD_KINDS,

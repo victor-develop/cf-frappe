@@ -3,6 +3,8 @@ import {
   D1_AUTOMATION_RUNS_TABLE,
   D1_DATA_PATCHES_TABLE,
   D1_DOCUMENTS_TABLE,
+  D1_EVENT_ARCHIVE_DOCUMENTS_TABLE,
+  D1_EVENT_ARCHIVE_SEGMENTS_TABLE,
   D1_EVENTS_TABLE,
   D1_JOB_EXECUTIONS_TABLE,
   D1_FOLD_SNAPSHOTS_TABLE,
@@ -59,9 +61,14 @@ describe("D1 table constants", () => {
     // Two are excluded: the migration journal is read once per migrate, and the
     // fold snapshots are only ever touched by full primary key, so there is no
     // alternative plan for statistics to influence.
+    // The two event-archive tables are excluded for the same reason: every
+    // query pins a primary-key prefix or the one index whose leading column it
+    // filters on.
     expect(D1_TABLES.filter((table) => !D1_QUERIED_TABLES.includes(table))).toEqual([
       D1_MIGRATIONS_TABLE,
-      D1_FOLD_SNAPSHOTS_TABLE
+      D1_FOLD_SNAPSHOTS_TABLE,
+      D1_EVENT_ARCHIVE_SEGMENTS_TABLE,
+      D1_EVENT_ARCHIVE_DOCUMENTS_TABLE
     ]);
   });
 

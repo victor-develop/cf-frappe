@@ -4,6 +4,9 @@ import {
   D1_AUTOMATION_RUNS_TABLE,
   D1_FOLD_SNAPSHOTS_TABLE,
   D1_DATA_PATCHES_TABLE,
+  D1_EVENT_ARCHIVE_DOCUMENTS_TABLE,
+  D1_EVENT_ARCHIVE_SEGMENTS_TABLE,
+  D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER,
   D1_DOCUMENTS_TABLE,
   D1_EVENTS_TABLE,
   D1_JOB_EXECUTIONS_TABLE,
@@ -64,6 +67,7 @@ export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_ro
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 export const D1_EVENT_DOCUMENT_NAME_MIGRATION_ID = "0007_cf_frappe_events_document_name";
 export const D1_FOLD_SNAPSHOT_MIGRATION_ID = "0008_cf_frappe_fold_snapshots";
+export const D1_EVENT_ARCHIVE_MIGRATION_ID = "0009_cf_frappe_event_archive";
 
 /**
  * Trailing projection-index column that lets the default list ordering
@@ -340,6 +344,102 @@ export const D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
   }
 ];
 
+/**
+ * The hot-side index of events moved to cold storage (issue #18).
+ *
+ * Created for every deployment and empty unless the archive is switched on.
+ * Three jobs, and the reason this lives in D1 rather than in an index object in
+ * R2 is the first one:
+ *
+ * - **It is written in the same transaction that deletes the hot rows.** A
+ *   segment row exists exactly when its events have left `cf_frappe_events`, so
+ *   there is no window in which an event is in neither place, or in both. An
+ *   index object in R2 would be a read-modify-write that no D1 batch can include.
+ * - **It is the stream's high-water mark once the hot tail is empty.**
+ *   `currentVersion` takes the larger of the hot `MAX(sequence)` and
+ *   `MAX(seq_end)` here; without it, a fully archived stream would report version
+ *   0 and the next append would reuse sequence 1.
+ * - **It is what the read path consults on a hot miss**, by stream for a fold, by
+ *   tenant and time for the audit search, and by document name for the reads
+ *   that match one record inside a shared stream.
+ *
+ * `cf_frappe_event_archive_documents` exists for that last case. The delivery
+ * outbox keeps every record of a tenant in one stream and looks each up by
+ * document name — on every enqueue, to stay exactly-once. Without a per-name
+ * index, a lookup in a stream with archived segments would have to read every
+ * one of them to prove a record is absent.
+ *
+ * `tenant_id` and `doctype` are per segment, not per event: the archiver refuses
+ * a segment whose events disagree on either, which every stream the framework
+ * writes satisfies.
+ */
+export const D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_event_archive_segments",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} (` +
+      "stream TEXT NOT NULL, " +
+      "seq_start INTEGER NOT NULL, " +
+      "seq_end INTEGER NOT NULL, " +
+      "tenant_id TEXT NOT NULL, " +
+      "doctype TEXT NOT NULL, " +
+      "first_occurred_at TEXT NOT NULL, " +
+      "last_occurred_at TEXT NOT NULL, " +
+      "event_count INTEGER NOT NULL, " +
+      "object_key TEXT NOT NULL, " +
+      "sha256 TEXT NOT NULL, " +
+      "byte_length INTEGER NOT NULL, " +
+      "archived_at TEXT NOT NULL, " +
+      "PRIMARY KEY (stream, seq_start)" +
+      ");"
+  },
+  {
+    name: "index_cf_frappe_event_archive_segments_tenant_time",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_event_archive_segments_tenant_time " +
+      `ON ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE}(tenant_id, last_occurred_at);`
+  },
+  {
+    name: "index_cf_frappe_event_archive_segments_doctype",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_event_archive_segments_doctype " +
+      `ON ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE}(tenant_id, doctype, stream);`
+  },
+  {
+    name: "create_cf_frappe_event_archive_documents",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_EVENT_ARCHIVE_DOCUMENTS_TABLE} (` +
+      "stream TEXT NOT NULL, " +
+      "document_name TEXT NOT NULL, " +
+      "seq_start INTEGER NOT NULL, " +
+      "PRIMARY KEY (stream, document_name, seq_start)" +
+      ");"
+  },
+  {
+    // `UNIQUE(stream, sequence)` is the last check an append's optimistic
+    // concurrency relies on: two writers that both read version N race on the
+    // insert of N+1, and one of them fails. Archiving deletes rows from the hot
+    // table, so it would also delete them from that constraint — a writer whose
+    // version read went stale while an archive moved N+1 away could insert a
+    // second N+1, and the merge would have two events at one sequence.
+    //
+    // This puts the archived prefix back under the constraint, in SQL, for
+    // every insert path. It costs one primary-key range read per inserted
+    // event, on a table that is empty unless the archive is on. The message
+    // says "constraint" so `isD1ConstraintError` maps it to the same
+    // concurrency conflict a duplicate sequence raises.
+    name: "guard_cf_frappe_events_archived_sequences",
+    sql:
+      `CREATE TRIGGER IF NOT EXISTS ${D1_EVENT_ARCHIVED_SEQUENCE_TRIGGER} ` +
+      `BEFORE INSERT ON ${D1_EVENTS_TABLE} ` +
+      `WHEN NEW.sequence <= (SELECT COALESCE(MAX(seq_end), 0) FROM ${D1_EVENT_ARCHIVE_SEGMENTS_TABLE} ` +
+      "WHERE stream = NEW.stream) " +
+      "BEGIN " +
+      "SELECT RAISE(ABORT, 'constraint failed: cf_frappe_events sequence is already archived'); " +
+      "END;"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -430,6 +530,11 @@ export function planD1Migrations(
           id: D1_FOLD_SNAPSHOT_MIGRATION_ID,
           label: "cf-frappe fold snapshots",
           statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_EVENT_ARCHIVE_MIGRATION_ID,
+          label: "cf-frappe event archive index",
+          statements: D1_EVENT_ARCHIVE_SCHEMA_STATEMENTS
         })
       ]
     : [];

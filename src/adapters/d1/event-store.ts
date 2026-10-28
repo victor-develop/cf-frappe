@@ -4,12 +4,31 @@ import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "
 import type { EventAppendBatchEntry, EventBatchStore, EventStore } from "../../ports/event-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
 import { isD1ConstraintError } from "./constraint-error.js";
-import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
+import type { D1ArchivedEvents } from "./archived-events.js";
+import {
+  readD1AuditDocumentEvents,
+  readD1EventStream,
+  readD1StreamVersion,
+  searchD1AuditEvents
+} from "./event-reader.js";
 import { insertEventStatements, sequenceEvents } from "./event-writer.js";
 import { D1_EVENTS_TABLE } from "./tables.js";
 
 export class D1EventStore implements EventStore, EventBatchStore, AuditEventStore {
-  constructor(private readonly db: D1Database) {}
+  private readonly archive: D1ArchivedEvents | undefined;
+
+  /**
+   * @param options.archive Reads archived events back from cold storage
+   *   (issue #18). Omitted, the store reads the hot table only, exactly as it
+   *   did before the archive existed — and refuses, rather than returns, a
+   *   stream whose oldest events are missing from it. See `readD1EventStream`.
+   */
+  constructor(
+    private readonly db: D1Database,
+    options: { readonly archive?: D1ArchivedEvents } = {}
+  ) {
+    this.archive = options.archive;
+  }
 
   async append(
     stream: StreamName,
@@ -53,20 +72,19 @@ export class D1EventStore implements EventStore, EventBatchStore, AuditEventStor
   }
 
   async readStream(stream: StreamName, options: ReadStreamOptions = {}): Promise<readonly DomainEvent[]> {
-    return readD1EventStream(this.db, stream, options);
+    return this.archive === undefined
+      ? readD1EventStream(this.db, stream, options)
+      : this.archive.readStream(stream, options);
   }
 
   async currentVersion(stream: StreamName): Promise<number> {
-    const row = await this.db
-      .prepare(`SELECT COALESCE(MAX(sequence), 0) AS version FROM ${D1_EVENTS_TABLE} WHERE stream = ?`)
-      .bind(stream)
-      .first<{ version: number }>();
-    // A MAX aggregate returns exactly one row even for a stream that has no
-    // events, so the version is always present.
-    return Number(row!.version);
+    return readD1StreamVersion(this.db, stream);
   }
 
   async listStreams(query: { readonly tenantId: string; readonly doctype: string }): Promise<readonly StreamName[]> {
+    if (this.archive !== undefined) {
+      return this.archive.listStreams(query);
+    }
     const result = await this.db
       .prepare(
         `SELECT DISTINCT stream FROM ${D1_EVENTS_TABLE} ` +
@@ -78,10 +96,14 @@ export class D1EventStore implements EventStore, EventBatchStore, AuditEventStor
   }
 
   async searchEvents(query: AuditEventQuery): Promise<readonly DomainEvent[]> {
-    return searchD1AuditEvents(this.db, query);
+    return this.archive === undefined
+      ? searchD1AuditEvents(this.db, query)
+      : this.archive.searchEvents(query);
   }
 
   async readDocumentEvents(query: AuditDocumentEventQuery): Promise<readonly DomainEvent[]> {
-    return readD1AuditDocumentEvents(this.db, query);
+    return this.archive === undefined
+      ? readD1AuditDocumentEvents(this.db, query)
+      : this.archive.readDocumentEvents(query);
   }
 }

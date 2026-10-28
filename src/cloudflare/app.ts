@@ -109,6 +109,11 @@ import {
   dispatchScheduledJobs,
   type ScheduledJobDefinition
 } from "./scheduled-jobs.js";
+import {
+  createCloudFrappeEventArchiveRuntime,
+  type CloudFrappeEventArchiveOptions
+} from "./event-archive.js";
+import type { EventArchiveService } from "../application/event-archive-service.js";
 import { toErrorResponse } from "../adapters/http/index.js";
 
 export interface CloudFrappeEnv {
@@ -156,6 +161,8 @@ export interface CloudFrappeRuntimeServices {
   readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
+  /** Present only when `eventArchive` is configured. See `CloudFrappeEventArchiveOptions`. */
+  readonly eventArchive?: EventArchiveService;
 }
 
 export interface CloudFrappeFileOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
@@ -274,6 +281,11 @@ export interface CloudFrappeWorkerOptions<
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
+  /**
+   * Cold event archive (issue #18). Off unless set; pass the same object to
+   * `createAggregateCoordinatorClass`.
+   */
+  readonly eventArchive?: CloudFrappeEventArchiveOptions<TEnv>;
   readonly webFormServerSuppliedData?: (
     request: Request,
     webFormName: string,
@@ -366,8 +378,14 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     return cached;
   }
   const projections = new D1ProjectionStore(env.DB);
-  const events = new D1EventStore(env.DB);
-  const automationRunStore = new D1DocumentStore(env.DB);
+  // Undefined unless the archive is configured, and then every store below is
+  // built exactly as it was before the archive existed.
+  const eventArchive = options.eventArchive === undefined
+    ? undefined
+    : createCloudFrappeEventArchiveRuntime(env, options.eventArchive);
+  const storeOptions = eventArchive === undefined ? {} : { archive: eventArchive.archived };
+  const events = new D1EventStore(env.DB, storeOptions);
+  const automationRunStore = new D1DocumentStore(env.DB, storeOptions);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -408,7 +426,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const naming = new NamingService({
     registry: options.registry,
     events,
-    store: new D1DocumentStore(env.DB),
+    store: new D1DocumentStore(env.DB, storeOptions),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNamingDocTypeResolver: preNamingDocType
   });
@@ -579,7 +597,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     roles,
     savedReports,
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
-    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
+    ...(eventArchive === undefined ? {} : { eventArchive: eventArchive.service })
   };
   const files = options.files
     ? new FileService({

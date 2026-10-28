@@ -1,5 +1,9 @@
 import {
   AutomationRunConsumer,
+  D1ArchivedEvents,
+  D1EventArchive,
+  InMemoryColdEventStorage,
+  fixedClock,
   AutomationRunPlanner,
   AutomationRunService,
   DocumentService,
@@ -49,6 +53,8 @@ export function sequentialIds(): IdGenerator {
 
 export interface ReplayApp {
   readonly engine: TestD1;
+  /** Present when the replay runs with the cold event archive switched on. */
+  readonly archive?: D1EventArchive;
   readonly documents: DocumentService;
   readonly runs: AutomationRunService;
   readonly consumer: AutomationRunConsumer;
@@ -56,10 +62,17 @@ export interface ReplayApp {
   readonly projections: D1ProjectionStore;
 }
 
-export function buildReplayApp(registry: ModelRegistry, options: { readonly clock: Clock; readonly ids: IdGenerator }): ReplayApp {
+export function buildReplayApp(
+  registry: ModelRegistry,
+  options: { readonly clock: Clock; readonly ids: IdGenerator; readonly archived?: boolean }
+): ReplayApp {
   const engine = createTestD1({ schema: frameworkSchema() });
-  const store = new D1DocumentStore(engine.database);
-  const events = new D1EventStore(engine.database);
+  const storage = new InMemoryColdEventStorage();
+  const storeOptions = options.archived === true
+    ? { archive: new D1ArchivedEvents(engine.database, { storage }) }
+    : {};
+  const store = new D1DocumentStore(engine.database, storeOptions);
+  const events = new D1EventStore(engine.database, storeOptions);
   const projections = new D1ProjectionStore(engine.database);
   const documents = new DocumentService({
     registry,
@@ -76,7 +89,20 @@ export function buildReplayApp(registry: ModelRegistry, options: { readonly cloc
     projections,
     clock: options.clock
   });
-  return { engine, documents, runs, consumer, events, projections };
+  return {
+    engine,
+    documents,
+    runs,
+    consumer,
+    events,
+    projections,
+    ...(options.archived === true ? {
+          // Its own fixed clock: drawing from the replay's ticking clock would
+          // shift every later timestamp and make the transcript differ from the
+          // golden for a reason that has nothing to do with archiving.
+          archive: new D1EventArchive(engine.database, { storage, clock: fixedClock("2000-01-01T00:00:00.000Z") })
+        } : {})
+  };
 }
 
 /**
@@ -131,10 +157,21 @@ export interface GoldenTranscript {
  * golden is exactly what a fresh fold of the stored history and the derived
  * projections say, not what the commands happened to return.
  */
-export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> {
+export async function replay(
+  fixture: GoldenFixture,
+  options: {
+    /**
+     * Runs after every step. The archived replay uses it to move every stream's
+     * whole history to cold storage between commands, so each command runs
+     * against a hot table that holds nothing of the streams it folds.
+     */
+    readonly afterStep?: (app: ReplayApp) => Promise<void>;
+    readonly archived?: boolean;
+  } = {}
+): Promise<GoldenTranscript> {
   const clock = tickingClock(fixture.clockStart);
   const ids = sequentialIds();
-  const app = buildReplayApp(fixture.registry, { clock, ids });
+  const app = buildReplayApp(fixture.registry, { clock, ids, ...(options.archived === true ? { archived: true } : {}) });
   const versions = new Map<string, number>();
   // Series-named documents (RMA-2026-000001 and friends) get their name from
   // the engine, so a create step names the result with an `as` alias and later
@@ -142,9 +179,16 @@ export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> 
   const aliases = new Map<string, string>();
 
   for (const step of fixture.steps) {
+    await runStep(step);
+    await options.afterStep?.(app);
+  }
+
+  return await collect(app, fixture);
+
+  async function runStep(step: GoldenStep): Promise<void> {
     if (step.op === "drainAutomations") {
       await drainAll(app.consumer, step.claimId);
-      continue;
+      return;
     }
     const actor = fixture.actors[step.actor];
     if (actor === undefined) {
@@ -154,7 +198,7 @@ export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> 
       const created = await app.documents.create({ actor, doctype: step.doctype, data: step.data });
       aliases.set(step.as, created.name);
       versions.set(`${step.doctype}/${step.as}`, created.version);
-      continue;
+      return;
     }
     const name = aliases.get(step.name) ?? step.name;
     const versionKey = `${step.doctype}/${step.name}`;
@@ -170,8 +214,6 @@ export async function replay(fixture: GoldenFixture): Promise<GoldenTranscript> 
     }
     versions.set(versionKey, snapshot.version);
   }
-
-  return await collect(app, fixture);
 }
 
 async function applyStep(
@@ -232,7 +274,11 @@ async function collect(app: ReplayApp, fixture: GoldenFixture): Promise<GoldenTr
   }
 
   const streams: Record<string, readonly DomainEvent[]> = {};
-  for (const row of app.engine.query("SELECT DISTINCT stream FROM cf_frappe_events ORDER BY stream ASC")) {
+  // Archived streams may have no hot row left, so they are enumerated from the
+  // archive index as well. Empty unless the replay archived something.
+  for (const row of app.engine.query(
+    "SELECT stream FROM cf_frappe_events UNION SELECT stream FROM cf_frappe_event_archive_segments ORDER BY stream ASC"
+  )) {
     const stream = String(row.stream);
     streams[stream] = await app.events.readStream(stream);
   }
