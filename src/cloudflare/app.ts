@@ -30,6 +30,18 @@ import {
   DocumentDeliveryOutboxConsumer
 } from "../application/document-delivery-outbox-consumer.js";
 import { DocumentDeliveryOutboxService } from "../application/document-delivery-outbox-service.js";
+import { ProjectionBackfillService } from "../application/projection-backfill.js";
+import {
+  PROJECTION_DELIVERY_DRAIN_JOB_NAME,
+  PROJECTION_ROLLBACK_CURSOR,
+  PROJECTION_ROLLBACK_DRAIN_JOB_NAME,
+  ProjectionDeliveryConsumer
+} from "../application/projection-delivery.js";
+import {
+  createProjectionRuntime,
+  projectionDocumentStoreOptions,
+  type CloudFrappeProjectionDatabaseOptions
+} from "./projection-database.js";
 import { KanbanService } from "../application/kanban-service.js";
 import { NamingService } from "../application/naming-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
@@ -154,6 +166,23 @@ export interface CloudFrappeRuntimeServices {
   readonly dataPatches?: DataPatchAdminPort;
   readonly documentDeliveryOutbox?: DocumentDeliveryOutboxService;
   readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
+  /**
+   * Folds streams on the primary into whichever projection table reads come
+   * from in this layout — the projection database when the split is on, the
+   * primary's own table when it is off. The tool for switching the split on;
+   * switching it off goes through `projectionRollback` instead, so the table is
+   * current before reads move to it. See `docs/projection-database.md`.
+   */
+  readonly projectionBackfill: ProjectionBackfillService;
+  /** Present only with `projectionDatabase`: drains the projection channel and reports its lag. */
+  readonly projectionDelivery?: ProjectionDeliveryConsumer;
+  /**
+   * Drains the projection channel into the primary's own projection table,
+   * under its own cursor. The first half of switching the split off: run it
+   * while the split is still on, so the table reads come back to is current on
+   * the switch; see `docs/projection-database.md`.
+   */
+  readonly projectionRollback: ProjectionDeliveryConsumer;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -271,6 +300,11 @@ export interface CloudFrappeWorkerOptions<
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly documentDeliveryOutbox?: boolean | CloudFrappeDocumentDeliveryOutboxOptions<TEnv>;
+  /**
+   * Moves projections to their own D1 database (issue #13). Off by default; pass
+   * the same object to `createAggregateCoordinatorClass`.
+   */
+  readonly projectionDatabase?: CloudFrappeProjectionDatabaseOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
@@ -365,9 +399,22 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   if (cached) {
     return cached;
   }
-  const projections = new D1ProjectionStore(env.DB);
   const events = new D1EventStore(env.DB);
-  const automationRunStore = new D1DocumentStore(env.DB);
+  const projectionRuntime = options.projectionDatabase === undefined
+    ? undefined
+    : createProjectionRuntime(env, options.projectionDatabase);
+  const projections = projectionRuntime?.projections ?? new D1ProjectionStore(env.DB);
+  const projectionBackfill = projectionRuntime?.backfill ??
+    new ProjectionBackfillService({ events, streams: events, target: new D1ProjectionStore(env.DB) });
+  // In either layout, and nothing calls it unless an operator switching the
+  // split off does: with the split off and never on, the channel is empty.
+  const projectionRollback = new ProjectionDeliveryConsumer({
+    events,
+    projections: new D1ProjectionStore(env.DB),
+    cursor: PROJECTION_ROLLBACK_CURSOR
+  });
+  const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
+  const automationRunStore = new D1DocumentStore(env.DB, documentStoreOptions);
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -408,7 +455,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const naming = new NamingService({
     registry: options.registry,
     events,
-    store: new D1DocumentStore(env.DB),
+    store: new D1DocumentStore(env.DB, documentStoreOptions),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNamingDocTypeResolver: preNamingDocType
   });
@@ -579,7 +626,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     roles,
     savedReports,
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
-    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
+    projectionBackfill,
+    projectionRollback,
+    ...(projectionRuntime === undefined ? {} : { projectionDelivery: projectionRuntime.delivery })
   };
   const files = options.files
     ? new FileService({
@@ -622,6 +672,21 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     documentDeliveryOutboxConsumer !== undefined &&
     jobOptions !== undefined &&
     jobOptions.registry.has(DOCUMENT_DELIVERY_OUTBOX_DRAIN_JOB_NAME);
+  const projectionDeliveryDrainQueueEnabled =
+    projectionRuntime !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(PROJECTION_DELIVERY_DRAIN_JOB_NAME);
+  const projectionRollbackDrainQueueEnabled =
+    jobOptions !== undefined &&
+    jobOptions.registry.has(PROJECTION_ROLLBACK_DRAIN_JOB_NAME);
+  if (projectionRuntime !== undefined && !projectionDeliveryDrainQueueEnabled) {
+    // Not an error — a deployment may drain from elsewhere — but with no drain
+    // job the lag alert never runs either, and the channel can grow unwatched.
+    console.warn(JSON.stringify({
+      event: "cf-frappe.projection.drain-job-missing",
+      message: `projectionDatabase is set but the ${PROJECTION_DELIVERY_DRAIN_JOB_NAME} job is not registered`
+    }));
+  }
   const automationRunDrainQueueEnabled =
     jobOptions !== undefined &&
     jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
@@ -638,6 +703,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         additionalJobResources<TJobResources>({
           ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
           ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
+          ...(projectionDeliveryDrainQueueEnabled ? { projectionDelivery: projectionRuntime.delivery } : {}),
+          ...(projectionRollbackDrainQueueEnabled ? { projectionRollback } : {}),
           ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
         })
       )
@@ -731,6 +798,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    ...(projectionRuntime?.readYourWrites === undefined ? {} : { readYourWrites: projectionRuntime.readYourWrites }),
     notifications
   });
   const desk = createDeskApp({

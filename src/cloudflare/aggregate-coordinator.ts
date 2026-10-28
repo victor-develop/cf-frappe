@@ -54,6 +54,7 @@ import type { Clock } from "../ports/clock.js";
 import type { EventStore } from "../ports/event-store.js";
 import type { IdGenerator } from "../ports/id-generator.js";
 import type { RealtimePublisher } from "../ports/realtime.js";
+import { projectionDocumentStoreOptions, type CloudFrappeProjectionDatabaseOptions } from "./projection-database.js";
 
 export type AggregateCoordinatorCommand =
   | ({ readonly kind: "create" } & CreateDocumentCommand)
@@ -113,6 +114,12 @@ export interface AggregateCoordinatorOptions<Env extends AggregateCoordinatorEnv
     readonly targets?: readonly DocumentDeliveryOutboxTarget[];
   };
   readonly onHookError?: (error: unknown, event: DomainEvent) => void | Promise<void>;
+  /**
+   * The split projection layout (issue #13): commits hand their projection rows
+   * to the outbox instead of writing them to `DB`. Pass the same object to
+   * `createCloudFrappeWorker`. Off by default.
+   */
+  readonly projectionDatabase?: CloudFrappeProjectionDatabaseOptions<Env>;
 }
 
 export type AggregateCoordinatorClass<Env extends AggregateCoordinatorEnv = AggregateCoordinatorEnv> = new (
@@ -132,6 +139,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
     constructor(_ctx: DurableObjectState, env: Env) {
       super(_ctx, env);
       const events = new D1EventStore(env.DB);
+      const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
       const customFields = new CustomFieldService({
         registry: options.registry,
         events
@@ -155,7 +163,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
       const naming = new NamingService({
         registry: options.registry,
         events,
-        store: new D1DocumentStore(env.DB),
+        store: new D1DocumentStore(env.DB, documentStoreOptions),
         preNamingDocTypeResolver: preNamingDocType
       });
       const effectiveDocType = (base: DocTypeDefinition, context: { readonly tenantId: string }) =>
@@ -223,7 +231,7 @@ export function createAggregateCoordinatorClass<Env extends AggregateCoordinator
           });
       this.service = new DocumentService({
         registry: options.registry,
-        store: new D1DocumentStore(env.DB),
+        store: new D1DocumentStore(env.DB, documentStoreOptions),
         // In-memory is enough here because losing a snapshot costs a cold fold
         // and nothing else — issue #17's rule is that a snapshot may always be
         // ignored. That is why this is one line rather than a table, a migration

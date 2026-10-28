@@ -18,6 +18,7 @@ export * from "./naming-api.js";
 export * from "./oidc.js";
 export * from "./oidc-providers.js";
 export * from "./print-api.js";
+export * from "./read-your-writes.js";
 export * from "./report-api.js";
 export * from "./request.js";
 export * from "./resource-api.js";

@@ -1,7 +1,12 @@
 import { domainEventPayloadKind } from "../core/domain-events.js";
 import type { DocumentData, DocumentName, DocTypeName, DomainEvent, TenantId } from "../core/types.js";
 
-export type DocumentDeliveryOutboxTarget = "notification" | "realtime" | "email";
+/**
+ * `projection` only ever appears on the projection channel, enqueued by the
+ * commit itself through a `ProjectionHandoff` rather than by an after-commit
+ * hook — see `projection-delivery.ts`.
+ */
+export type DocumentDeliveryOutboxTarget = "notification" | "realtime" | "email" | "projection";
 
 export type DocumentDeliveryOutboxStatus = "pending" | "claimed" | "delivered" | "failed";
 

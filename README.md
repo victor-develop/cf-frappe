@@ -252,6 +252,22 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
+#### Separate projection database (off by default)
+
+Projections normally live in the same D1 database as the events and are written in the same commit, so a document is listable the moment the write returns. Once that database approaches 5 GB, or read load starts slowing writes, projections can move to a D1 database of their own, fed through the delivery outbox:
+
+```ts
+const projectionDatabase: CloudFrappeProjectionDatabaseOptions<Env> = {
+  database: (env) => env.PROJECTIONS_DB,
+  readYourWrites: { secret: (env) => env.READ_AFTER_SECRET }
+};
+// Pass the same object to both, then backfill.
+createAggregateCoordinatorClass<Env>({ registry, projectionDatabase });
+createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* + createProjectionDeliveryDrainJob() */ } });
+```
+
+The cost is real: lists, reports and dashboards become eventually consistent. Reads of one document by name stay strongly consistent, and writes never read projections at all. A write response carries an `X-CF-Frappe-Read-After` token; send it back on a read to wait for that write. Leave it off until the trigger is reached. Turning it back off needs the same care as turning it on: drain the projection channel into `DB`'s own table with `createProjectionRollbackDrainJob()` *while the split is still on*, then switch, then drain once more — with the switch off, reads by name come straight from that table. [Separate Projection Database](docs/projection-database.md) covers which reads are strong, the lag alert, turning it on, and turning it back off.
+
 ### Development Setup
 
 Work on the framework:
@@ -298,6 +314,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [Naming Engine](docs/naming-engine.md): business ID templates, atomic allocation, runtime administration, and API contract.
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
+- [Separate Projection Database](docs/projection-database.md): moving projections to their own D1 through the delivery outbox — which reads stay strong, read-your-writes tokens, lag alerts, and switching on and back off.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
@@ -548,6 +565,22 @@ npm run deploy
 
 委外的是**凭证验证，不是用户管理**：帐号、角色、权限及其完整审计轨迹留在这里并且是事件化的；密码、MFA、passkey、设备管理属于 IdP。所以 MFA、passkey、社群登录、设备管理都是**刻意不做**的 —— 理由、`signed-session` 的范围冻结说明、以及面向终端客户场景的建议做法，见 [Authentication](docs/authentication.md)。
 
+#### 独立投影数据库（默认关闭）
+
+默认情况下，投影和事件在同一个 D1 数据库里，并且在同一次 commit 中写入，所以写入一返回，列表里就能看到这条文档。等这个库接近 5 GB，或者读压力开始拖慢写入时，可以把投影搬到一个独立的 D1 数据库，由 delivery outbox 推送过去：
+
+```ts
+const projectionDatabase: CloudFrappeProjectionDatabaseOptions<Env> = {
+  database: (env) => env.PROJECTIONS_DB,
+  readYourWrites: { secret: (env) => env.READ_AFTER_SECRET }
+};
+// 同一个对象同时传给两边，然后做一次回填。
+createAggregateCoordinatorClass<Env>({ registry, projectionDatabase });
+createCloudFrappeWorker<Env>({ registry, actor, projectionDatabase, jobs: { /* + createProjectionDeliveryDrainJob() */ } });
+```
+
+代价是实打实的：列表、报表和仪表板会变成最终一致。按名称读取单个文档仍然是强一致的，写入路径也从不读投影。写入的响应会带一个 `X-CF-Frappe-Read-After` token，读取时带回去，就会等到这次写入可见。触发条件没到之前请保持关闭。回退到单库和开启一样要讲顺序：**在分库还开着的时候**，先用 `createProjectionRollbackDrainJob()` 把投影 channel 回放进 `DB` 自己的投影表，再关开关、部署，然后再回放一次——开关一关，按名称读取就直接读这张表了。哪些读取是强一致、lag 告警、怎么开启、怎么回退到单库，见 [Separate Projection Database](docs/projection-database.md)。
+
 ### 开发环境
 
 开发框架本身：
@@ -594,6 +627,7 @@ See [English TODO](#todo).
 - [Naming Engine](docs/naming-engine.md)：业务编号模板、原子分配、运行时管理和 API 契约。
 - [Projection Indexes](docs/projection-indexes.md)：`indexes` 声明如何变成 D1 SQL、能服务哪些查询与排序形状，以及每次 version bump 的重建代价。
 - [Document Delivery Outbox](docs/delivery-outbox.md)：outbox 的工作集如何随投递历史增长而保持有界，以及单记录读依赖的那条索引。
+- [Separate Projection Database](docs/projection-database.md)：经 delivery outbox 把投影搬到独立 D1——哪些读取保持强一致、read-your-writes token、lag 告警，以及如何开启和回退。
 - [Authentication](docs/authentication.md)：为什么 cf-frappe 消费身份而不提供身份、Access / OIDC / signed-session 怎么选，以及哪些能力是刻意不做的。
 - [Password Hashing](docs/passwords.md)：为什么在 Workers 上用 PBKDF2、迭代成本的实测数据，以及存量帳號如何在登入時升級。
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md)：本地角色 persona 和访问边界。

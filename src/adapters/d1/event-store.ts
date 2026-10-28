@@ -1,7 +1,7 @@
 import { conflict } from "../../core/errors.js";
 import type { DomainEvent, NewDomainEvent, StreamName } from "../../core/types.js";
 import type { AuditDocumentEventQuery, AuditEventQuery, AuditEventStore } from "../../ports/audit-event-store.js";
-import type { EventAppendBatchEntry, EventBatchStore, EventStore } from "../../ports/event-store.js";
+import type { EventAppendBatchEntry, EventBatchStore, EventStore, StreamCatalogQuery } from "../../ports/event-store.js";
 import type { ReadStreamOptions } from "../../ports/document-store.js";
 import { isD1ConstraintError } from "./constraint-error.js";
 import { readD1AuditDocumentEvents, readD1EventStream, searchD1AuditEvents } from "./event-reader.js";
@@ -66,13 +66,21 @@ export class D1EventStore implements EventStore, EventBatchStore, AuditEventStor
     return Number(row!.version);
   }
 
-  async listStreams(query: { readonly tenantId: string; readonly doctype: string }): Promise<readonly StreamName[]> {
+  async listStreams(query: StreamCatalogQuery): Promise<readonly StreamName[]> {
     const result = await this.db
       .prepare(
         `SELECT DISTINCT stream FROM ${D1_EVENTS_TABLE} ` +
-        "WHERE tenant_id = ? AND doctype = ? ORDER BY stream ASC"
+        "WHERE tenant_id = ? AND doctype = ?" +
+        (query.after === undefined ? "" : " AND stream > ?") +
+        " ORDER BY stream ASC" +
+        (query.limit === undefined ? "" : " LIMIT ?")
       )
-      .bind(query.tenantId, query.doctype)
+      .bind(
+        query.tenantId,
+        query.doctype,
+        ...(query.after === undefined ? [] : [query.after]),
+        ...(query.limit === undefined ? [] : [query.limit])
+      )
       .all<{ stream: string }>();
     return (result.results ?? []).map((row) => row.stream);
   }

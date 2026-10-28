@@ -128,7 +128,7 @@ export function documentDeliveryOutboxSourceFromRecord(record: DocumentDeliveryO
   if (snapshot === undefined || snapshot === null) {
     return { event, snapshot: null };
   }
-  if (!isDocumentSnapshot(snapshot)) {
+  if (!isDocumentSnapshotValue(snapshot)) {
     throw badRequest(`Document delivery outbox record '${record.id}' contains an invalid source snapshot`);
   }
   return { event, snapshot };
@@ -153,7 +153,7 @@ function isDomainEvent(value: unknown): value is DomainEvent {
   );
 }
 
-function isDocumentSnapshot(value: unknown): value is DocumentSnapshot {
+export function isDocumentSnapshotValue(value: unknown): value is DocumentSnapshot {
   if (!isRecord(value)) {
     return false;
   }
