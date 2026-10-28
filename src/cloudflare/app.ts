@@ -1,5 +1,11 @@
 import { AuditService } from "../application/audit-service.js";
 import {
+  ANALYTICS_EXPORT_JOB_NAME,
+  AnalyticsExportService
+} from "../application/analytics-export-service.js";
+import type { AnalyticsUnavailablePolicy } from "../application/analytics-policy.js";
+import { AnalyticsQueryService } from "../application/analytics-query-service.js";
+import {
   AUTOMATION_RUN_DRAIN_JOB_NAME,
   AutomationRunConsumer
 } from "../application/automation-run-consumer.js";
@@ -63,6 +69,7 @@ import type { DocumentCommandExecutor } from "../application/document-service.js
 import { FileService } from "../application/file-service.js";
 import { webCryptoPbkdf2PasswordHasher } from "../adapters/crypto/index.js";
 import {
+  D1AnalyticsExportCursorStore,
   D1SnapshotStore, D1DataPatchLog, D1DocumentStore, D1EventStore, D1ProjectionStore } from "../adapters/d1/index.js";
 import { createDeskApp } from "../adapters/desk/index.js";
 import {
@@ -86,6 +93,11 @@ import type { DataPatchDefinition } from "../core/data-patch.js";
 import { canSubscribeToRealtimeTopic, parseRealtimeTopic, realtimeTopicFromScope } from "../core/realtime.js";
 import type { ModelRegistry } from "../core/registry.js";
 import type { AccountRecoveryNotifier } from "../ports/account-recovery.js";
+import type {
+  AnalyticsDocumentReader,
+  AnalyticsExportCursorStore,
+  AnalyticsSink
+} from "../ports/analytics.js";
 import { systemClock, type Clock } from "../ports/clock.js";
 import type { DataPatchLog } from "../ports/data-patch-log.js";
 import type { FileScanner } from "../ports/file-scanner.js";
@@ -154,6 +166,7 @@ export interface CloudFrappeRuntimeServices {
   readonly dataPatches?: DataPatchAdminPort;
   readonly documentDeliveryOutbox?: DocumentDeliveryOutboxService;
   readonly documentDeliveryOutboxConsumer?: DocumentDeliveryOutboxConsumer;
+  readonly analyticsExports?: AnalyticsExportService;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -248,6 +261,32 @@ export interface CloudFrappeDocumentDeliveryOutboxOptions<TEnv extends CloudFrap
   };
 }
 
+/**
+ * The analytical query path (issue #16). Omit it and every report and dashboard
+ * reads the operational projection, whatever it declares — the framework then
+ * behaves exactly as it did before this option existed.
+ *
+ * Set it and reports or dashboards declaring `queryPath: "analytical"` read
+ * from `reader`, while the export job (`createAnalyticsExportJob`, scheduled
+ * per tenant) copies changed projection rows into `sink`. See
+ * `docs/analytics.md` for the Pipelines + R2 SQL and the second-D1 setups.
+ */
+export interface CloudFrappeAnalyticsOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
+  readonly reader: (env: TEnv) => AnalyticsDocumentReader;
+  readonly sink: (env: TEnv) => AnalyticsSink;
+  /** Defaults to `cf_frappe_analytics_exports` in `env.DB` (migration 0009). */
+  readonly cursors?: (env: TEnv) => AnalyticsExportCursorStore;
+  /** `"fail"` (default) answers 503 when the copy cannot serve; `"operational"` falls back to D1. */
+  readonly onUnavailable?: AnalyticsUnavailablePolicy;
+  readonly settleSeconds?: number;
+  readonly batchSize?: number;
+  readonly maxRowsPerRun?: number;
+  readonly scanPageSize?: number;
+  /** Defaults to every DocType an analytical report or dashboard reads. */
+  readonly doctypes?: readonly string[];
+  readonly clock?: Clock;
+}
+
 export interface CloudFrappeDataPatchOptions<
   TEnv extends CloudFrappeEnv = CloudFrappeEnv,
   TResources = CloudFrappeRuntimeServices
@@ -271,6 +310,7 @@ export interface CloudFrappeWorkerOptions<
   readonly files?: CloudFrappeFileOptions<TEnv>;
   readonly realtime?: CloudFrappeRealtimeOptions<TEnv>;
   readonly documentDeliveryOutbox?: boolean | CloudFrappeDocumentDeliveryOutboxOptions<TEnv>;
+  readonly analytics?: CloudFrappeAnalyticsOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
@@ -465,8 +505,45 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const prints = new PrintService({ registry: options.registry, queries: restrictedQueries, printSettings });
   const relatedResources = new RelatedResourceService({ queries: restrictedQueries, prints });
   const printing = new PrintingWorkspaceService({ prints, printSettings, queries: restrictedQueries });
-  const reports = new ReportService({ registry: options.registry, queries: restrictedQueries });
-  const dashboards = new DashboardService({ registry: options.registry, queries: restrictedQueries, reports });
+  const analyticsOptions = options.analytics;
+  const analyticsCursors = analyticsOptions
+    ? analyticsOptions.cursors?.(env) ?? new D1AnalyticsExportCursorStore(env.DB)
+    : undefined;
+  const analyticsQueries = analyticsOptions && analyticsCursors
+    ? new AnalyticsQueryService({
+        reader: analyticsOptions.reader(env),
+        queries: restrictedQueries,
+        cursors: analyticsCursors,
+        ...(analyticsOptions.clock === undefined ? {} : { clock: analyticsOptions.clock }),
+        ...(analyticsOptions.scanPageSize === undefined ? {} : { pageSize: analyticsOptions.scanPageSize }),
+        ...(analyticsOptions.onUnavailable === undefined ? {} : { onUnavailable: analyticsOptions.onUnavailable })
+      })
+    : undefined;
+  const analyticsExports = analyticsOptions && analyticsCursors
+    ? new AnalyticsExportService({
+        registry: options.registry,
+        feed: projections,
+        sink: analyticsOptions.sink(env),
+        cursors: analyticsCursors,
+        ...(analyticsOptions.clock === undefined ? {} : { clock: analyticsOptions.clock }),
+        ...(analyticsOptions.settleSeconds === undefined ? {} : { settleSeconds: analyticsOptions.settleSeconds }),
+        ...(analyticsOptions.batchSize === undefined ? {} : { batchSize: analyticsOptions.batchSize }),
+        ...(analyticsOptions.maxRowsPerRun === undefined ? {} : { maxRowsPerRun: analyticsOptions.maxRowsPerRun }),
+        ...(analyticsOptions.doctypes === undefined ? {} : { doctypes: analyticsOptions.doctypes }),
+        ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
+      })
+    : undefined;
+  const reports = new ReportService({
+    registry: options.registry,
+    queries: restrictedQueries,
+    ...(analyticsQueries === undefined ? {} : { analytics: analyticsQueries })
+  });
+  const dashboards = new DashboardService({
+    registry: options.registry,
+    queries: restrictedQueries,
+    reports,
+    ...(analyticsQueries === undefined ? {} : { analytics: analyticsQueries })
+  });
   const kanbans = new KanbanService({ registry: options.registry, queries: restrictedQueries });
   const calendars = new CalendarService({ registry: options.registry, queries: restrictedQueries });
   const webForms = new WebFormService({ registry: options.registry, documents, queries: restrictedQueries });
@@ -579,7 +656,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     roles,
     savedReports,
     ...(documentDeliveryOutbox === undefined ? {} : { documentDeliveryOutbox }),
-    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer })
+    ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
+    ...(analyticsExports === undefined ? {} : { analyticsExports })
   };
   const files = options.files
     ? new FileService({
@@ -625,6 +703,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const automationRunDrainQueueEnabled =
     jobOptions !== undefined &&
     jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
+  const analyticsExportQueueEnabled =
+    analyticsExports !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(ANALYTICS_EXPORT_JOB_NAME);
   const jobHistory = jobExecutionLog && jobOptions
     ? new JobHistoryService({ registry: jobOptions.registry, executionLog: jobExecutionLog })
     : undefined;
@@ -638,7 +720,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
         additionalJobResources<TJobResources>({
           ...(dataPatchJobQueueEnabled ? { dataPatches } : {}),
           ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
-          ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
+          ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {}),
+          ...(analyticsExportQueueEnabled ? { analyticsExports } : {})
         })
       )
     : undefined;
@@ -731,6 +814,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(jobHistory === undefined ? {} : { jobs: jobHistory }),
     ...(jobRetry === undefined ? {} : { jobRetry }),
     ...(jobSchedules === undefined ? {} : { jobSchedules }),
+    ...(analyticsExports === undefined ? {} : { analyticsExports }),
     notifications
   });
   const desk = createDeskApp({

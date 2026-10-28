@@ -1,4 +1,5 @@
 import { FrameworkError } from "./errors.js";
+import { assertQueryPath, type QueryPath } from "./analytics.js";
 import { assertListFilterExpressionShape, freezeListFilter, freezeListFilterExpression } from "./list-view.js";
 import {
   SYSTEM_MANAGER_ROLE,
@@ -65,6 +66,12 @@ export interface DashboardDefinition {
   readonly description?: string;
   readonly roles?: readonly string[];
   readonly cards: readonly DashboardCardDefinition[];
+  /**
+   * Where the `documentCount` and `documentAggregate` cards read from. Report
+   * cards follow their report's own `queryPath`, so one report reads the same
+   * store whether it is opened directly or through a dashboard.
+   */
+  readonly queryPath?: QueryPath;
 }
 
 export function defineDashboard(definition: DashboardDefinition): DashboardDefinition {
@@ -92,6 +99,7 @@ export function defineDashboard(definition: DashboardDefinition): DashboardDefin
 
 export function assertDashboardDefinition(definition: DashboardDefinition): void {
   assertDashboardIdentifier(definition.name, "dashboard name");
+  assertQueryPath(definition.queryPath, `Dashboard '${definition.name}'`, "DASHBOARD_INVALID");
   if (definition.cards.length === 0) {
     throw new FrameworkError(
       "DASHBOARD_INVALID",

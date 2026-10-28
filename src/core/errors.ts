@@ -1,6 +1,8 @@
 import type { ValidationIssue } from "./types.js";
 
 export type FrameworkErrorCode =
+  | "ANALYTICS_INVALID"
+  | "ANALYTICS_UNAVAILABLE"
   | "APP_DEPENDENCY_CYCLE"
   | "APP_DEPENDENCY_MISSING"
   | "APP_DUPLICATE"

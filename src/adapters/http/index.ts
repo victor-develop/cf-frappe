@@ -1,4 +1,5 @@
 export * from "./actor.js";
+export * from "./analytics-api.js";
 export * from "./assignment-rule-api.js";
 export * from "./auth-api.js";
 export * from "./audit-api.js";

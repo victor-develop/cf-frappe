@@ -362,6 +362,42 @@ export class QueryService {
     return { doctype, page, sources };
   }
 
+  /**
+   * Applies this actor's read access to documents that did not come from the
+   * projection — the analytics copy (#16) — exactly as a list would: the same
+   * row-level check, the same shares and user permissions, the same field
+   * redaction, against the same tenant-resolved DocType. Documents the actor
+   * cannot read are dropped; the rest come back redacted, in input order.
+   *
+   * Reusing this rather than re-deriving access for the analytics path is what
+   * makes an analytical report agree with its operational run by construction.
+   */
+  async readableDocumentsFrom(
+    actor: Actor,
+    doctypeName: string,
+    documents: readonly DocumentSnapshot[],
+    options: { readonly tenantId?: string } = {}
+  ): Promise<readonly DocumentSnapshot[]> {
+    const tenantId = options.tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const { doctype, relatedDocType } = await this.doctypeContext(actor, doctypeName, tenantId);
+    this.requireDocTypeAction(actor, doctype, "read");
+    const readable = await this.filterReadableDocuments(
+      actor,
+      doctype,
+      documents.filter((document) => document.tenantId === tenantId && document.doctype === doctype.name),
+      relatedDocType
+    );
+    return readable.map((entry) => entry.document);
+  }
+
+  /** The DocType a list for this actor and tenant is normalised against, after tenant customisation. */
+  async queryDocTypeFor(actor: Actor, doctypeName: string, tenantId?: string): Promise<DocTypeDefinition> {
+    const resolvedTenant = tenantId ?? actor.tenantId ?? DEFAULT_TENANT_ID;
+    const doctype = await this.doctypeFor(actor, doctypeName, resolvedTenant);
+    this.requireDocTypeAction(actor, doctype, "read");
+    return projectDocTypeForFieldQueries({ actor, doctype });
+  }
+
   getListView(actor: Actor, doctypeName: string): ResolvedListView {
     return resolveListView(this.getMeta(actor, doctypeName));
   }

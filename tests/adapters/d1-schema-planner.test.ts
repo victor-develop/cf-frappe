@@ -4,6 +4,11 @@ import {
   D1_EVENT_DOCUMENT_NAME_SCHEMA_STATEMENTS,
   D1_FOLD_SNAPSHOT_MIGRATION_ID,
   D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS,
+  D1_ANALYTICS_DOCUMENTS_MIGRATION_ID,
+  D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS,
+  D1_ANALYTICS_EXPORT_MIGRATION_ID,
+  D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS,
+  planD1AnalyticsMigrations,
   D1_AUTOMATION_RUN_SCHEMA_STATEMENTS,
   D1_CORE_MIGRATION_ID,
   D1_CORE_SCHEMA_STATEMENTS,
@@ -154,6 +159,7 @@ describe("D1 schema planner", () => {
       D1_AUTOMATION_RUN_MIGRATION_ID,
       D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
       D1_FOLD_SNAPSHOT_MIGRATION_ID,
+      D1_ANALYTICS_EXPORT_MIGRATION_ID,
       "doctype_task_v7_indexes"
     ]);
     expect(migrations[0]!.checksum).toMatch(/^fnv1a32:[a-f0-9]{8}$/);
@@ -211,6 +217,11 @@ describe("D1 schema planner", () => {
       statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
     });
     expect(migrations[8]).toMatchObject({
+      id: D1_ANALYTICS_EXPORT_MIGRATION_ID,
+      label: "cf-frappe analytics export cursors",
+      statements: D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS
+    });
+    expect(migrations[9]).toMatchObject({
       label: "Task projection indexes",
       statements: [
         {
@@ -430,6 +441,44 @@ describe("D1 schema planner", () => {
     );
   });
 
+  it("keeps the checked-in Wrangler analytics export cursor migration exactly equivalent to the TypeScript plan", () => {
+    const fileSql = readFileSync(new URL("../../migrations/0009_cf_frappe_analytics_exports.sql", import.meta.url), "utf8");
+
+    expect(splitSqlStatements(fileSql)).toEqual(
+      D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS.map((statement) =>
+        normalizeSql(renderD1Migration({ ...analyticsExportMigrationStub, statements: [statement] }))
+      )
+    );
+  });
+
+  it("keeps the analytics database's checked-in migration exactly equivalent to its TypeScript plan", () => {
+    // A separate database with a separate migrations directory, so a separate
+    // pair to keep in step.
+    const fileSql = readFileSync(
+      new URL("../../migrations/analytics/0001_cf_frappe_analytics_documents.sql", import.meta.url),
+      "utf8"
+    );
+    const migrations = planD1AnalyticsMigrations();
+
+    expect(migrations.map((migration) => migration.id)).toEqual([D1_ANALYTICS_DOCUMENTS_MIGRATION_ID]);
+    expect(migrations[0]!.statements).toEqual(D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS);
+    expect(splitSqlStatements(fileSql)).toEqual(
+      D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS.map((statement) =>
+        normalizeSql(renderD1Migration({ ...analyticsDocumentsMigrationStub, statements: [statement] }))
+      )
+    );
+  });
+
+  it("never plans the analytics copy into the framework database", () => {
+    // The analytical path exists to take a report's scan off `DB`; a copy
+    // migrated into `DB` would put it straight back.
+    const sql = planD1Migrations([])
+      .flatMap((migration) => migration.statements.map((statement) => statement.sql))
+      .join("\n");
+
+    expect(sql).not.toContain("cf_frappe_analytics_documents");
+  });
+
   it("keeps the checked-in Wrangler event document name migration exactly equivalent to the TypeScript plan", () => {
     // `wrangler d1 migrations apply` runs the file on disk while
     // `D1MigrationRunner` runs the planned statements, so the two can drift
@@ -479,6 +528,16 @@ const automationRunMigrationStub = {
 
 const eventDocumentNameMigrationStub = {
   id: D1_EVENT_DOCUMENT_NAME_MIGRATION_ID,
+  checksum: "test"
+};
+
+const analyticsExportMigrationStub = {
+  id: D1_ANALYTICS_EXPORT_MIGRATION_ID,
+  checksum: "test"
+};
+
+const analyticsDocumentsMigrationStub = {
+  id: D1_ANALYTICS_DOCUMENTS_MIGRATION_ID,
   checksum: "test"
 };
 

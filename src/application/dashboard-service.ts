@@ -22,6 +22,10 @@ import {
 import { isPermissionDeniedError } from "./access-policy.js";
 import type { QueryService } from "./query-service.js";
 import type { ReportFilters, ReportService } from "./report-service.js";
+import type { AnalyticsQueryService } from "./analytics-query-service.js";
+import { isAnalyticsUnavailableError, planAnalyticsQueryPath } from "./analytics-policy.js";
+import { andPredicateExpressions } from "../core/predicates.js";
+import type { QueryPath } from "../core/analytics.js";
 
 export type DashboardCardResult = DashboardCardShape<DashboardCardValue>;
 
@@ -34,17 +38,25 @@ export interface DashboardServiceOptions {
   readonly registry: ModelRegistry;
   readonly queries: QueryService;
   readonly reports: ReportService;
+  /**
+   * The analytics copy (#16), for document cards on dashboards declaring
+   * `queryPath: "analytical"`. Report cards go through {@link ReportService},
+   * which has its own.
+   */
+  readonly analytics?: AnalyticsQueryService;
 }
 
 export class DashboardService {
   private readonly registry: ModelRegistry;
   private readonly queries: QueryService;
   private readonly reports: ReportService;
+  private readonly analytics: AnalyticsQueryService | undefined;
 
   constructor(options: DashboardServiceOptions) {
     this.registry = options.registry;
     this.queries = options.queries;
     this.reports = options.reports;
+    this.analytics = options.analytics;
   }
 
   async listDashboards(actor: Actor): Promise<readonly DashboardDefinition[]> {
@@ -66,21 +78,29 @@ export class DashboardService {
     const dashboard = await this.getDashboard(actor, dashboardName);
     return {
       dashboard,
-      cards: await Promise.all(dashboard.cards.map((card) => this.runCard(actor, card)))
+      cards: await Promise.all(dashboard.cards.map((card) => this.runCard(actor, card, dashboard.queryPath)))
     };
   }
 
-  private async runCard(actor: Actor, card: DashboardCardDefinition): Promise<DashboardCardResult> {
-    const value = await this.cardValue(actor, card.source);
+  private async runCard(
+    actor: Actor,
+    card: DashboardCardDefinition,
+    queryPath: QueryPath | undefined
+  ): Promise<DashboardCardResult> {
+    const value = await this.cardValue(actor, card.source, queryPath);
     return dashboardCardResult(card, value);
   }
 
-  private async cardValue(actor: Actor, source: DashboardCardSourceDefinition): Promise<DashboardCardValue> {
+  private async cardValue(
+    actor: Actor,
+    source: DashboardCardSourceDefinition,
+    queryPath: QueryPath | undefined
+  ): Promise<DashboardCardValue> {
     if (source.kind === "documentCount") {
-      return this.countReadableDocuments(actor, source);
+      return this.countReadableDocuments(actor, source, queryPath);
     }
     if (source.kind === "documentAggregate") {
-      return this.aggregateReadableDocuments(actor, source);
+      return this.aggregateReadableDocuments(actor, source, queryPath);
     }
     const result = await this.reports.runReport(actor, source.report, {
       filters: (source.filters ?? {}) as ReportFilters,
@@ -91,17 +111,19 @@ export class DashboardService {
 
   private async countReadableDocuments(
     actor: Actor,
-    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentCount" }>
+    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentCount" }>,
+    queryPath: QueryPath | undefined
   ): Promise<number> {
-    return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, 0, (count) => count + 1);
+    return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, queryPath, 0, (count) => count + 1);
   }
 
   private async aggregateReadableDocuments(
     actor: Actor,
-    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentAggregate" }>
+    source: Extract<DashboardCardSourceDefinition, { readonly kind: "documentAggregate" }>,
+    queryPath: QueryPath | undefined
   ): Promise<JsonPrimitive> {
     if (source.aggregate === "count") {
-      return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, 0, (count) => count + 1);
+      return this.foldReadableDocuments(actor, source.doctype, source.filters ?? [], source.filterExpression, queryPath, 0, (count) => count + 1);
     }
     const field = source.field;
     if (field === undefined) {
@@ -112,6 +134,7 @@ export class DashboardService {
       source.doctype,
       source.filters ?? [],
       source.filterExpression,
+      queryPath,
       emptyDashboardDocumentAggregate(),
       (aggregate, document) => updateDashboardDocumentAggregate(aggregate, document.data[field])
     );
@@ -123,9 +146,23 @@ export class DashboardService {
     doctype: string,
     filters: readonly ListDocumentsFilter[],
     filterExpression: ListFilterExpression | undefined,
+    queryPath: QueryPath | undefined,
     initial: T,
     reducer: (accumulator: T, document: DocumentSnapshot) => T
   ): Promise<T> {
+    const analytics = this.analytics;
+    const path = planAnalyticsQueryPath({ declared: queryPath, configured: analytics !== undefined });
+    if (path.status === "analytical" && analytics !== undefined) {
+      try {
+        const predicate = await this.analyticsPredicate(actor, doctype, filters, filterExpression);
+        const { documents } = await analytics.readableDocuments(actor, doctype, predicate === undefined ? {} : { predicate });
+        return documents.reduce(reducer, initial);
+      } catch (error) {
+        if (!(isAnalyticsUnavailableError(error) && analytics.onUnavailable === "operational")) {
+          throw error;
+        }
+      }
+    }
     const pageSize = 200;
     let accumulator = initial;
     for (let offset = 0; ; offset += pageSize) {
@@ -142,6 +179,27 @@ export class DashboardService {
         return accumulator;
       }
     }
+  }
+
+  /**
+   * The predicate the operational list would push into SQL for these filters,
+   * normalised against the same tenant-resolved, field-access-projected DocType,
+   * so the analytics path matches the very rows the projection query would.
+   */
+  private async analyticsPredicate(
+    actor: Actor,
+    doctype: string,
+    filters: readonly ListDocumentsFilter[],
+    filterExpression: ListFilterExpression | undefined
+  ) {
+    const queryDoctype = await this.queries.queryDocTypeFor(actor, doctype);
+    const normalized = normalizeListFilters(queryDoctype, filters);
+    return andPredicateExpressions([
+      normalized.length === 0
+        ? undefined
+        : normalizeListFilterExpression(queryDoctype, { kind: "group", match: "all", filters: normalized }),
+      filterExpression === undefined ? undefined : normalizeListFilterExpression(queryDoctype, filterExpression)
+    ]);
   }
 
   private dashboardReadAccess(actor: Actor, dashboard: DashboardDefinition): DashboardReadAccessDecision {

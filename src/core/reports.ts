@@ -2,6 +2,7 @@ import { FrameworkError, type FrameworkErrorCode } from "./errors.js";
 import type { Actor, DocTypeDefinition, FieldDefinition, FieldType, JsonPrimitive, PermissionAction } from "./types.js";
 import { SYSTEM_MANAGER_ROLE } from "./types.js";
 import { isMetadataName } from "./identifiers.js";
+import { assertQueryPath, isAnalyticalQueryPath, type QueryPath } from "./analytics.js";
 
 export type ReportFilterOperator = "eq" | "ne" | "contains" | "gte" | "lte" | "between" | "not_between";
 export type ReportFilterValue = JsonPrimitive | readonly JsonPrimitive[];
@@ -116,6 +117,13 @@ export interface ReportDefinition {
   readonly order?: ReportOrder;
   readonly roles?: readonly string[];
   readonly permissionAction?: PermissionAction;
+  /**
+   * Where the report reads its rows: the operational D1 projection (the
+   * default) or the exported analytics copy. See `src/core/analytics.ts` and
+   * `docs/analytics.md`. Ignored, and the report runs operationally, when no
+   * analytics store is configured.
+   */
+  readonly queryPath?: QueryPath;
 }
 
 export function defineReport(definition: ReportDefinition): ReportDefinition {
@@ -181,6 +189,7 @@ export function defineReport(definition: ReportDefinition): ReportDefinition {
 export function assertReportDefinition(definition: ReportDefinition): void {
   assertIdentifier(definition.name, "report name");
   assertReportSourceValid(definition);
+  assertReportQueryPathValid(definition);
   if (definition.columns.length === 0) {
     throw new FrameworkError("REPORT_INVALID", `Report '${definition.name}' must define at least one column`, {
       status: 400
@@ -614,6 +623,19 @@ function assertReportSourceValid(report: ReportDefinition): void {
     `Report '${report.name}' has invalid source`,
     { status: 400 }
   );
+}
+
+function assertReportQueryPathValid(report: ReportDefinition): void {
+  assertQueryPath(report.queryPath, `Report '${report.name}'`, "REPORT_INVALID");
+  // A custom report's rows come from its provider, not from a projection, so
+  // there is nothing to export and nothing for the analytics path to read.
+  if (isAnalyticalQueryPath(report.queryPath) && isCustomReport(report)) {
+    throw new FrameworkError(
+      "REPORT_INVALID",
+      `Report '${report.name}' has a custom source and cannot use the analytical query path`,
+      { status: 400 }
+    );
+  }
 }
 
 function assertReportOrderMatchesDocType(

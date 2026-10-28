@@ -75,6 +75,19 @@ export function frameworkSchema(): readonly string[] {
     .map((name) => readFileSync(new URL(name, MIGRATIONS_DIRECTORY), "utf8"));
 }
 
+const ANALYTICS_MIGRATIONS_DIRECTORY = new URL("../migrations/analytics/", import.meta.url);
+
+/**
+ * The analytics database's schema (issue #16) — a separate D1 from the
+ * framework's, so a separate set of shipped migrations.
+ */
+export function analyticsSchema(): readonly string[] {
+  return readdirSync(ANALYTICS_MIGRATIONS_DIRECTORY)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => readFileSync(new URL(name, ANALYTICS_MIGRATIONS_DIRECTORY), "utf8"));
+}
+
 /** D1's own message when the placeholder count and the binding count disagree. */
 export const D1_BINDING_MISMATCH = "Wrong number of parameter bindings for SQL query.";
 

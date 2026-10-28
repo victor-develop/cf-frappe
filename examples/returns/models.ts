@@ -633,6 +633,9 @@ export const ReturnsFinanceQueue = defineReport({
   module: "Returns",
   description: "Refund approvals and processing work ordered by scheduled refund time.",
   doctype: "Return Request",
+  // A whole-DocType aggregation, so it reads the exported analytics copy when
+  // a deployment configures one (#16); without one it runs on the projection.
+  queryPath: "analytical",
   columns: [
     { name: "return_id", label: "Return", field: "return_id", type: "text" },
     { name: "order", label: "Order", field: "order", type: "link" },

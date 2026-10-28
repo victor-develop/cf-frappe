@@ -8,9 +8,11 @@ import type {
 } from "../../core/types.js";
 import { cloneDocumentSnapshot } from "../../core/document-snapshots.js";
 import type { ProjectionStore } from "../../ports/projection-store.js";
+import type { ProjectionChangeFeed, ProjectionChangeQuery } from "../../ports/analytics.js";
+import { listInMemoryProjectionChanges } from "./analytics-store.js";
 import { compareListDocuments, matchesDocumentPredicate } from "./list-filters.js";
 
-export class InMemoryProjectionStore implements ProjectionStore {
+export class InMemoryProjectionStore implements ProjectionStore, ProjectionChangeFeed {
   private readonly documents = new Map<string, DocumentSnapshot>();
 
   async get(
@@ -46,6 +48,10 @@ export class InMemoryProjectionStore implements ProjectionStore {
       // break the same way on both adapters rather than only on D1.
       total: query.skipTotal === true ? 0 : all.length
     };
+  }
+
+  async listChangedSince(query: ProjectionChangeQuery): Promise<readonly DocumentSnapshot[]> {
+    return listInMemoryProjectionChanges(this.documents.values(), query).map(cloneDocumentSnapshot);
   }
 
   clear(): void {

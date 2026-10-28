@@ -1,4 +1,5 @@
 export * from "./aggregate-coordinator.js";
+export * from "./analytics.js";
 export * from "./app.js";
 export * from "./browser-rendering-print-pdf-renderer.js";
 export * from "./durable-object-command-executor.js";

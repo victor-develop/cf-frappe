@@ -1,6 +1,8 @@
 import type { DocTypeDefinition, RetiredIndexDefinition } from "../../core/types.js";
 import { FrameworkError } from "../../core/errors.js";
 import {
+  D1_ANALYTICS_DOCUMENTS_TABLE,
+  D1_ANALYTICS_EXPORTS_TABLE,
   D1_AUTOMATION_RUNS_TABLE,
   D1_FOLD_SNAPSHOTS_TABLE,
   D1_DATA_PATCHES_TABLE,
@@ -64,6 +66,9 @@ export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_ro
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 export const D1_EVENT_DOCUMENT_NAME_MIGRATION_ID = "0007_cf_frappe_events_document_name";
 export const D1_FOLD_SNAPSHOT_MIGRATION_ID = "0008_cf_frappe_fold_snapshots";
+export const D1_ANALYTICS_EXPORT_MIGRATION_ID = "0009_cf_frappe_analytics_exports";
+/** The analytics database's own first migration; see {@link planD1AnalyticsMigrations}. */
+export const D1_ANALYTICS_DOCUMENTS_MIGRATION_ID = "0001_cf_frappe_analytics_documents";
 
 /**
  * Trailing projection-index column that lets the default list ordering
@@ -340,6 +345,84 @@ export const D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
   }
 ];
 
+/**
+ * Export cursors for the analytics copy (issue #16): one row per tenant and
+ * exported DocType, saying how far the projection has been copied out.
+ *
+ * Created whether or not analytics is configured, like every core table, so
+ * turning the mode on later is a configuration change and not a migration. An
+ * unused table costs nothing: nothing on the write path touches it.
+ *
+ * No index beyond the primary key: every access is a point read, an upsert, or
+ * a list of one tenant's rows, which is the key's leading column.
+ */
+export const D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_analytics_exports",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_ANALYTICS_EXPORTS_TABLE} (` +
+      "tenant_id TEXT NOT NULL, " +
+      "doctype TEXT NOT NULL, " +
+      "position_updated_at TEXT, " +
+      "position_name TEXT, " +
+      "complete_through TEXT, " +
+      "pending_through TEXT, " +
+      "pending_visible_at TEXT, " +
+      "generation INTEGER NOT NULL DEFAULT 0, " +
+      "reexporting INTEGER NOT NULL DEFAULT 0, " +
+      "exported_rows INTEGER NOT NULL DEFAULT 0, " +
+      "last_run_at TEXT, " +
+      "last_error TEXT, " +
+      "PRIMARY KEY (tenant_id, doctype)" +
+      ");"
+  }
+];
+
+/**
+ * The analytics copy, in the analytics database (not `DB`).
+ *
+ * Append-only and keyed by version and export generation: the primary key
+ * `(tenant_id, doctype, name, version, export_generation)` is both the
+ * idempotency of a re-sent export and the index the reader's newest-row seek
+ * runs on. No other index — the reader filters on `data_json` only for rows the
+ * key has already chosen.
+ */
+export const D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_analytics_documents",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_ANALYTICS_DOCUMENTS_TABLE} (` +
+      "tenant_id TEXT NOT NULL, " +
+      "doctype TEXT NOT NULL, " +
+      "name TEXT NOT NULL, " +
+      "version INTEGER NOT NULL, " +
+      "docstatus TEXT NOT NULL, " +
+      "data_json TEXT NOT NULL, " +
+      "created_at TEXT NOT NULL, " +
+      "updated_at TEXT NOT NULL, " +
+      "export_generation INTEGER NOT NULL DEFAULT 0, " +
+      "exported_at TEXT NOT NULL, " +
+      "PRIMARY KEY (tenant_id, doctype, name, version, export_generation)" +
+      ");"
+  }
+];
+
+/**
+ * Migrations for a D1 database used as the analytics store
+ * ({@link D1AnalyticsStore}). Apply them to that database, never to `DB`:
+ * `new D1MigrationRunner(env.ANALYTICS_DB).apply(planD1AnalyticsMigrations())`,
+ * or `wrangler d1 migrations apply` with `migrations_dir: "migrations/analytics"`.
+ */
+export function planD1AnalyticsMigrations(): readonly D1Migration[] {
+  return [
+    defineD1Migration({
+      id: D1_ANALYTICS_DOCUMENTS_MIGRATION_ID,
+      label: "cf-frappe analytics document copy",
+      statements: D1_ANALYTICS_DOCUMENTS_SCHEMA_STATEMENTS
+    })
+  ];
+}
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -430,6 +513,11 @@ export function planD1Migrations(
           id: D1_FOLD_SNAPSHOT_MIGRATION_ID,
           label: "cf-frappe fold snapshots",
           statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_ANALYTICS_EXPORT_MIGRATION_ID,
+          label: "cf-frappe analytics export cursors",
+          statements: D1_ANALYTICS_EXPORT_SCHEMA_STATEMENTS
         })
       ]
     : [];
