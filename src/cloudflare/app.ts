@@ -39,9 +39,18 @@ import {
 } from "../application/projection-delivery.js";
 import {
   createProjectionRuntime,
+  createProjectionRuntimeFromStores,
   projectionDocumentStoreOptions,
   type CloudFrappeProjectionDatabaseOptions
 } from "./projection-database.js";
+import {
+  createTenantShardingRuntime,
+  type CloudFrappeTenantShardingOptions,
+  type CloudFrappeTenantShardServices
+} from "./tenant-sharding.js";
+import { TENANT_MOVE_ADVANCE_JOB_NAME } from "../adapters/sharding/index.js";
+import type { AuditEventStore } from "../ports/audit-event-store.js";
+import type { EventBatchStore, EventStore, StreamCatalog } from "../ports/event-store.js";
 import { KanbanService } from "../application/kanban-service.js";
 import { NamingService } from "../application/naming-service.js";
 import { DocumentHistoryService } from "../application/document-history-service.js";
@@ -128,6 +137,13 @@ export interface CloudFrappeEnv {
   readonly AGGREGATES: RpcDurableObjectNamespace<AggregateCoordinatorRpc>;
 }
 
+/**
+ * The event store every Worker service is built on: `D1EventStore` over `DB`, or
+ * a tenant-routed one when sharding (issue #14) is on. The ports, not the class,
+ * so callbacks given it work in either layout.
+ */
+export type CloudFrappeEventStore = EventStore & EventBatchStore & StreamCatalog & AuditEventStore;
+
 export interface CloudFrappeRuntimeServices {
   readonly registry: ModelRegistry;
   readonly documents: DocumentCommandExecutor;
@@ -183,6 +199,12 @@ export interface CloudFrappeRuntimeServices {
    * the switch; see `docs/projection-database.md`.
    */
   readonly projectionRollback: ProjectionDeliveryConsumer;
+  /**
+   * Present only with `tenantSharding`: the directory, provisioning, per-shard
+   * migrations, tenant moves and cross-tenant scatter-gather. See
+   * `docs/tenant-sharding.md`.
+   */
+  readonly tenantShards?: CloudFrappeTenantShardServices;
   readonly files?: FileService;
   readonly realtime?: RealtimePublisher;
 }
@@ -263,11 +285,11 @@ export interface CloudFrappeJobOptions<
 export interface CloudFrappeDocumentDeliveryOutboxOptions<TEnv extends CloudFrappeEnv = CloudFrappeEnv> {
   readonly emailNotifications?: (
     env: TEnv,
-    services: { readonly events: D1EventStore; readonly notificationRules: NotificationRuleService }
+    services: { readonly events: CloudFrappeEventStore; readonly notificationRules: NotificationRuleService }
   ) => EmailNotificationService;
   readonly emailNotificationDeliveryQueue?: (
     env: TEnv,
-    services: { readonly events: D1EventStore; readonly notificationRules: NotificationRuleService }
+    services: { readonly events: CloudFrappeEventStore; readonly notificationRules: NotificationRuleService }
   ) => EmailNotificationDeliveryQueue;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
@@ -305,6 +327,11 @@ export interface CloudFrappeWorkerOptions<
    * the same object to `createAggregateCoordinatorClass`.
    */
   readonly projectionDatabase?: CloudFrappeProjectionDatabaseOptions<TEnv>;
+  /**
+   * Shards tenants across D1 databases (issue #14). Off by default; pass the
+   * same object to `createAggregateCoordinatorClass`.
+   */
+  readonly tenantSharding?: CloudFrappeTenantShardingOptions<TEnv>;
   readonly jobs?: CloudFrappeJobOptions<TEnv, TJobResources>;
   readonly dataPatches?: CloudFrappeDataPatchOptions<TEnv, TDataPatchResources>;
   readonly printPdfRenderer?: (env: TEnv, services: CloudFrappeRuntimeServices) => PrintPdfRenderer;
@@ -399,22 +426,39 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   if (cached) {
     return cached;
   }
-  const events = new D1EventStore(env.DB);
+  // Sharding (issue #14) swaps every store below for one that routes each call
+  // to the tenant's shard; nothing above the stores changes. Off, these are the
+  // single-database stores exactly as before.
+  const sharding = options.tenantSharding === undefined
+    ? undefined
+    : createTenantShardingRuntime(env, options.tenantSharding, {
+        registry: options.registry,
+        ...(options.projectionDatabase === undefined ? {} : { projectionDatabase: options.projectionDatabase })
+      });
+  const events: CloudFrappeEventStore = sharding?.events ?? new D1EventStore(env.DB);
   const projectionRuntime = options.projectionDatabase === undefined
     ? undefined
-    : createProjectionRuntime(env, options.projectionDatabase);
-  const projections = projectionRuntime?.projections ?? new D1ProjectionStore(env.DB);
+    : sharding === undefined
+      ? createProjectionRuntime(env, options.projectionDatabase)
+      : createProjectionRuntimeFromStores(env, options.projectionDatabase, {
+          table: sharding.table,
+          events,
+          streams: events,
+          snapshots: sharding.snapshots
+        });
+  const projections = projectionRuntime?.projections ?? sharding?.table ?? new D1ProjectionStore(env.DB);
   const projectionBackfill = projectionRuntime?.backfill ??
-    new ProjectionBackfillService({ events, streams: events, target: new D1ProjectionStore(env.DB) });
+    new ProjectionBackfillService({ events, streams: events, target: sharding?.primaryTable ?? new D1ProjectionStore(env.DB) });
   // In either layout, and nothing calls it unless an operator switching the
   // split off does: with the split off and never on, the channel is empty.
   const projectionRollback = new ProjectionDeliveryConsumer({
     events,
-    projections: new D1ProjectionStore(env.DB),
+    projections: sharding?.primaryTable ?? new D1ProjectionStore(env.DB),
     cursor: PROJECTION_ROLLBACK_CURSOR
   });
   const documentStoreOptions = projectionDocumentStoreOptions(env, options.projectionDatabase);
-  const automationRunStore = new D1DocumentStore(env.DB, documentStoreOptions);
+  const documentStore = () => sharding?.documents ?? new D1DocumentStore(env.DB, documentStoreOptions);
+  const automationRunStore = documentStore();
   const documents = new DurableObjectCommandExecutor({
     registry: options.registry,
     namespace: env.AGGREGATES
@@ -455,7 +499,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
   const naming = new NamingService({
     registry: options.registry,
     events,
-    store: new D1DocumentStore(env.DB, documentStoreOptions),
+    store: documentStore(),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles }),
     preNamingDocTypeResolver: preNamingDocType
   });
@@ -541,7 +585,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     // whichever isolate serves the inbox, so an in-memory snapshot would be
     // cold almost every time. Losing it is still only a cold fold — see
     // `src/ports/snapshot-store.ts`.
-    snapshots: new D1SnapshotStore(env.DB),
+    snapshots: sharding?.snapshots ?? new D1SnapshotStore(env.DB),
     ...(options.auth?.adminRoles === undefined ? {} : { adminRoles: options.auth.adminRoles })
   });
   const realtime = options.realtime
@@ -629,7 +673,8 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
     ...(documentDeliveryOutboxConsumer === undefined ? {} : { documentDeliveryOutboxConsumer }),
     projectionBackfill,
     projectionRollback,
-    ...(projectionRuntime === undefined ? {} : { projectionDelivery: projectionRuntime.delivery })
+    ...(projectionRuntime === undefined ? {} : { projectionDelivery: projectionRuntime.delivery }),
+    ...(sharding === undefined ? {} : { tenantShards: sharding.services })
   };
   const files = options.files
     ? new FileService({
@@ -687,6 +732,10 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
       message: `projectionDatabase is set but the ${PROJECTION_DELIVERY_DRAIN_JOB_NAME} job is not registered`
     }));
   }
+  const tenantMoveQueueEnabled =
+    sharding !== undefined &&
+    jobOptions !== undefined &&
+    jobOptions.registry.has(TENANT_MOVE_ADVANCE_JOB_NAME);
   const automationRunDrainQueueEnabled =
     jobOptions !== undefined &&
     jobOptions.registry.has(AUTOMATION_RUN_DRAIN_JOB_NAME);
@@ -705,6 +754,7 @@ function appsForEnv<TEnv extends CloudFrappeEnv, TJobResources, TDataPatchResour
           ...(documentDeliveryOutboxDrainQueueEnabled ? { documentDeliveryOutboxConsumer } : {}),
           ...(projectionDeliveryDrainQueueEnabled ? { projectionDelivery: projectionRuntime.delivery } : {}),
           ...(projectionRollbackDrainQueueEnabled ? { projectionRollback } : {}),
+          ...(tenantMoveQueueEnabled ? { tenantShards: sharding.services } : {}),
           ...(automationRunDrainQueueEnabled ? { automationRunConsumer } : {})
         })
       )

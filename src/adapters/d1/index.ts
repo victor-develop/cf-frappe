@@ -1,5 +1,6 @@
 export * from "./audit-event-query.js";
 export * from "./automation-run-index.js";
+export { D1_TENANT_FENCED_MARKER, isD1TenantFencedError } from "./constraint-error.js";
 export * from "./data-patch-log.js";
 export * from "./document-store.js";
 export * from "./event-store.js";
@@ -15,3 +16,6 @@ export * from "./serde.js";
 export * from "./snapshot-store.js";
 export * from "./statistics.js";
 export * from "./tables.js";
+export * from "./tenant-mover.js";
+export * from "./tenant-provisioning.js";
+export * from "./tenant-shard-directory.js";

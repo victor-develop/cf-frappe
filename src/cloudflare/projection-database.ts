@@ -14,7 +14,15 @@ import {
 } from "../application/projection-read-consistency.js";
 import type { DocumentSnapshot } from "../core/types.js";
 import type { Clock } from "../ports/clock.js";
+import type { AutomationRunClaimStore } from "../ports/automation-run-claim-store.js";
 import type { DocumentStoreProjectionOptions } from "../ports/document-store.js";
+import type { EventStore, StreamCatalog } from "../ports/event-store.js";
+import type {
+  MonotonicProjectionWriter,
+  ProjectionStore,
+  ProjectionVersionReader
+} from "../ports/projection-store.js";
+import type { SnapshotStore } from "../ports/snapshot-store.js";
 
 /**
  * The split layout from issue #13: events stay in `DB`, projections move to a
@@ -80,7 +88,20 @@ export function projectionDocumentStoreOptions<TEnv>(
   if (options === undefined) {
     return {};
   }
-  const eager = options.eagerApply === false ? undefined : new D1ProjectionStore(options.database(env));
+  return projectionHandoffStoreOptions(env, options, options.database(env));
+}
+
+/**
+ * The handoff options for a `D1DocumentStore` whose projection rows belong in
+ * `projectionDatabase`. The unsharded layout has one, `options.database(env)`;
+ * a sharded one (issue #14) has one per shard.
+ */
+export function projectionHandoffStoreOptions<TEnv>(
+  env: TEnv,
+  options: CloudFrappeProjectionDatabaseOptions<TEnv>,
+  projectionDatabase: D1Database
+): DocumentStoreProjectionOptions {
+  const eager = options.eagerApply === false ? undefined : new D1ProjectionStore(projectionDatabase);
   return {
     projectionHandoff: new ProjectionOutboxHandoff({
       ...(eager === undefined ? {} : { eager }),
@@ -111,12 +132,41 @@ export function createProjectionRuntime<TEnv extends { readonly DB: D1Database }
   env: TEnv,
   options: CloudFrappeProjectionDatabaseOptions<TEnv>
 ): CloudFrappeProjectionRuntime {
-  const projectionDatabase = new D1ProjectionStore(options.database(env));
   const events = new D1EventStore(env.DB);
+  return createProjectionRuntimeFromStores(env, options, {
+    table: new D1ProjectionStore(options.database(env)),
+    events,
+    streams: events,
+    snapshots: new D1SnapshotStore(env.DB)
+  });
+}
+
+/**
+ * The stores the split layout's read side is assembled from: the table rows
+ * physically live in, and the primary's events and fold snapshots. Plain D1
+ * stores unsharded; tenant-routed ones when sharding (issue #14) puts each
+ * tenant's primary and projection database on its shard. Every call these make
+ * names its tenant, so one runtime over routed stores behaves as one runtime
+ * per shard would.
+ */
+export interface CloudFrappeProjectionRuntimeStores {
+  readonly table: ProjectionStore & MonotonicProjectionWriter & ProjectionVersionReader & AutomationRunClaimStore;
+  readonly events: Pick<EventStore, "readStream" | "append" | "currentVersion">;
+  readonly streams: StreamCatalog;
+  readonly snapshots: SnapshotStore;
+}
+
+export function createProjectionRuntimeFromStores<TEnv>(
+  env: TEnv,
+  options: CloudFrappeProjectionDatabaseOptions<TEnv>,
+  stores: CloudFrappeProjectionRuntimeStores
+): CloudFrappeProjectionRuntime {
+  const projectionDatabase = stores.table;
+  const events = stores.events;
   const projections = new ConsistentProjectionStore({
     projections: projectionDatabase,
     events,
-    snapshots: new D1SnapshotStore(env.DB),
+    snapshots: stores.snapshots,
     ...(options.onReadFallback === undefined
       ? {}
       : { onFallback: (fallback: ProjectionReadFallback) => options.onReadFallback!(fallback, env) })
@@ -141,7 +191,7 @@ export function createProjectionRuntime<TEnv extends { readonly DB: D1Database }
   return {
     projections,
     delivery,
-    backfill: new ProjectionBackfillService({ events, streams: events, target: projectionDatabase }),
+    backfill: new ProjectionBackfillService({ events, streams: stores.streams, target: projectionDatabase }),
     ...(readYourWrites === undefined
       ? {}
       : {

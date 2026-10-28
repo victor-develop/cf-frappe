@@ -7,7 +7,11 @@ import {
   D1_DOCUMENTS_TABLE,
   D1_EVENTS_TABLE,
   D1_JOB_EXECUTIONS_TABLE,
-  D1_MIGRATIONS_TABLE
+  D1_MIGRATIONS_TABLE,
+  D1_TENANT_FENCE_TRIGGER,
+  D1_TENANT_FENCES_TABLE,
+  D1_TENANT_MOVES_TABLE,
+  D1_TENANT_SHARDS_TABLE
 } from "./tables.js";
 import { isMetadataName } from "../../core/identifiers.js";
 import { d1JsonExtract } from "./json-path.js";
@@ -64,6 +68,7 @@ export const D1_DATA_PATCH_ROLLBACK_MIGRATION_ID = "0005_cf_frappe_data_patch_ro
 export const D1_AUTOMATION_RUN_MIGRATION_ID = "0006_cf_frappe_automation_runs";
 export const D1_EVENT_DOCUMENT_NAME_MIGRATION_ID = "0007_cf_frappe_events_document_name";
 export const D1_FOLD_SNAPSHOT_MIGRATION_ID = "0008_cf_frappe_fold_snapshots";
+export const D1_TENANT_SHARD_MIGRATION_ID = "0009_cf_frappe_tenant_shards";
 
 /**
  * Trailing projection-index column that lets the default list ordering
@@ -340,6 +345,95 @@ export const D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] 
   }
 ];
 
+/**
+ * Tenant sharding (issue #14): the routing directory, the move journal, and the
+ * per-shard write fence.
+ *
+ * The directory and the journal are only ever used on the directory database.
+ * They are created everywhere anyway, because every shard takes the same
+ * `migrations/` directory — the same trade the projection database makes.
+ *
+ * The fence is the part that has to be in every shard, and it is a trigger
+ * rather than a check in the writers for one reason: a Worker isolate whose
+ * routing cache still points a tenant at the shard it just left must not be
+ * able to write there. A check in the adapter would read the fence and then
+ * write — a race — and would have to be repeated in every writer. The trigger
+ * runs inside the insert, in the same transaction as every other statement of
+ * the batch, so a fenced tenant's whole batch is rolled back whichever code
+ * path issued it. With no fence rows — every deployment that never moves a
+ * tenant — it costs one primary-key probe of an empty table per event insert.
+ *
+ * `__global__:` streams are exempt (`HOME_SHARD_STREAM_PREFIX`): they live on
+ * home whatever tenant id their rows carry, so a tenant that moved away — whose
+ * fence on home stays for good — can still save its runtime job schedules.
+ *
+ * `RAISE(ABORT, ...)` reaches the caller as an error whose message carries
+ * `CF_FRAPPE_TENANT_FENCED` (verified on workerd's D1 and on `node:sqlite`);
+ * `isD1TenantFencedError` recognizes it, and the D1 stores rethrow it as is
+ * rather than reporting a version conflict.
+ */
+export const D1_TENANT_SHARD_SCHEMA_STATEMENTS: readonly PlannedSqlStatement[] = [
+  {
+    name: "create_cf_frappe_tenant_shards",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_TENANT_SHARDS_TABLE} (` +
+      "tenant_id TEXT PRIMARY KEY, " +
+      "shard_id TEXT NOT NULL, " +
+      "epoch INTEGER NOT NULL, " +
+      "move_id TEXT, " +
+      "assigned_at TEXT NOT NULL, " +
+      "updated_at TEXT NOT NULL" +
+      ");"
+  },
+  {
+    name: "index_cf_frappe_tenant_shards_shard",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_tenant_shards_shard " +
+      `ON ${D1_TENANT_SHARDS_TABLE}(shard_id, tenant_id);`
+  },
+  {
+    name: "create_cf_frappe_tenant_moves",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_TENANT_MOVES_TABLE} (` +
+      "move_id TEXT PRIMARY KEY, " +
+      "tenant_id TEXT NOT NULL, " +
+      "source_shard_id TEXT NOT NULL, " +
+      "target_shard_id TEXT NOT NULL, " +
+      "phase TEXT NOT NULL CHECK (phase IN ('copying', 'building', 'catching-up', 'cutover', 'completed', 'aborted')), " +
+      "revision INTEGER NOT NULL, " +
+      "state_json TEXT NOT NULL, " +
+      "started_at TEXT NOT NULL, " +
+      "updated_at TEXT NOT NULL, " +
+      "finished_at TEXT" +
+      ");"
+  },
+  {
+    name: "index_cf_frappe_tenant_moves_tenant",
+    sql:
+      "CREATE INDEX IF NOT EXISTS idx_cf_frappe_tenant_moves_tenant " +
+      `ON ${D1_TENANT_MOVES_TABLE}(tenant_id, started_at);`
+  },
+  {
+    name: "create_cf_frappe_tenant_fences",
+    sql:
+      `CREATE TABLE IF NOT EXISTS ${D1_TENANT_FENCES_TABLE} (` +
+      "tenant_id TEXT PRIMARY KEY, " +
+      "move_id TEXT NOT NULL, " +
+      "attempt INTEGER NOT NULL, " +
+      "fenced_at TEXT NOT NULL" +
+      ");"
+  },
+  {
+    name: "create_cf_frappe_events_tenant_fence",
+    sql:
+      `CREATE TRIGGER IF NOT EXISTS ${D1_TENANT_FENCE_TRIGGER} ` +
+      `BEFORE INSERT ON ${D1_EVENTS_TABLE} ` +
+      `WHEN substr(NEW.stream, 1, 11) <> '__global__:' ` +
+      `AND EXISTS (SELECT 1 FROM ${D1_TENANT_FENCES_TABLE} WHERE tenant_id = NEW.tenant_id) ` +
+      "BEGIN SELECT RAISE(ABORT, 'CF_FRAPPE_TENANT_FENCED'); END;"
+  }
+];
+
 export function planD1ProjectionIndexes(
   doctypes: readonly DocTypeDefinition[]
 ): readonly PlannedSqlStatement[] {
@@ -430,6 +524,11 @@ export function planD1Migrations(
           id: D1_FOLD_SNAPSHOT_MIGRATION_ID,
           label: "cf-frappe fold snapshots",
           statements: D1_FOLD_SNAPSHOT_SCHEMA_STATEMENTS
+        }),
+        defineD1Migration({
+          id: D1_TENANT_SHARD_MIGRATION_ID,
+          label: "cf-frappe tenant shard directory and fences",
+          statements: D1_TENANT_SHARD_SCHEMA_STATEMENTS
         })
       ]
     : [];

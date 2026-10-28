@@ -75,6 +75,22 @@ export function frameworkSchema(): readonly string[] {
     .map((name) => readFileSync(new URL(name, MIGRATIONS_DIRECTORY), "utf8"));
 }
 
+/**
+ * {@link frameworkSchema}, plus the journal `wrangler d1 migrations apply`
+ * keeps — what a database migrated by Wrangler actually looks like. Code that
+ * asks a database which migrations it has (per-shard migration tracking,
+ * issue #14) must read that journal, not only `cf_frappe_migrations`.
+ */
+export function wranglerMigratedSchema(): readonly string[] {
+  const names = readdirSync(MIGRATIONS_DIRECTORY).filter((name) => name.endsWith(".sql")).sort();
+  return [
+    ...frameworkSchema(),
+    "CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, " +
+      "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);",
+    ...names.map((name) => `INSERT INTO d1_migrations (name) VALUES ('${name.replaceAll("'", "''")}');`)
+  ];
+}
+
 /** D1's own message when the placeholder count and the binding count disagree. */
 export const D1_BINDING_MISMATCH = "Wrong number of parameter bindings for SQL query.";
 

@@ -10,6 +10,9 @@ import {
   D1_QUERIED_TABLES,
   D1_STATISTICS_TARGETS,
   D1_TABLES,
+  D1_TENANT_FENCES_TABLE,
+  D1_TENANT_MOVES_TABLE,
+  D1_TENANT_SHARDS_TABLE,
   planD1Migrations
 } from "../../src";
 import { isMetadataName, isPlainIdentifier } from "../../src/core/identifiers.js";
@@ -56,12 +59,16 @@ describe("D1 table constants", () => {
 
   it("derives the statistics targets from the queried tables", () => {
     expect(D1_STATISTICS_TARGETS).toEqual(D1_QUERIED_TABLES);
-    // Two are excluded: the migration journal is read once per migrate, and the
-    // fold snapshots are only ever touched by full primary key, so there is no
-    // alternative plan for statistics to influence.
+    // Excluded: the migration journal is read once per migrate, and the fold
+    // snapshots and the three tenant-sharding tables are only ever touched by
+    // key or one index prefix, at a row per tenant or move rather than per
+    // write, so there is no alternative plan for statistics to influence.
     expect(D1_TABLES.filter((table) => !D1_QUERIED_TABLES.includes(table))).toEqual([
       D1_MIGRATIONS_TABLE,
-      D1_FOLD_SNAPSHOTS_TABLE
+      D1_FOLD_SNAPSHOTS_TABLE,
+      D1_TENANT_SHARDS_TABLE,
+      D1_TENANT_MOVES_TABLE,
+      D1_TENANT_FENCES_TABLE
     ]);
   });
 
