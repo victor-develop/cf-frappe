@@ -10,6 +10,7 @@ export * from "./migrator.js";
 // module-private like the query builders it lives with.
 export { D1_PROJECTION_TEXT_PATTERN_MAX_BYTES } from "./projection-query.js";
 export * from "./projection-store.js";
+export * from "./scim-token-store.js";
 export * from "./schema-planner.js";
 export * from "./serde.js";
 export * from "./snapshot-store.js";
