@@ -23,6 +23,7 @@ export * from "./request.js";
 export * from "./resource-api.js";
 export * from "./role-api.js";
 export * from "./saved-report-api.js";
+export * from "./scim-api.js";
 export * from "./signed-session.js";
 export * from "./user-account-api.js";
 export * from "./user-permission-api.js";

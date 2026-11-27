@@ -11,6 +11,7 @@ export const D1_JOB_EXECUTIONS_TABLE = "cf_frappe_job_executions";
 export const D1_DATA_PATCHES_TABLE = "cf_frappe_data_patches";
 export const D1_AUTOMATION_RUNS_TABLE = "cf_frappe_automation_runs";
 export const D1_FOLD_SNAPSHOTS_TABLE = "cf_frappe_fold_snapshots";
+export const D1_SCIM_TOKENS_TABLE = "cf_frappe_scim_tokens";
 
 /** Every framework-owned table, in migration order. */
 export const D1_TABLES: readonly string[] = [
@@ -20,7 +21,8 @@ export const D1_TABLES: readonly string[] = [
   D1_JOB_EXECUTIONS_TABLE,
   D1_DATA_PATCHES_TABLE,
   D1_AUTOMATION_RUNS_TABLE,
-  D1_FOLD_SNAPSHOTS_TABLE
+  D1_FOLD_SNAPSHOTS_TABLE,
+  D1_SCIM_TOKENS_TABLE
 ];
 
 /**

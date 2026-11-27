@@ -8,6 +8,7 @@ import {
   D1_FOLD_SNAPSHOTS_TABLE,
   D1_MIGRATIONS_TABLE,
   D1_QUERIED_TABLES,
+  D1_SCIM_TOKENS_TABLE,
   D1_STATISTICS_TARGETS,
   D1_TABLES,
   planD1Migrations
@@ -61,7 +62,8 @@ describe("D1 table constants", () => {
     // alternative plan for statistics to influence.
     expect(D1_TABLES.filter((table) => !D1_QUERIED_TABLES.includes(table))).toEqual([
       D1_MIGRATIONS_TABLE,
-      D1_FOLD_SNAPSHOTS_TABLE
+      D1_FOLD_SNAPSHOTS_TABLE,
+      D1_SCIM_TOKENS_TABLE
     ]);
   });
 

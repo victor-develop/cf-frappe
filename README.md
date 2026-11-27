@@ -252,6 +252,8 @@ npm run deploy
 
 What is delegated is **credential verification, not user management**: accounts, roles, permissions and their full audit trail stay here and stay event-sourced, while passwords, MFA, passkeys and device management belong to the IdP. MFA, passkeys, social login and device management are therefore deliberately not built — see [Authentication](docs/authentication.md) for the reasoning, the frozen scope of `signed-session`, and the recommended shape for customer-facing surfaces.
 
+For enterprise IdP provisioning, cf-frappe also exposes SCIM 2.0 Users and Groups with per-tenant bearer tokens. SCIM `DELETE` maps to account disablement and immediate session invalidation, not data deletion — see [SCIM provisioning](docs/scim.md).
+
 ### Development Setup
 
 Work on the framework:
@@ -283,7 +285,7 @@ The repository currently passes:
 - `npm run build`
 - `npm run check`
 
-Current verification: `256` Vitest files and `3060` tests passing. The architecture-critical coverage gate reports `95.27%` branch coverage. A separate naming-reliability gate enforces at least `93%` branch coverage for every naming-critical file and currently reports `97.06%` overall; the full-source baseline is `82.52%` branch coverage and is reported separately.
+Current verification: `321` Vitest files and `4163` tests passing. The architecture-critical coverage gate reports `96.53%` branch coverage. A separate naming-reliability gate enforces at least `93%` branch coverage for every naming-critical file and currently reports `97.06%` overall; the full-source baseline is `82.52%` branch coverage and is reported separately.
 
 ### TODO
 
@@ -299,6 +301,7 @@ Current verification: `256` Vitest files and `3060` tests passing. The architect
 - [Projection Indexes](docs/projection-indexes.md): how `indexes` declarations become D1 SQL, which query and ordering shapes they serve, and the version-bump rebuild cost.
 - [Document Delivery Outbox](docs/delivery-outbox.md): how the outbox working set stays bounded as delivery history grows, and the index that per-record reads depend on.
 - [Authentication](docs/authentication.md): why cf-frappe consumes identity rather than providing it, how to choose between Access, OIDC and signed-session, and what is deliberately not built.
+- [SCIM Provisioning](docs/scim.md): enterprise IdP resource mapping, bearer-token lifecycle, and deprovisioning semantics.
 - [Password Hashing](docs/passwords.md): why PBKDF2 on Workers, the measured iteration cost, and how existing accounts upgrade on login.
 - [ReturnsOS Test Personas](docs/returns-example-test-accounts.md): local role-specific test identities and access boundaries.
 - [Todo Example](examples/todos): small metadata-only model example.

@@ -19,6 +19,8 @@ This is the part that gets misread, so it is worth being blunt: **you do not hav
 
 The bridge already exists: `UserAuthProviderLinked` and `UserAuthProviderSynced` attach an external subject to a cf-frappe account and keep roles and email in step with what the provider asserts.
 
+For enterprise IdP-driven provisioning, use SCIM 2.0. It maps provider create/update/disable operations onto those same event-sourced account and role streams; see [SCIM provisioning](scim.md). In particular, SCIM deprovisioning disables the cf-frappe account and invalidates its sessions; it is not a hard delete.
+
 ## Choosing
 
 | Mode | Fits | What the deployment must supply |
